@@ -21,8 +21,7 @@ They do not offer:
 
 ## Deployment steps
 
-1. Setup
-   [Knative Eventing](http://knative.dev/docs/install).
+1. Setup [Knative Eventing](http://knative.dev/docs/install).
 1. If not done already, install a [NATS Streaming](./broker/README.md)
 1. Apply the NATSS configuration (from project root):
 
