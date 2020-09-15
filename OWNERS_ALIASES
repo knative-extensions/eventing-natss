@@ -1,70 +1,16 @@
 aliases:
-  toc:
-  - evankanderson
-  - grantr
-  - markusthoemmes
-  - mattmoor
-  - tcnghia
-
-  # These aliases are for OWNERS of the various Source implementations. These
-  # Are in addition to the repo level OWNERS.
-
-  awssqs-approvers:
-    - lberk
-  awssqs-reviewers:
-    - lberk
-
-  camel-approvers:
-    - nicolaferraro
-    - matzew
-  camel-reviewers:
-    - nicolaferraro
-    - matzew
-
-  github-approvers:
-    - lberk
+  technical-oversight-committee:
+    - evankanderson
+    - grantr
+    - markusthoemmes
     - mattmoor
-  github-reviewers:
-    - lberk
-    - rootfs
-
-  gitlab-approvers:
-    - sebgoa
-    - tzununbekov
-  gitlab-reviewers:
-    - sebgoa
-    - tzununbekov
-
-  kafka-approvers:
-    - lberk
+    - tcnghia
+  wg-leads:
+    # eventing
+    - grantr
+    - Harwayne
+    - vaikas
+    - n3wscott
     - matzew
-  kafka-reviewers:
-    - lberk
-    - matzew
-
-  natss-approvers:
-    - devguyio
-  natss-reviewers:
-    - devguyio
-
-  couchdb-approvers:
+    - nachocano
     - lionelvillard
-  couchdb-reviewers:
-    - lionelvillard
-
-  prometheus-approvers:
-    - syedriko
-    - matzew
-  prometheus-reviewers:
-    - syedriko
-    - matzew
-
-  productivity-approvers:
-  - chaodaiG
-  - chizhg
-  productivity-reviewers:
-  - chaodaiG
-  - coryrc
-  - chizhg
-  - steuhs
-  - yt3liu

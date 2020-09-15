@@ -24,27 +24,15 @@ export GO111MODULE=on
 # Yaml files to generate, and the source config dir for them.
 declare -A COMPONENTS
 COMPONENTS=(
-  ["appender.yaml"]="config/tools/appender"
-  ["awssqs.yaml"]="awssqs/config"
-  ["camel.yaml"]="camel/source/config"
-  ["couchdb.yaml"]="couchdb/source/config"
-  ["event-display.yaml"]="config/tools/event-display"
-  ["github.yaml"]="github/config"
-  ["mt-github.yaml"]="github/config/mt-github"
-  ["gitlab.yaml"]="gitlab/config"
-  ["kafka-source.yaml"]="kafka/source/config"
-  ["kafka-channel.yaml"]="kafka/channel/config"
   ["natss-channel.yaml"]="natss/config"
-  ["prometheus-source.yaml"]="prometheus/config"
-  ["websocket-source.yaml"]="config/tools/websocket-source"
 )
 readonly COMPONENTS
 
 function build_release() {
    # Update release labels if this is a tagged release
   if [[ -n "${TAG}" ]]; then
-    echo "Tagged release, updating release labels to contrib.eventing.knative.dev/release: \"${TAG}\""
-    LABEL_YAML_CMD=(sed -e "s|contrib.eventing.knative.dev/release: devel|contrib.eventing.knative.dev/release: \"${TAG}\"|")
+    echo "Tagged release, updating release labels to natss.eventing.knative.dev/release: \"${TAG}\""
+    LABEL_YAML_CMD=(sed -e "s|natss.eventing.knative.dev/release: devel|natss.eventing.knative.dev/release: \"${TAG}\"|")
   else
     echo "Untagged release, will NOT update release labels"
     LABEL_YAML_CMD=(cat)
@@ -53,7 +41,7 @@ function build_release() {
   local all_yamls=()
   for yaml in "${!COMPONENTS[@]}"; do
     local config="${COMPONENTS[${yaml}]}"
-    echo "Building Knative Eventing Contrib - ${config}"
+    echo "Building Knative Eventing NATSS - ${config}"
     # TODO(chizhg): reenable --strict mode after https://github.com/knative/test-infra/issues/1262 is fixed.
     ko resolve ${KO_FLAGS} -f ${config}/ | "${LABEL_YAML_CMD[@]}" > ${yaml}
     all_yamls+=(${yaml})
