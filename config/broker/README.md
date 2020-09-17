@@ -4,7 +4,7 @@
 
    ```sbtshell
    kubectl create namespace natss
-   kubectl apply -n natss -f natss/config/broker/natss.yaml
+   kubectl apply -n natss -f ./config/broker/natss.yaml
    ```
 
    NATS Streaming is deployed as a StatefulSet, using "nats-streaming" ConfigMap
