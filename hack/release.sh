@@ -24,7 +24,7 @@ export GO111MODULE=on
 # Yaml files to generate, and the source config dir for them.
 declare -A COMPONENTS
 COMPONENTS=(
-  ["natss-channel.yaml"]="natss/config"
+  ["eventing-natss.yaml"]="./config"
 )
 readonly COMPONENTS
 
