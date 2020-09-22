@@ -5,7 +5,7 @@ go 1.14
 require (
 	github.com/cloudevents/sdk-go/protocol/stan/v2 v2.2.0
 	github.com/cloudevents/sdk-go/v2 v2.2.0
-	github.com/google/go-cmp v0.5.1
+	github.com/google/go-cmp v0.5.2
 	github.com/hashicorp/go-uuid v1.0.2 // indirect
 	github.com/influxdata/tdigest v0.0.1 // indirect
 	github.com/nats-io/stan.go v0.6.0
@@ -19,9 +19,9 @@ require (
 	k8s.io/api v0.18.8
 	k8s.io/apimachinery v0.18.8
 	k8s.io/client-go v11.0.1-0.20190805182717-6502b5e7b1b5+incompatible
-	knative.dev/eventing v0.17.1-0.20200918121244-5508e48a03a8
-	knative.dev/pkg v0.0.0-20200917214745-ec3e2dd4bd19
-	knative.dev/test-infra v0.0.0-20200918021244-22269d552166
+	knative.dev/eventing v0.17.1-0.20200922073637-bfa066dc34b4
+	knative.dev/pkg v0.0.0-20200921223636-6a12c7596267
+	knative.dev/test-infra v0.0.0-20200921012245-37f1a12adbd3
 )
 
 replace (
