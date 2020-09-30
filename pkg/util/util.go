@@ -2,8 +2,9 @@ package util
 
 import (
 	"fmt"
-	"knative.dev/pkg/network"
 	"os"
+
+	"knative.dev/pkg/network"
 )
 
 const (

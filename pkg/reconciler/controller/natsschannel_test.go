@@ -19,8 +19,9 @@ package controller
 import (
 	"context"
 	"fmt"
-	"knative.dev/pkg/network"
 	"testing"
+
+	"knative.dev/pkg/network"
 
 	duckv1alpha1 "knative.dev/pkg/apis/duck/v1alpha1"
 	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
