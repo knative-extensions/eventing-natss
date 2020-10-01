@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	eventingutils "knative.dev/eventing/pkg/utils"
+	"knative.dev/pkg/network"
 )
 
 const (
@@ -37,7 +37,7 @@ func GetNatssConfig() NatssConfig {
 
 // GetDefaultNatssURL returns the default natss url to connect to
 func GetDefaultNatssURL() string {
-	return getEnv(defaultNatssURLVar, fmt.Sprintf(fallbackDefaultNatssURLTmpl, eventingutils.GetClusterDomainName()))
+	return getEnv(defaultNatssURLVar, fmt.Sprintf(fallbackDefaultNatssURLTmpl, network.GetClusterDomainName()))
 }
 
 // GetDefaultClusterID returns the default cluster id to connect with
