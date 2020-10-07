@@ -29,8 +29,8 @@ import (
 
 	"k8s.io/client-go/tools/cache"
 
-	"knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1alpha1/natsschannel"
-	natssChannelReconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsschannel"
+	"knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1beta1/natsschannel"
+	natssChannelReconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1beta1/natsschannel"
 )
 
 // NewController initializes the controller and is called by the generated code.
@@ -49,8 +49,6 @@ func NewController(ctx context.Context) *controller.Impl {
 		dispatcherNamespace:      system.Namespace(),
 		dispatcherDeploymentName: dispatcherName,
 		dispatcherServiceName:    dispatcherName,
-		natsschannelLister:       channelInformer.Lister(),
-		natsschannelInformer:     channelInformer.Informer(),
 		deploymentLister:         deploymentInformer.Lister(),
 		serviceLister:            serviceInformer.Lister(),
 		endpointsLister:          endpointsInformer.Lister(),

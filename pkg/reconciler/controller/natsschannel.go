@@ -32,13 +32,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	appsv1listers "k8s.io/client-go/listers/apps/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/tools/cache"
-
 	"knative.dev/eventing/pkg/reconciler/names"
 
-	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	natssChannelReconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsschannel"
-	listers "knative.dev/eventing-natss/pkg/client/listers/messaging/v1alpha1"
+	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
+	natssChannelReconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1beta1/natsschannel"
 	"knative.dev/eventing-natss/pkg/reconciler/controller/resources"
 )
 
@@ -69,16 +66,14 @@ type Reconciler struct {
 	dispatcherDeploymentName string
 	dispatcherServiceName    string
 
-	natsschannelLister   listers.NatssChannelLister
-	natsschannelInformer cache.SharedIndexInformer
-	deploymentLister     appsv1listers.DeploymentLister
-	serviceLister        corev1listers.ServiceLister
-	endpointsLister      corev1listers.EndpointsLister
+	deploymentLister appsv1listers.DeploymentLister
+	serviceLister    corev1listers.ServiceLister
+	endpointsLister  corev1listers.EndpointsLister
 }
 
 var _ natssChannelReconciler.Interface = (*Reconciler)(nil)
 
-func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatssChannel) reconciler.Event {
+func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1beta1.NatssChannel) reconciler.Event {
 	nc.Status.InitializeConditions()
 
 	logger := logging.FromContext(ctx)
@@ -104,7 +99,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatssChanne
 		} else {
 			nc.Status.MarkDispatcherFailed(dispatcherDeploymentFailed, "Failed to get dispatcher Deployment")
 		}
-		return newError(err)
+		return err
 	}
 	nc.Status.PropagateDispatcherStatus(&d.Status)
 
@@ -119,7 +114,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatssChanne
 		} else {
 			nc.Status.MarkServiceFailed(dispatcherServiceFailed, "Failed to get dispatcher service")
 		}
-		return newError(err)
+		return err
 	}
 	nc.Status.MarkServiceTrue()
 
@@ -133,7 +128,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatssChanne
 		} else {
 			nc.Status.MarkEndpointsFailed(dispatcherEndpointsFailed, "Failed to get dispatcher endpoints")
 		}
-		return newError(err)
+		return err
 	}
 
 	if len(e.Subsets) == 0 {
@@ -147,7 +142,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatssChanne
 	svc, err := r.reconcileChannelService(ctx, nc)
 	if err != nil {
 		nc.Status.MarkChannelServiceFailed(channelServiceFailed, fmt.Sprintf("Channel Service failed: %s", err))
-		return newError(err)
+		return err
 	}
 	nc.Status.MarkChannelServiceTrue()
 	nc.Status.SetAddress(&apis.URL{
@@ -157,10 +152,10 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatssChanne
 
 	// Ok, so now the Dispatcher Deployment & Service have been created, we're golden since the
 	// dispatcher watches the Channel and where it needs to dispatch events to.
-	return newReconciledNormal(nc.Namespace, nc.Name)
+	return nil
 }
 
-func (r *Reconciler) reconcileChannelService(ctx context.Context, channel *v1alpha1.NatssChannel) (*corev1.Service, error) {
+func (r *Reconciler) reconcileChannelService(ctx context.Context, channel *v1beta1.NatssChannel) (*corev1.Service, error) {
 	logger := logging.FromContext(ctx)
 	// Get the  Service and propagate the status to the Channel in case it does not exist.
 	// We don't do anything with the service because it's status contains nothing useful, so just do
@@ -189,16 +184,4 @@ func (r *Reconciler) reconcileChannelService(ctx context.Context, channel *v1alp
 		return nil, fmt.Errorf("natsschannel: %s/%s does not own Service: %q", channel.Namespace, channel.Name, svc.Name)
 	}
 	return svc, nil
-}
-
-func (r *Reconciler) FinalizeKind(ctx context.Context, nc *v1alpha1.NatssChannel) reconciler.Event {
-	return newReconciledNormal(nc.Namespace, nc.Name)
-}
-
-func newReconciledNormal(namespace, name string) reconciler.Event {
-	return reconciler.NewEvent(corev1.EventTypeNormal, channelReconciled, reconciledNormalFmt, namespace, name)
-}
-
-func newError(err error) error {
-	return fmt.Errorf(ReconcilerName+" reconciliation failed with: %s", err)
 }

@@ -38,8 +38,8 @@ import (
 
 	"knative.dev/eventing-natss/pkg/client/injection/client"
 	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
-	_ "knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1alpha1/natsschannel/fake"
-	natsschannelreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsschannel"
+	_ "knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1beta1/natsschannel/fake"
+	natsschannelreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1beta1/natsschannel"
 	"knative.dev/eventing-natss/pkg/dispatcher"
 	dispatchertesting "knative.dev/eventing-natss/pkg/dispatcher/testing"
 	reconciletesting "knative.dev/eventing-natss/pkg/reconciler/testing"

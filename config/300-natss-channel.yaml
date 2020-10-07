@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: apiextensions.k8s.io/v1beta1
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: natsschannels.messaging.knative.dev
@@ -22,8 +22,8 @@ metadata:
     messaging.knative.dev/subscribable: "true"
     duck.knative.dev/addressable: "true"
 spec:
+  scope: Namespaced
   group: messaging.knative.dev
-  version: v1alpha1
   names:
     kind: NatssChannel
     plural: natsschannels
@@ -35,9 +35,17 @@ spec:
       - channel
     shortNames:
       - natssc
-  scope: Namespaced
-  subresources:
-    status: {}
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+      subresources:
+        status: { }
+      schema:
+        openAPIV3Schema:
+          type: object
+          # Workaround, existing schema is incomplete and fails validation.
+          x-kubernetes-preserve-unknown-fields: true
   additionalPrinterColumns:
     - name: Ready
       type: string
@@ -51,47 +59,3 @@ spec:
     - name: Age
       type: date
       JSONPath: .metadata.creationTimestamp
-  validation:
-    openAPIV3Schema:
-      properties:
-        spec:
-          properties:
-            subscribable:
-              type: object
-              properties:
-                subscribers:
-                  type: array
-                  description: "The list of subscribers that have expressed interest in receiving events from this channel."
-                  items:
-                    required:
-                      - uid
-                    properties:
-                      ref:
-                        type: object
-                        required:
-                          - namespace
-                          - name
-                          - uid
-                        properties:
-                          apiVersion:
-                            type: string
-                          kind:
-                            type: string
-                          name:
-                            type: string
-                            minLength: 1
-                          namespace:
-                            type: string
-                            minLength: 1
-                          uid:
-                            type: string
-                            minLength: 1
-                      uid:
-                        type: string
-                        minLength: 1
-                      subscriberURI:
-                        type: string
-                        minLength: 1
-                      replyURI:
-                        type: string
-                        minLength: 1

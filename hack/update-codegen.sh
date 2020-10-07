@@ -43,13 +43,13 @@ chmod +x ${KNATIVE_CODEGEN_PKG}/hack/generate-knative.sh
 #                  instead of the $GOPATH directly. For normal projects this can be dropped.
 ${CODEGEN_PKG}/generate-groups.sh "deepcopy,client,informer,lister" \
   "knative.dev/eventing-natss/pkg/client" "knative.dev/eventing-natss/pkg/apis" \
-  "messaging:v1alpha1" \
+  "messaging:v1beta1" \
   --go-header-file ${REPO_ROOT_DIR}/hack/boilerplate.go.txt
 
 # Knative Injection
 ${KNATIVE_CODEGEN_PKG}/hack/generate-knative.sh "injection" \
   "knative.dev/eventing-natss/pkg/client" "knative.dev/eventing-natss/pkg/apis" \
-  "messaging:v1alpha1" \
+  "messaging:v1beta1" \
   --go-header-file ${REPO_ROOT_DIR}/hack/boilerplate.go.txt
 
 # Make sure our dependencies are up-to-date

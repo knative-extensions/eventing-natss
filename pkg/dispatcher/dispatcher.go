@@ -19,6 +19,7 @@ package dispatcher
 import (
 	"context"
 	"fmt"
+	sdaasdsaddsa "knative.dev/eventing/pkg/apis/messaging/v1beta1"
 	"net/http"
 	"net/url"
 	"sync"
@@ -33,7 +34,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	messagingv1beta1 "knative.dev/eventing/pkg/apis/messaging/v1beta1"
+	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/kncloudevents"
 
@@ -80,8 +81,8 @@ type SubscriptionsSupervisor struct {
 
 type NatssDispatcher interface {
 	Start(ctx context.Context) error
-	UpdateSubscriptions(ctx context.Context, channel *messagingv1beta1.Channel, isFinalizer bool) (map[eventingduck.SubscriberSpec]error, error)
-	ProcessChannels(ctx context.Context, chanList []messagingv1beta1.Channel) error
+	UpdateSubscriptions(ctx context.Context, channel *messagingv1.Channel, isFinalizer bool) (map[eventingduck.SubscriberSpec]error, error)
+	ProcessChannels(ctx context.Context, chanList []messagingv1.Channel) error
 }
 
 type Args struct {
@@ -215,7 +216,7 @@ func (s *SubscriptionsSupervisor) Connect(ctx context.Context) {
 // UpdateSubscriptions creates/deletes the natss subscriptions based on channel.Spec.Subscribable.Subscribers
 // Return type:map[eventingduck.SubscriberSpec]error --> Returns a map of subscriberSpec that failed with the value=error encountered.
 // Ignore the value in case error != nil
-func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, channel *messagingv1beta1.Channel, isFinalizer bool) (map[eventingduck.SubscriberSpec]error, error) {
+func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, channel *messagingv1.Channel, isFinalizer bool) (map[eventingduck.SubscriberSpec]error, error) {
 	s.subscriptionsMux.Lock()
 	defer s.subscriptionsMux.Unlock()
 
@@ -315,10 +316,11 @@ func (s *SubscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 			deadLetter = subscription.Delivery.DeadLetterSink.URI.URL()
 			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
 		}
-		if !subscription.DeadLetterSinkURI.IsEmpty() {
-			deadLetter = subscription.DeadLetterSinkURI.URL()
-			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
-		}
+		// TODO: this does not map from v1alpha1
+		//if !subscription.DeadLetterSinkURI.IsEmpty() {
+		//	deadLetter = subscription.DeadLetterSinkURI.URL()
+		//	s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
+		//}
 
 		if err := s.dispatcher.DispatchMessage(ctx, message, nil, destination, reply, deadLetter); err != nil {
 			s.logger.Error("Failed to dispatch message: ", zap.Error(err))
