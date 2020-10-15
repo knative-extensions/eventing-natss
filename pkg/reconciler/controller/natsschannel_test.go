@@ -362,12 +362,3 @@ func makeReadyEndpoints() *corev1.Endpoints {
 	e.Subsets = []corev1.EndpointSubset{{Addresses: []corev1.EndpointAddress{{IP: "1.1.1.1"}}}}
 	return e
 }
-
-func patchFinalizers(namespace, name string) clientgotesting.PatchActionImpl {
-	action := clientgotesting.PatchActionImpl{}
-	action.Name = name
-	action.Namespace = namespace
-	patch := `{"metadata":{"finalizers":["natsschannels.messaging.knative.dev"],"resourceVersion":""}}`
-	action.Patch = []byte(patch)
-	return action
-}
