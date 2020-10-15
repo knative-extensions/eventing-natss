@@ -24,7 +24,7 @@ import (
 
 	"knative.dev/pkg/injection"
 
-	_ "knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1alpha1/natsschannel/fake"
+	_ "knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1beta1/natsschannel/fake"
 	_ "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment/fake"
 	_ "knative.dev/pkg/client/injection/kube/informers/core/v1/endpoints/fake"
 	_ "knative.dev/pkg/client/injection/kube/informers/core/v1/service/fake"

@@ -56,7 +56,7 @@ func MakeFactory(ctor Ctor) Factory {
 		ctx := logging.WithLogger(context.Background(), logtesting.TestLogger(t))
 		ctx, kubeClient := fakekubeclient.With(ctx, ls.GetKubeObjects()...)
 		ctx, eventingClient := fakeeventingclient.With(ctx, ls.GetEventingObjects()...)
-		ctx, client := fakeclientset.With(ctx, ls.GetMessagingObjects()...)
+		ctx, client := fakeclientset.With(ctx, ls.GetNatssObjects()...)
 
 		dynamicScheme := runtime.NewScheme()
 		for _, addTo := range clientSetSchemes {

@@ -17,14 +17,13 @@ limitations under the License.
 package dispatcher
 
 import (
-	eventingduck "knative.dev/eventing/pkg/apis/duck/v1alpha1"
-	eventingduckbeta1 "knative.dev/eventing/pkg/apis/duck/v1beta1"
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 )
 
-type subscriptionReference eventingduck.SubscriberSpec
+type subscriptionReference eventingduckv1.SubscriberSpec
 
-func newSubscriptionReference(spec eventingduckbeta1.SubscriberSpec) subscriptionReference {
-	s := eventingduck.SubscriberSpec{
+func newSubscriptionReference(spec eventingduckv1.SubscriberSpec) subscriptionReference {
+	s := eventingduckv1.SubscriberSpec{
 		UID:           spec.UID,
 		Generation:    spec.Generation,
 		SubscriberURI: spec.SubscriberURI,
@@ -32,9 +31,6 @@ func newSubscriptionReference(spec eventingduckbeta1.SubscriberSpec) subscriptio
 		Delivery:      spec.Delivery,
 	}
 
-	if spec.Delivery != nil && spec.Delivery.DeadLetterSink != nil {
-		s.DeadLetterSinkURI = spec.Delivery.DeadLetterSink.URI
-	}
 	return subscriptionReference(s)
 }
 

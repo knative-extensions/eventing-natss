@@ -103,7 +103,7 @@ Create a test NatssChannel:
 
 ```bash
 cat << EOF | kubectl apply -f -
-apiVersion: messaging.knative.dev/v1alpha1
+apiVersion: messaging.knative.dev/v1beta1
 kind: NatssChannel
 metadata:
   name: my-test-channel

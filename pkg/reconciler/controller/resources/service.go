@@ -19,11 +19,11 @@ package resources
 import (
 	"fmt"
 
+	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
 	"knative.dev/pkg/network"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/pkg/kmeta"
 )
 
@@ -61,7 +61,7 @@ func ExternalService(namespace, service string) ServiceOption {
 // MakeK8sService creates a new K8s Service for a Channel resource. It also sets the appropriate
 // OwnerReferences on the resource so handleObject can discover the Channel resource that 'owns' it.
 // As well as being garbage collected when the Channel is deleted.
-func MakeK8sService(kc *v1alpha1.NatssChannel, opts ...ServiceOption) (*corev1.Service, error) {
+func MakeK8sService(kc *v1beta1.NatssChannel, opts ...ServiceOption) (*corev1.Service, error) {
 	// Add annotations
 	svc := &corev1.Service{
 		TypeMeta: metav1.TypeMeta{
