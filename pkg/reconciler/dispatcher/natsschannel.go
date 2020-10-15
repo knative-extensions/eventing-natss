@@ -19,8 +19,9 @@ package controller
 import (
 	"context"
 	"fmt"
-	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
 	"strings"
+
+	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
 
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	pkgreconciler "knative.dev/pkg/reconciler"
