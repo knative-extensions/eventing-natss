@@ -256,8 +256,9 @@ func (r *TableRow) Test(t *testing.T, factory Factory) {
 		objPrevState[objKey(got)] = got
 
 		if !cmp.Equal(want.GetObject(), got, effectiveOpts...) {
-			t.Errorf("Unexpected status update (-want, +got):\n%s\nFull: %v",
-				cmp.Diff(want.GetObject(), got, effectiveOpts...), got)
+			diff := cmp.Diff(want.GetObject(), got, effectiveOpts...)
+			t.Errorf("Unexpected status update (-want, +got):\n%s\nFull: skipped",
+				diff)
 		}
 	}
 	if got, want := len(statusUpdates), len(r.WantStatusUpdates); got > want {

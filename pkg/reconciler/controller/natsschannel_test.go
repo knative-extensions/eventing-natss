@@ -263,7 +263,10 @@ func TestAllCases(t *testing.T) {
 			serviceLister:            listers.GetServiceLister(),
 			endpointsLister:          listers.GetEndpointsLister(),
 		}
-		return natsschannel.NewReconciler(ctx, logging.FromContext(ctx), fakeclientset.Get(ctx), listers.GetNatssChannelLister(), controller.GetEventRecorder(ctx), r)
+		return natsschannel.NewReconciler(ctx, logging.FromContext(ctx),
+			fakeclientset.Get(ctx), listers.GetNatssChannelLister(),
+			controller.GetEventRecorder(ctx),
+			r)
 	}))
 }
 

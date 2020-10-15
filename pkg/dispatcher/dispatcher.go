@@ -25,14 +25,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	eventingduck "knative.dev/eventing/pkg/apis/duck/v1alpha1"
-
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/nats-io/stan.go"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/kncloudevents"
@@ -80,7 +79,7 @@ type SubscriptionsSupervisor struct {
 
 type NatssDispatcher interface {
 	Start(ctx context.Context) error
-	UpdateSubscriptions(ctx context.Context, channel *messagingv1.Channel, isFinalizer bool) (map[eventingduck.SubscriberSpec]error, error)
+	UpdateSubscriptions(ctx context.Context, channel *messagingv1.Channel, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error)
 	ProcessChannels(ctx context.Context, chanList []messagingv1.Channel) error
 }
 
@@ -91,6 +90,8 @@ type Args struct {
 	Cargs     kncloudevents.ConnectionArgs
 	Logger    *zap.Logger
 }
+
+var _ NatssDispatcher = (*SubscriptionsSupervisor)(nil)
 
 // NewDispatcher returns a new NatssDispatcher.
 func NewDispatcher(args Args) (NatssDispatcher, error) {
@@ -215,11 +216,11 @@ func (s *SubscriptionsSupervisor) Connect(ctx context.Context) {
 // UpdateSubscriptions creates/deletes the natss subscriptions based on channel.Spec.Subscribable.Subscribers
 // Return type:map[eventingduck.SubscriberSpec]error --> Returns a map of subscriberSpec that failed with the value=error encountered.
 // Ignore the value in case error != nil
-func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, channel *messagingv1.Channel, isFinalizer bool) (map[eventingduck.SubscriberSpec]error, error) {
+func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, channel *messagingv1.Channel, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error) {
 	s.subscriptionsMux.Lock()
 	defer s.subscriptionsMux.Unlock()
 
-	failedToSubscribe := make(map[eventingduck.SubscriberSpec]error)
+	failedToSubscribe := make(map[eventingduckv1.SubscriberSpec]error)
 	cRef := eventingchannels.ChannelReference{Namespace: channel.Namespace, Name: channel.Name}
 	s.logger.Info("Update subscriptions", zap.String("cRef", cRef.String()), zap.String("subscribable", fmt.Sprintf("%v", channel)), zap.Bool("isFinalizer", isFinalizer))
 	if channel.Spec.Subscribers == nil || isFinalizer {
@@ -259,8 +260,8 @@ func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, chann
 		if err != nil {
 			s.logger.Sugar().Errorf("failed to subscribe (subscription:%q) to channel: %v. Error:%s", sub, cRef, err.Error())
 
-			subv1alpha1 := newSubscriptionReference(sub)
-			failedToSubscribe[eventingduck.SubscriberSpec(subv1alpha1)] = err
+			sub := newSubscriptionReference(sub)
+			failedToSubscribe[eventingduckv1.SubscriberSpec(sub)] = err
 			continue
 		}
 		chMap[subRef.UID] = natssSub
@@ -305,21 +306,18 @@ func (s *SubscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 			destination = subscription.SubscriberURI.URL()
 			s.logger.Debug("dispatch message", zap.String("destination", destination.String()))
 		}
+
 		var reply *url.URL
 		if !subscription.ReplyURI.IsEmpty() {
 			reply = subscription.ReplyURI.URL()
 			s.logger.Debug("dispatch message", zap.String("reply", reply.String()))
 		}
+
 		var deadLetter *url.URL
 		if subscription.Delivery != nil && subscription.Delivery.DeadLetterSink != nil && !subscription.Delivery.DeadLetterSink.URI.IsEmpty() {
 			deadLetter = subscription.Delivery.DeadLetterSink.URI.URL()
 			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
 		}
-		// TODO: this does not map from v1alpha1
-		//if !subscription.DeadLetterSinkURI.IsEmpty() {
-		//	deadLetter = subscription.DeadLetterSinkURI.URL()
-		//	s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
-		//}
 
 		if err := s.dispatcher.DispatchMessage(ctx, message, nil, destination, reply, deadLetter); err != nil {
 			s.logger.Error("Failed to dispatch message: ", zap.Error(err))
@@ -387,20 +385,20 @@ func (s *SubscriptionsSupervisor) setHostToChannelMap(hcMap map[string]eventingc
 }
 
 // NewHostNameToChannelRefMap parses each channel from cList and creates a map[string(Status.Address.HostName)]ChannelReference
-func newHostNameToChannelRefMap(cList []messagingv1beta1.Channel) (map[string]eventingchannels.ChannelReference, error) {
+func newHostNameToChannelRefMap(cList []messagingv1.Channel) (map[string]eventingchannels.ChannelReference, error) {
 	hostToChanMap := make(map[string]eventingchannels.ChannelReference, len(cList))
 	for _, c := range cList {
-		url := c.Status.Address.URL
-		if cr, present := hostToChanMap[url.Host]; present {
+		u := c.Status.Address.URL
+		if cr, present := hostToChanMap[u.Host]; present {
 			return nil, fmt.Errorf(
 				"duplicate hostName found. Each channel must have a unique host header. HostName:%s, channel:%s.%s, channel:%s.%s",
-				url.Host,
+				u.Host,
 				c.Namespace,
 				c.Name,
 				cr.Namespace,
 				cr.Name)
 		}
-		hostToChanMap[url.Host] = eventingchannels.ChannelReference{Name: c.Name, Namespace: c.Namespace}
+		hostToChanMap[u.Host] = eventingchannels.ChannelReference{Name: c.Name, Namespace: c.Namespace}
 	}
 	return hostToChanMap, nil
 }
@@ -408,7 +406,7 @@ func newHostNameToChannelRefMap(cList []messagingv1beta1.Channel) (map[string]ev
 // ProcessChannels will be called from the controller that watches natss channels.
 // It will update internal hostToChannelMap which is used to resolve the hostHeader of the
 // incoming request to the correct ChannelReference in the receiver function.
-func (s *SubscriptionsSupervisor) ProcessChannels(ctx context.Context, chanList []messagingv1beta1.Channel) error {
+func (s *SubscriptionsSupervisor) ProcessChannels(ctx context.Context, chanList []messagingv1.Channel) error {
 	s.logger.Debug("ProcessChannels", zap.Any("chanList", chanList))
 	hostToChanMap, err := newHostNameToChannelRefMap(chanList)
 	if err != nil {

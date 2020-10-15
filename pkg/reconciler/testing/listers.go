@@ -24,18 +24,20 @@ import (
 	appsv1listers "k8s.io/client-go/listers/apps/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	fakemessagingclientset "knative.dev/eventing-natss/pkg/client/clientset/versioned/fake"
-	messaginglisters "knative.dev/eventing-natss/pkg/client/listers/messaging/v1alpha1"
+
 	fakeeventingclientset "knative.dev/eventing/pkg/client/clientset/versioned/fake"
 	fakeeventsclientset "knative.dev/eventing/pkg/client/clientset/versioned/fake"
 	"knative.dev/pkg/reconciler/testing"
+
+	natssv1beta1 "knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
+	fakenatsslientset "knative.dev/eventing-natss/pkg/client/clientset/versioned/fake"
+	natsslisters "knative.dev/eventing-natss/pkg/client/listers/messaging/v1beta1"
 )
 
 var clientSetSchemes = []func(*runtime.Scheme) error{
 	fakekubeclientset.AddToScheme,
 	fakeeventsclientset.AddToScheme,
-	fakemessagingclientset.AddToScheme,
+	fakenatsslientset.AddToScheme,
 	fakeeventingclientset.AddToScheme,
 }
 
@@ -67,6 +69,10 @@ func (l *Listers) GetKubeObjects() []runtime.Object {
 	return l.sorter.ObjectsForSchemeFunc(fakekubeclientset.AddToScheme)
 }
 
+func (l *Listers) GetNatssObjects() []runtime.Object {
+	return l.sorter.ObjectsForSchemeFunc(fakenatsslientset.AddToScheme)
+}
+
 func (l *Listers) GetEventingObjects() []runtime.Object {
 	return l.sorter.ObjectsForSchemeFunc(fakeeventingclientset.AddToScheme)
 }
@@ -75,14 +81,10 @@ func (l *Listers) GetEventsObjects() []runtime.Object {
 	return l.sorter.ObjectsForSchemeFunc(fakeeventsclientset.AddToScheme)
 }
 
-func (l *Listers) GetMessagingObjects() []runtime.Object {
-	return l.sorter.ObjectsForSchemeFunc(fakemessagingclientset.AddToScheme)
-}
-
 func (l *Listers) GetAllObjects() []runtime.Object {
-	all := l.GetMessagingObjects()
-	all = append(all, l.GetEventsObjects()...)
+	all := l.GetEventsObjects()
 	all = append(all, l.GetKubeObjects()...)
+	all = append(all, l.GetNatssObjects()...)
 	return all
 }
 
@@ -94,8 +96,8 @@ func (l *Listers) GetEndpointsLister() corev1listers.EndpointsLister {
 	return corev1listers.NewEndpointsLister(l.indexerFor(&corev1.Endpoints{}))
 }
 
-func (l *Listers) GetNatssChannelLister() messaginglisters.NatssChannelLister {
-	return messaginglisters.NewNatssChannelLister(l.indexerFor(&messagingv1alpha1.NatssChannel{}))
+func (l *Listers) GetNatssChannelLister() natsslisters.NatssChannelLister {
+	return natsslisters.NewNatssChannelLister(l.indexerFor(&natssv1beta1.NatssChannel{}))
 }
 
 func (l *Listers) GetDeploymentLister() appsv1listers.DeploymentLister {

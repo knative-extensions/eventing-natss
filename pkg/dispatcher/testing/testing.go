@@ -20,8 +20,8 @@ import (
 	"context"
 	"errors"
 
-	eventingduck "knative.dev/eventing/pkg/apis/duck/v1alpha1"
-	messagingv1beta1 "knative.dev/eventing/pkg/apis/messaging/v1beta1"
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
+	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
 
 	"knative.dev/eventing-natss/pkg/dispatcher"
 )
@@ -39,11 +39,11 @@ func (s *DispatcherDoNothing) Start(_ context.Context) error {
 	return nil
 }
 
-func (s *DispatcherDoNothing) UpdateSubscriptions(_ context.Context, _ *messagingv1beta1.Channel, _ bool) (map[eventingduck.SubscriberSpec]error, error) {
+func (s *DispatcherDoNothing) UpdateSubscriptions(_ context.Context, _ *messagingv1.Channel, _ bool) (map[eventingduckv1.SubscriberSpec]error, error) {
 	return nil, nil
 }
 
-func (s *DispatcherDoNothing) ProcessChannels(_ context.Context, _ []messagingv1beta1.Channel) error {
+func (s *DispatcherDoNothing) ProcessChannels(_ context.Context, _ []messagingv1.Channel) error {
 	return nil
 }
 
@@ -62,10 +62,10 @@ func (s *DispatcherFailNatssSubscription) Start(_ context.Context) error {
 }
 
 // UpdateSubscriptions returns a failed natss subscription
-func (s *DispatcherFailNatssSubscription) UpdateSubscriptions(_ context.Context, channel *messagingv1beta1.Channel, _ bool) (map[eventingduck.SubscriberSpec]error, error) {
-	failedSubscriptions := make(map[eventingduck.SubscriberSpec]error, len(channel.Spec.Subscribers))
+func (s *DispatcherFailNatssSubscription) UpdateSubscriptions(_ context.Context, channel *messagingv1.Channel, _ bool) (map[eventingduckv1.SubscriberSpec]error, error) {
+	failedSubscriptions := make(map[eventingduckv1.SubscriberSpec]error, len(channel.Spec.Subscribers))
 	for _, sub := range channel.Spec.Subscribers {
-		sv1alpha1 := eventingduck.SubscriberSpec{
+		ss := eventingduckv1.SubscriberSpec{
 			UID:           sub.UID,
 			Generation:    sub.Generation,
 			SubscriberURI: sub.SubscriberURI,
@@ -73,14 +73,11 @@ func (s *DispatcherFailNatssSubscription) UpdateSubscriptions(_ context.Context,
 			Delivery:      sub.Delivery,
 		}
 
-		if sub.Delivery != nil && sub.Delivery.DeadLetterSink != nil {
-			sv1alpha1.DeadLetterSinkURI = sub.Delivery.DeadLetterSink.URI
-		}
-		failedSubscriptions[sv1alpha1] = errors.New("ups")
+		failedSubscriptions[ss] = errors.New("ups")
 	}
 	return failedSubscriptions, nil
 }
 
-func (s *DispatcherFailNatssSubscription) ProcessChannels(_ context.Context, _ []messagingv1beta1.Channel) error {
+func (s *DispatcherFailNatssSubscription) ProcessChannels(_ context.Context, _ []messagingv1.Channel) error {
 	return nil
 }

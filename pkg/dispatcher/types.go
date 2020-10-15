@@ -31,10 +31,6 @@ func newSubscriptionReference(spec eventingduckv1.SubscriberSpec) subscriptionRe
 		Delivery:      spec.Delivery,
 	}
 
-	// TODO: this does not map to v1 from v1alpha1
-	//if spec.Delivery != nil && spec.Delivery.DeadLetterSink != nil {
-	//	s.DeadLetterSinkURI = spec.Delivery.DeadLetterSink.URI
-	//}
 	return subscriptionReference(s)
 }
 

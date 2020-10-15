@@ -43,7 +43,6 @@ const (
 	ReconcilerName = "NatssChannel"
 
 	// Name of the corev1.Events emitted from the reconciliation process.
-	channelReconciled            = "NatssChannelReconciled"
 	dispatcherDeploymentNotFound = "DispatcherDeploymentDoesNotExist"
 	dispatcherDeploymentFailed   = "DispatcherDeploymentFailed"
 	dispatcherServiceFailed      = "DispatcherServiceFailed"
@@ -53,9 +52,6 @@ const (
 	channelServiceFailed         = "ChannelServiceFailed"
 
 	dispatcherName = "natss-ch-dispatcher"
-
-	// reconciled normal message format (namespace, name)
-	reconciledNormalFmt = ReconcilerName + " reconciled: \"%s/%s\""
 )
 
 // Reconciler reconciles NATSS Channels.
@@ -74,15 +70,7 @@ type Reconciler struct {
 var _ natssChannelReconciler.Interface = (*Reconciler)(nil)
 
 func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1beta1.NatssChannel) reconciler.Event {
-	nc.Status.InitializeConditions()
-
 	logger := logging.FromContext(ctx)
-	// Verify channel is valid.
-	nc.SetDefaults(ctx)
-	if err := nc.Validate(ctx); err != nil {
-		logger.Error("Invalid natss channel", zap.String("channel", nc.Name), zap.Error(err))
-		return err
-	}
 
 	// We reconcile the status of the Channel by looking at:
 	// 1. Dispatcher Deployment for it's readiness.
@@ -91,64 +79,58 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1beta1.NatssChannel
 	// 4. K8s service representing the channel that will use ExternalName to point to the Dispatcher k8s service.
 
 	// Get the Dispatcher Deployment and propagate the status to the Channel
-	d, err := r.deploymentLister.Deployments(r.dispatcherNamespace).Get(r.dispatcherDeploymentName)
-	if err != nil {
+	if d, err := r.deploymentLister.Deployments(r.dispatcherNamespace).Get(r.dispatcherDeploymentName); err != nil {
 		logger.Error("Unable to get the dispatcher Deployment", zap.Error(err))
 		if apierrs.IsNotFound(err) {
 			nc.Status.MarkDispatcherFailed(dispatcherDeploymentNotFound, "Dispatcher Deployment does not exist")
 		} else {
 			nc.Status.MarkDispatcherFailed(dispatcherDeploymentFailed, "Failed to get dispatcher Deployment")
 		}
-		return err
+	} else {
+		nc.Status.PropagateDispatcherStatus(&d.Status)
 	}
-	nc.Status.PropagateDispatcherStatus(&d.Status)
 
 	// Get the Dispatcher Service and propagate the status to the Channel in case it does not exist.
 	// We don't do anything with the service because it's status contains nothing useful, so just do
 	// an existence check. Then below we check the endpoints targeting it.
-	_, err = r.serviceLister.Services(r.dispatcherNamespace).Get(r.dispatcherServiceName)
-	if err != nil {
+	if _, err := r.serviceLister.Services(r.dispatcherNamespace).Get(r.dispatcherServiceName); err != nil {
 		logger.Error("Unable to get the dispatcher service", zap.Error(err))
 		if apierrs.IsNotFound(err) {
 			nc.Status.MarkServiceFailed(dispatcherServiceNotFound, "Dispatcher Service does not exist")
 		} else {
 			nc.Status.MarkServiceFailed(dispatcherServiceFailed, "Failed to get dispatcher service")
 		}
-		return err
+	} else {
+		nc.Status.MarkServiceTrue()
 	}
-	nc.Status.MarkServiceTrue()
 
 	// Get the Dispatcher Service Endpoints and propagate the status to the Channel
 	// endpoints has the same name as the service, so not a bug.
-	e, err := r.endpointsLister.Endpoints(r.dispatcherNamespace).Get(r.dispatcherServiceName)
-	if err != nil {
+	if e, err := r.endpointsLister.Endpoints(r.dispatcherNamespace).Get(r.dispatcherServiceName); err != nil {
 		logger.Error("Unable to get the dispatcher endpoints", zap.Error(err))
 		if apierrs.IsNotFound(err) {
 			nc.Status.MarkEndpointsFailed(dispatcherEndpointsNotFound, "Dispatcher Endpoints does not exist")
 		} else {
 			nc.Status.MarkEndpointsFailed(dispatcherEndpointsFailed, "Failed to get dispatcher endpoints")
 		}
-		return err
+	} else {
+		if len(e.Subsets) == 0 {
+			nc.Status.MarkEndpointsFailed("DispatcherEndpointsNotReady", "There are no endpoints ready for Dispatcher service")
+		} else {
+			nc.Status.MarkEndpointsTrue()
+		}
 	}
-
-	if len(e.Subsets) == 0 {
-		logger.Error("No endpoints found for Dispatcher service", zap.Error(err))
-		nc.Status.MarkEndpointsFailed("DispatcherEndpointsNotReady", "There are no endpoints ready for Dispatcher service")
-		return fmt.Errorf("there are no endpoints ready for Dispatcher service %s", r.dispatcherServiceName)
-	}
-	nc.Status.MarkEndpointsTrue()
 
 	// Reconcile the k8s service representing the actual Channel. It points to the Dispatcher service via ExternalName
-	svc, err := r.reconcileChannelService(ctx, nc)
-	if err != nil {
+	if svc, err := r.reconcileChannelService(ctx, nc); err != nil {
 		nc.Status.MarkChannelServiceFailed(channelServiceFailed, fmt.Sprintf("Channel Service failed: %s", err))
-		return err
+	} else {
+		nc.Status.MarkChannelServiceTrue()
+		nc.Status.SetAddress(&apis.URL{
+			Scheme: "http",
+			Host:   names.ServiceHostName(svc.Name, svc.Namespace),
+		})
 	}
-	nc.Status.MarkChannelServiceTrue()
-	nc.Status.SetAddress(&apis.URL{
-		Scheme: "http",
-		Host:   names.ServiceHostName(svc.Name, svc.Namespace),
-	})
 
 	// Ok, so now the Dispatcher Deployment & Service have been created, we're golden since the
 	// dispatcher watches the Channel and where it needs to dispatch events to.
