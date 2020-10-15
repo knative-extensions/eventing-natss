@@ -992,7 +992,11 @@ knative.dev/eventing/test/test_images/print
 knative.dev/eventing/test/test_images/recordevents
 knative.dev/eventing/test/test_images/sequencestepper
 knative.dev/eventing/test/test_images/transformevents
+<<<<<<< HEAD
 # knative.dev/pkg v0.0.0-20201014184531-9e655c6b02f6
+=======
+# knative.dev/pkg v0.0.0-20201015201857-befac20ca4a1
+>>>>>>> migrate natss to v1beta1
 ## explicit
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
@@ -1066,7 +1070,7 @@ knative.dev/pkg/version
 knative.dev/pkg/webhook
 knative.dev/pkg/webhook/certificates/resources
 knative.dev/pkg/webhook/resourcesemantics
-# knative.dev/test-infra v0.0.0-20201014021030-ae3984a33f82
+# knative.dev/test-infra v0.0.0-20201015184856-358002934062
 ## explicit
 knative.dev/test-infra/scripts
 # sigs.k8s.io/structured-merge-diff/v3 v3.0.1-0.20200706213357-43c19bbb7fba

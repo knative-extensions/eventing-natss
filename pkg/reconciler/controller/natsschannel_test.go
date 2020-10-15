@@ -23,7 +23,7 @@ import (
 
 	"knative.dev/pkg/network"
 
-	duckv1alpha1 "knative.dev/pkg/apis/duck/v1alpha1"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/kmeta"
@@ -55,7 +55,7 @@ const (
 func init() {
 	// Add types to scheme
 	_ = v1beta1.AddToScheme(scheme.Scheme)
-	_ = duckv1alpha1.AddToScheme(scheme.Scheme)
+	_ = duckv1.AddToScheme(scheme.Scheme)
 }
 
 func TestAllCases(t *testing.T) {
@@ -85,11 +85,16 @@ func TestAllCases(t *testing.T) {
 			WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
 				Object: reconciletesting.NewNatssChannel(ncName, testNS,
 					reconciletesting.WithNatssInitChannelConditions,
-					reconciletesting.WithNatssChannelDeploymentNotReady(dispatcherDeploymentNotFound, "Dispatcher Deployment does not exist")),
+					reconciletesting.WithNatssChannelDeploymentNotReady(dispatcherDeploymentNotFound, "Dispatcher Deployment does not exist"),
+					reconciletesting.WithNatssChannelChannelServiceReady(),
+					reconciletesting.WithNatssChannelAddress(channelServiceAddress),
+					reconciletesting.Addressable(),
+					reconciletesting.WithNatssChannelServiceNotReady(dispatcherServiceNotFound, "Dispatcher Service does not exist"),
+					reconciletesting.WithNatssChannelEndpointsNotReady(dispatcherEndpointsNotFound, "Dispatcher Endpoints does not exist"),
+				),
 			}},
-			WantErr: true,
-			WantEvents: []string{
-				Eventf(corev1.EventTypeWarning, "InternalError", `deployment.apps "test-deployment" not found`),
+			WantCreates: []runtime.Object{
+				makeChannelService(reconciletesting.NewNatssChannel(ncName, testNS)),
 			},
 		}, {
 			Name: "Service does not exist",
@@ -102,11 +107,15 @@ func TestAllCases(t *testing.T) {
 				Object: reconciletesting.NewNatssChannel(ncName, testNS,
 					reconciletesting.WithNatssInitChannelConditions,
 					reconciletesting.WithNatssChannelDeploymentReady(),
-					reconciletesting.WithNatssChannelServiceNotReady(dispatcherServiceNotFound, "Dispatcher Service does not exist")),
+					reconciletesting.WithNatssChannelChannelServiceReady(),
+					reconciletesting.WithNatssChannelAddress(channelServiceAddress),
+					reconciletesting.Addressable(),
+					reconciletesting.WithNatssChannelServiceNotReady(dispatcherServiceNotFound, "Dispatcher Service does not exist"),
+					reconciletesting.WithNatssChannelEndpointsNotReady(dispatcherEndpointsNotFound, "Dispatcher Endpoints does not exist"),
+				),
 			}},
-			WantErr: true,
-			WantEvents: []string{
-				Eventf(corev1.EventTypeWarning, "InternalError", `service "test-service" not found`),
+			WantCreates: []runtime.Object{
+				makeChannelService(reconciletesting.NewNatssChannel(ncName, testNS)),
 			},
 		}, {
 			Name: "Endpoints does not exist",
@@ -116,17 +125,19 @@ func TestAllCases(t *testing.T) {
 				makeService(),
 				reconciletesting.NewNatssChannel(ncName, testNS),
 			},
-			WantErr: true,
 			WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
 				Object: reconciletesting.NewNatssChannel(ncName, testNS,
 					reconciletesting.WithNatssInitChannelConditions,
 					reconciletesting.WithNatssChannelDeploymentReady(),
 					reconciletesting.WithNatssChannelServiceReady(),
+					reconciletesting.WithNatssChannelChannelServiceReady(),
+					reconciletesting.WithNatssChannelAddress(channelServiceAddress),
+					reconciletesting.Addressable(),
 					reconciletesting.WithNatssChannelEndpointsNotReady(dispatcherEndpointsNotFound, "Dispatcher Endpoints does not exist"),
 				),
 			}},
-			WantEvents: []string{
-				Eventf(corev1.EventTypeWarning, "InternalError", `endpoints "test-service" not found`),
+			WantCreates: []runtime.Object{
+				makeChannelService(reconciletesting.NewNatssChannel(ncName, testNS)),
 			},
 		}, {
 			Name: "Endpoints not ready",
@@ -142,12 +153,14 @@ func TestAllCases(t *testing.T) {
 					reconciletesting.WithNatssInitChannelConditions,
 					reconciletesting.WithNatssChannelDeploymentReady(),
 					reconciletesting.WithNatssChannelServiceReady(),
+					reconciletesting.WithNatssChannelChannelServiceReady(),
+					reconciletesting.WithNatssChannelAddress(channelServiceAddress),
+					reconciletesting.Addressable(),
 					reconciletesting.WithNatssChannelEndpointsNotReady("DispatcherEndpointsNotReady", "There are no endpoints ready for Dispatcher service"),
 				),
 			}},
-			WantErr: true,
-			WantEvents: []string{
-				Eventf(corev1.EventTypeWarning, "InternalError", "there are no endpoints ready for Dispatcher service test-service"),
+			WantCreates: []runtime.Object{
+				makeChannelService(reconciletesting.NewNatssChannel(ncName, testNS)),
 			},
 		}, {
 			Name: "Works, creates new channel",
@@ -158,7 +171,6 @@ func TestAllCases(t *testing.T) {
 				makeReadyEndpoints(),
 				reconciletesting.NewNatssChannel(ncName, testNS),
 			},
-			WantErr: false,
 			WantCreates: []runtime.Object{
 				makeChannelService(reconciletesting.NewNatssChannel(ncName, testNS)),
 			},
@@ -170,11 +182,9 @@ func TestAllCases(t *testing.T) {
 					reconciletesting.WithNatssChannelEndpointsReady(),
 					reconciletesting.WithNatssChannelChannelServiceReady(),
 					reconciletesting.WithNatssChannelAddress(channelServiceAddress),
+					reconciletesting.Addressable(),
 				),
 			}},
-			WantPatches: []clientgotesting.PatchActionImpl{
-				patchFinalizers(testNS, ncName),
-			},
 		}, {
 			Name: "Works, channel exists",
 			Key:  ncKey,
@@ -185,7 +195,6 @@ func TestAllCases(t *testing.T) {
 				reconciletesting.NewNatssChannel(ncName, testNS),
 				makeChannelService(reconciletesting.NewNatssChannel(ncName, testNS)),
 			},
-			WantErr: false,
 			WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
 				Object: reconciletesting.NewNatssChannel(ncName, testNS,
 					reconciletesting.WithNatssInitChannelConditions,
@@ -206,7 +215,6 @@ func TestAllCases(t *testing.T) {
 				reconciletesting.NewNatssChannel(ncName, testNS),
 				makeChannelServiceNotOwnedByUs(),
 			},
-			WantErr: true,
 			WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
 				Object: reconciletesting.NewNatssChannel(ncName, testNS,
 					reconciletesting.WithNatssInitChannelConditions,
@@ -216,9 +224,6 @@ func TestAllCases(t *testing.T) {
 					reconciletesting.WithNatssChannelChannelServicetNotReady("ChannelServiceFailed", "Channel Service failed: natsschannel: test-namespace/test-nc does not own Service: \"test-nc-kn-channel\""),
 				),
 			}},
-			WantEvents: []string{
-				Eventf(corev1.EventTypeWarning, "InternalError", `natsschannel: test-namespace/test-nc does not own Service: "test-nc-kn-channel"`),
-			},
 		}, {
 			Name: "channel does not exist, fails to create",
 			Key:  ncKey,
@@ -228,7 +233,6 @@ func TestAllCases(t *testing.T) {
 				makeReadyEndpoints(),
 				reconciletesting.NewNatssChannel(ncName, testNS),
 			},
-			WantErr: true,
 			WithReactors: []clientgotesting.ReactionFunc{
 				InduceFailure("create", "Services"),
 			},
@@ -243,12 +247,6 @@ func TestAllCases(t *testing.T) {
 			}},
 			WantCreates: []runtime.Object{
 				makeChannelService(reconciletesting.NewNatssChannel(ncName, testNS)),
-			},
-			WantEvents: []string{
-				Eventf(corev1.EventTypeWarning, "InternalError", "inducing failure for create services"),
-			},
-			WantPatches: []clientgotesting.PatchActionImpl{
-				patchFinalizers(testNS, ncName),
 			},
 		},
 	}

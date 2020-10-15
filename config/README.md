@@ -32,7 +32,7 @@ They do not offer:
 1. Create NATSS channels:
 
    ```yaml
-   apiVersion: messaging.knative.dev/v1alpha1
+   apiVersion: messaging.knative.dev/v1beta1
    kind: NatssChannel
    metadata:
      name: foo
