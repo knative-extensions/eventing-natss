@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	eventingduck "knative.dev/eventing/pkg/apis/duck/v1alpha1"
 	"strings"
 
 	duckv1 "knative.dev/pkg/apis/duck/v1"

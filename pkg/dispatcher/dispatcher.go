@@ -19,7 +19,6 @@ package dispatcher
 import (
 	"context"
 	"fmt"
-	sdaasdsaddsa "knative.dev/eventing/pkg/apis/messaging/v1beta1"
 	"net/http"
 	"net/url"
 	"sync"

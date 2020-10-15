@@ -18,6 +18,7 @@ package v1beta1
 
 import (
 	"context"
+
 	"knative.dev/eventing/pkg/apis/messaging"
 )
 

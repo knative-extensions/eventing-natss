@@ -17,8 +17,9 @@ limitations under the License.
 package v1beta1
 
 import (
-	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"testing"
+
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"

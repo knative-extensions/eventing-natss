@@ -18,8 +18,9 @@ package v1beta1
 
 import (
 	"context"
-	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"testing"
+
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 
 	"github.com/google/go-cmp/cmp"
 	"knative.dev/pkg/webhook/resourcesemantics"
