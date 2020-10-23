@@ -89,6 +89,7 @@ type Args struct {
 	ClientID  string
 	Cargs     kncloudevents.ConnectionArgs
 	Logger    *zap.Logger
+	Reporter  eventingchannels.StatsReporter
 }
 
 var _ NatssDispatcher = (*SubscriptionsSupervisor)(nil)
@@ -112,6 +113,7 @@ func NewDispatcher(args Args) (NatssDispatcher, error) {
 	receiver, err := eventingchannels.NewMessageReceiver(
 		messageReceiverFunc(d),
 		d.logger,
+		args.Reporter,
 		eventingchannels.ResolveMessageChannelFromHostHeader(d.getChannelReferenceFromHost))
 	if err != nil {
 		return nil, err
@@ -319,10 +321,14 @@ func (s *SubscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
 		}
 
-		if err := s.dispatcher.DispatchMessage(ctx, message, nil, destination, reply, deadLetter); err != nil {
+		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, nil, destination, reply, deadLetter)
+		if err != nil {
 			s.logger.Error("Failed to dispatch message: ", zap.Error(err))
 			return
 		}
+		// TODO: Actually report the stats
+		// https://github.com/knative-sandbox/eventing-natss/issues/39
+		s.logger.Debug("Dispatch details", zap.Any("DispatchExecutionInfo", executionInfo))
 		if err := stanMsg.Ack(); err != nil {
 			s.logger.Error("failed to acknowledge message", zap.Error(err))
 		}
