@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -123,6 +124,8 @@ func (l *failOnFatalAndErrorLogger) Fatal(msg string, fields ...zap.Field) {
 }
 
 func TestNewController(t *testing.T) {
+	os.Setenv("POD_NAME", "testpod")
+	os.Setenv("CONTAINER_NAME", "testcontainer")
 
 	logger := failOnFatalAndErrorLogger{
 		Logger: zap.NewNop(),
@@ -141,6 +144,9 @@ func TestNewController(t *testing.T) {
 }
 
 func TestFailedNatssSubscription(t *testing.T) {
+	os.Setenv("POD_NAME", "testpod")
+	os.Setenv("CONTAINER_NAME", "testcontainer")
+
 	ncKey := testNS + "/" + ncName
 
 	table := TableTest{

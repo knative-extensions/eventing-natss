@@ -22,8 +22,13 @@ import (
 	"strings"
 
 	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
+	"knative.dev/eventing/pkg/channel"
+
+	"github.com/google/uuid"
+	"github.com/kelseyhightower/envconfig"
 
 	duckv1 "knative.dev/pkg/apis/duck/v1"
+	"knative.dev/pkg/kmeta"
 	pkgreconciler "knative.dev/pkg/reconciler"
 
 	"go.uber.org/zap"
@@ -69,13 +74,24 @@ type Reconciler struct {
 var _ natsschannelreconciler.Interface = (*Reconciler)(nil)
 var _ natsschannelreconciler.Finalizer = (*Reconciler)(nil)
 
+type envConfig struct {
+	PodName       string `envconfig:"POD_NAME" required:"true"`
+	ContainerName string `envconfig:"CONTAINER_NAME" required:"true"`
+}
+
 // NewController initializes the controller and is called by the generated code.
 // Registers event handlers to enqueue events.
 func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 
 	logger := logging.FromContext(ctx)
 
+	var env envConfig
+	if err := envconfig.Process("", &env); err != nil {
+		logger.Fatalw("Failed to process env var", zap.Error(err))
+	}
+
 	natssConfig := util.GetNatssConfig()
+	reporter := channel.NewStatsReporter(env.ContainerName, kmeta.ChildName(env.PodName, uuid.New().String()))
 	dispatcherArgs := dispatcher.Args{
 		NatssURL:  util.GetDefaultNatssURL(),
 		ClusterID: util.GetDefaultClusterID(),
@@ -84,7 +100,8 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 			MaxIdleConns:        natssConfig.MaxIdleConns,
 			MaxIdleConnsPerHost: natssConfig.MaxIdleConnsPerHost,
 		},
-		Logger: logger.Desugar(),
+		Logger:   logger.Desugar(),
+		Reporter: reporter,
 	}
 	natssDispatcher, err := dispatcher.NewDispatcher(dispatcherArgs)
 	if err != nil {
