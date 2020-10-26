@@ -46,8 +46,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-          - name: CONTAINER_NAME
-            value: dispatcher
+            - name: CONTAINER_NAME
+              value: dispatcher
           ports:
             - containerPort: 9090
               name: metrics
