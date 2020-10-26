@@ -29,18 +29,11 @@ import (
 )
 
 const (
-	serviceName    = "my-test-service"
 	ncName         = "my-test-nc"
 	testNS         = "my-test-ns"
 	dispatcherNS   = "dispatcher-namespace"
 	dispatcherName = "dispatcher-name"
 )
-
-func TestMakeExternalServiceAddress(t *testing.T) {
-	if want, got := "my-test-service.my-test-ns.svc.cluster.local", MakeExternalServiceAddress(testNS, serviceName); want != got {
-		t.Errorf("Want: %q got %q", want, got)
-	}
-}
 
 func TestMakeChannelServiceAddress(t *testing.T) {
 	if want, got := "my-test-nc-kn-channel", MakeChannelServiceName(ncName); want != got {

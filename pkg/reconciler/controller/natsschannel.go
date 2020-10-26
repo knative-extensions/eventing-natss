@@ -24,6 +24,7 @@ import (
 
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/logging"
+	"knative.dev/pkg/network"
 	"knative.dev/pkg/reconciler"
 
 	corev1 "k8s.io/api/core/v1"
@@ -32,7 +33,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	appsv1listers "k8s.io/client-go/listers/apps/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
-	"knative.dev/eventing/pkg/reconciler/names"
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
 	natssChannelReconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1beta1/natsschannel"
@@ -128,7 +128,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1beta1.NatssChannel
 		nc.Status.MarkChannelServiceTrue()
 		nc.Status.SetAddress(&apis.URL{
 			Scheme: "http",
-			Host:   names.ServiceHostName(svc.Name, svc.Namespace),
+			Host:   network.GetServiceHostname(svc.Name, svc.Namespace),
 		})
 	}
 

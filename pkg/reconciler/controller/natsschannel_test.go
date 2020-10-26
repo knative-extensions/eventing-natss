@@ -319,7 +319,7 @@ func makeChannelService(nc *v1beta1.NatssChannel) *corev1.Service {
 		},
 		Spec: corev1.ServiceSpec{
 			Type:         corev1.ServiceTypeExternalName,
-			ExternalName: fmt.Sprintf("%s.%s.svc.%s", dispatcherServiceName, testNS, network.GetClusterDomainName()),
+			ExternalName: network.GetServiceHostname(dispatcherServiceName, testNS),
 		},
 	}
 }
@@ -339,7 +339,7 @@ func makeChannelServiceNotOwnedByUs() *corev1.Service {
 		},
 		Spec: corev1.ServiceSpec{
 			Type:         corev1.ServiceTypeExternalName,
-			ExternalName: fmt.Sprintf("%s.%s.svc.%s", dispatcherServiceName, testNS, network.GetClusterDomainName()),
+			ExternalName: network.GetServiceHostname(dispatcherServiceName, testNS),
 		},
 	}
 }
