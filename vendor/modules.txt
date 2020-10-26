@@ -967,7 +967,6 @@ knative.dev/eventing/pkg/client/injection/client
 knative.dev/eventing/pkg/client/injection/client/fake
 knative.dev/eventing/pkg/configmap
 knative.dev/eventing/pkg/kncloudevents
-knative.dev/eventing/pkg/reconciler/names
 knative.dev/eventing/pkg/utils
 knative.dev/eventing/test/lib
 knative.dev/eventing/test/lib/dropevents
