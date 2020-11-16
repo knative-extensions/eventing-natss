@@ -161,7 +161,7 @@ func TestFailedNatssSubscription(t *testing.T) {
 					reconciletesting.Addressable(),
 					reconciletesting.WithReady,
 					// add subscriber for channel
-					reconciletesting.WithNatssChannelSubscribers(t, "http://dummy.org"),
+					reconciletesting.WithNatssChannelSubscribers(t, "http://example.com"),
 				),
 			},
 			Key: ncKey,
@@ -179,7 +179,7 @@ func TestFailedNatssSubscription(t *testing.T) {
 						reconciletesting.Addressable(),
 						reconciletesting.WithReady,
 						// add subscriber for channel
-						reconciletesting.WithNatssChannelSubscribers(t, "http://dummy.org"),
+						reconciletesting.WithNatssChannelSubscribers(t, "http://example.com"),
 						// status of subscriber should be not ready, because SubscriptionsSupervisorUpdateBroken simulates a failed natss subscription
 						reconciletesting.WithNatssChannelSubscribableStatus(corev1.ConditionFalse, "ups"),
 					),

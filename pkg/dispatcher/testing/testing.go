@@ -26,7 +26,7 @@ import (
 	"knative.dev/eventing-natss/pkg/dispatcher"
 )
 
-// DispatcherDoNothing is a dummy mock which doesn't do anything
+// DispatcherDoNothing is a mock which doesn't do anything
 type DispatcherDoNothing struct{}
 
 var _ dispatcher.NatssDispatcher = (*DispatcherDoNothing)(nil)
