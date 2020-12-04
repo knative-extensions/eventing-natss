@@ -22,6 +22,11 @@ import (
 	"os"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/types"
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
+	"knative.dev/pkg/apis"
+	"knative.dev/pkg/ptr"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -51,6 +56,55 @@ import (
 const (
 	testNS = "test-namespace"
 	ncName = "test-nc"
+
+	twoSubscriberPatch                = `[{"op":"add","path":"/status/subscribers","value":[{"observedGeneration":1,"ready":"True","uid":"2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1"},{"observedGeneration":2,"ready":"True","uid":"34c5aec8-deb6-11e8-9f32-f2801f1b9fd1"}]}]`
+	oneSubscriberPatch                = `[{"op":"add","path":"/status/subscribers","value":[{"observedGeneration":1,"ready":"True","uid":"2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1"}]}]`
+	oneSubscriberRemovedOneAddedPatch = `[{"op":"add","path":"/status/subscribers/2","value":{"observedGeneration":2,"ready":"True","uid":"34c5aec8-deb6-11e8-9f32-f2801f1b9fd1"}},{"op":"remove","path":"/status/subscribers/0"}]`
+	twoSubscriberPatchFailed          = `[{"op":"add","path":"/status/subscribers","value":[{"message":"ups","observedGeneration":1,"ready":"False","uid":"2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1"},{"message":"ups","observedGeneration":2,"ready":"False","uid":"34c5aec8-deb6-11e8-9f32-f2801f1b9fd1"}]}]`
+)
+
+var (
+	linear      = eventingduckv1.BackoffPolicyLinear
+	exponential = eventingduckv1.BackoffPolicyExponential
+
+	subscriber1UID        = types.UID("2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1")
+	subscriber2UID        = types.UID("34c5aec8-deb6-11e8-9f32-f2801f1b9fd1")
+	subscriber3UID        = types.UID("43995566-deb6-11e8-9f32-f2801f1b9fd1")
+	subscriber1Generation = int64(1)
+	subscriber2Generation = int64(2)
+	subscriber3Generation = int64(2)
+
+	subscriber1 = eventingduckv1.SubscriberSpec{
+		UID:           subscriber1UID,
+		Generation:    subscriber1Generation,
+		SubscriberURI: apis.HTTP("call1"),
+		ReplyURI:      apis.HTTP("sink2"),
+	}
+	subscriber1WithLinearRetry = eventingduckv1.SubscriberSpec{
+		UID:           subscriber1UID,
+		Generation:    subscriber1Generation,
+		SubscriberURI: apis.HTTP("call1"),
+		ReplyURI:      apis.HTTP("sink2"),
+		Delivery: &eventingduckv1.DeliverySpec{
+			Retry:         ptr.Int32(3),
+			BackoffPolicy: &linear,
+		},
+	}
+
+	subscriber2 = eventingduckv1.SubscriberSpec{
+		UID:           subscriber2UID,
+		Generation:    subscriber2Generation,
+		SubscriberURI: apis.HTTP("call2"),
+		ReplyURI:      apis.HTTP("sink2"),
+	}
+	subscriber3 = eventingduckv1.SubscriberSpec{
+		UID:           subscriber3UID,
+		Generation:    subscriber3Generation,
+		SubscriberURI: apis.HTTP("call3"),
+		ReplyURI:      apis.HTTP("sink2"),
+	}
+
+	subscribers = []eventingduckv1.SubscriberSpec{subscriber1, subscriber2}
 )
 
 var (
@@ -78,6 +132,11 @@ func TestAllCases(t *testing.T) {
 			Key:  ncKey,
 			Objects: []runtime.Object{
 				reconciletesting.NewNatssChannel(ncName, testNS,
+					reconciletesting.WithNatssChannelChannelServiceReady(),
+					reconciletesting.WithNatssChannelServiceReady(),
+					reconciletesting.WithNatssChannelEndpointsReady(),
+					reconciletesting.WithNatssChannelDeploymentReady(),
+					reconciletesting.Addressable(),
 					reconciletesting.WithReady,
 				),
 			},
@@ -87,19 +146,55 @@ func TestAllCases(t *testing.T) {
 			WantEvents: []string{
 				finalizerUpdatedEvent,
 			},
-			WantErr: false,
-			WantStatusUpdates: []clientgotesting.UpdateActionImpl{
-				{
-					Object: reconciletesting.NewNatssChannel(ncName, testNS,
-						reconciletesting.WithNatssChannelChannelServiceReady(),
-						reconciletesting.WithNatssChannelServiceReady(),
-						reconciletesting.WithNatssChannelEndpointsReady(),
-						reconciletesting.WithNatssChannelDeploymentReady(),
-						reconciletesting.Addressable(),
-						reconciletesting.WithReady,
-					),
-				},
+		},
+		{
+			Name: "with subscribers, works",
+			Key:  ncKey,
+			Objects: []runtime.Object{
+				reconciletesting.NewNatssChannel(ncName, testNS,
+					reconciletesting.WithNatssChannelChannelServiceReady(),
+					reconciletesting.WithNatssChannelServiceReady(),
+					reconciletesting.WithNatssChannelEndpointsReady(),
+					reconciletesting.WithNatssChannelDeploymentReady(),
+					reconciletesting.Addressable(),
+					reconciletesting.WithReady,
+					reconciletesting.WithNatssChannelSubscribers(subscribers),
+				),
 			},
+			WantPatches: []clientgotesting.PatchActionImpl{
+				makeFinalizerPatch(testNS, ncName),
+				makePatch(testNS, ncName, twoSubscriberPatch),
+			},
+			WantEvents: []string{
+				finalizerUpdatedEvent,
+			},
+		},
+		{
+			Name: "with subscribers, patch fails",
+			Key:  ncKey,
+			Objects: []runtime.Object{
+				reconciletesting.NewNatssChannel(ncName, testNS,
+					reconciletesting.WithNatssChannelChannelServiceReady(),
+					reconciletesting.WithNatssChannelServiceReady(),
+					reconciletesting.WithNatssChannelEndpointsReady(),
+					reconciletesting.WithNatssChannelDeploymentReady(),
+					reconciletesting.Addressable(),
+					reconciletesting.WithReady,
+					reconciletesting.WithNatssChannelSubscribers(subscribers),
+				),
+			},
+			WithReactors: []clientgotesting.ReactionFunc{
+				InduceFailure("patch", "natsschannels/status"),
+			},
+			WantPatches: []clientgotesting.PatchActionImpl{
+				makeFinalizerPatch(testNS, ncName),
+				makePatch(testNS, ncName, twoSubscriberPatch),
+			},
+			WantEvents: []string{
+				finalizerUpdatedEvent,
+				Eventf(corev1.EventTypeWarning, "InternalError", "Failed patching: inducing failure for patch natsschannels"),
+			},
+			WantErr: true,
 		},
 	}
 
@@ -161,32 +256,17 @@ func TestFailedNatssSubscription(t *testing.T) {
 					reconciletesting.Addressable(),
 					reconciletesting.WithReady,
 					// add subscriber for channel
-					reconciletesting.WithNatssChannelSubscribers(t, "http://example.com"),
+					reconciletesting.WithNatssChannelSubscribers(subscribers),
 				),
 			},
 			Key: ncKey,
 			WantEvents: []string{
 				finalizerUpdatedEvent,
-				Eventf(corev1.EventTypeWarning, "InternalError", "\nups"),
-			},
-			WantStatusUpdates: []clientgotesting.UpdateActionImpl{
-				{
-					Object: reconciletesting.NewNatssChannel(ncName, testNS,
-						reconciletesting.WithNatssChannelChannelServiceReady(),
-						reconciletesting.WithNatssChannelServiceReady(),
-						reconciletesting.WithNatssChannelEndpointsReady(),
-						reconciletesting.WithNatssChannelDeploymentReady(),
-						reconciletesting.Addressable(),
-						reconciletesting.WithReady,
-						// add subscriber for channel
-						reconciletesting.WithNatssChannelSubscribers(t, "http://example.com"),
-						// status of subscriber should be not ready, because SubscriptionsSupervisorUpdateBroken simulates a failed natss subscription
-						reconciletesting.WithNatssChannelSubscribableStatus(corev1.ConditionFalse, "ups"),
-					),
-				},
+				Eventf(corev1.EventTypeWarning, "InternalError", "\nups\nups"),
 			},
 			WantPatches: []clientgotesting.PatchActionImpl{
 				makeFinalizerPatch(testNS, ncName),
+				makePatch(testNS, ncName, twoSubscriberPatchFailed),
 			},
 			WantErr: true,
 		},
@@ -200,12 +280,17 @@ func TestFailedNatssSubscription(t *testing.T) {
 }
 
 func makeFinalizerPatch(namespace, name string) clientgotesting.PatchActionImpl {
-	action := clientgotesting.PatchActionImpl{}
-	action.Name = name
-	action.Namespace = namespace
-	patch := `{"metadata":{"finalizers":["` + finalizerName + `"],"resourceVersion":""}}`
-	action.Patch = []byte(patch)
-	return action
+	return makePatch(namespace, name, `{"metadata":{"finalizers":["`+finalizerName+`"],"resourceVersion":""}}`)
+}
+
+func makePatch(namespace, name, patch string) clientgotesting.PatchActionImpl {
+	return clientgotesting.PatchActionImpl{
+		ActionImpl: clientgotesting.ActionImpl{
+			Namespace: namespace,
+		},
+		Name:  name,
+		Patch: []byte(patch),
+	}
 }
 
 func createReconciler(

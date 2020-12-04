@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/types"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -125,7 +127,7 @@ func WithNatssChannelEndpointsReady() NatssChannelOption {
 	}
 }
 
-func WithNatssChannelSubscribers(t *testing.T, subscriberURI string) NatssChannelOption {
+func WithNatssChannelSubscriber(t *testing.T, subscriberURI string) NatssChannelOption {
 	s, err := apis.ParseURL(subscriberURI)
 	if err != nil {
 		t.Errorf("cannot parse url: %v", err)
@@ -139,12 +141,31 @@ func WithNatssChannelSubscribers(t *testing.T, subscriberURI string) NatssChanne
 	}
 }
 
+func WithNatssChannelSubscribers(subscribers []duckv1.SubscriberSpec) NatssChannelOption {
+	return func(nc *v1beta1.NatssChannel) {
+		nc.Spec.Subscribers = subscribers
+	}
+}
+
 func WithNatssChannelSubscribableStatus(ready corev1.ConditionStatus, message string) NatssChannelOption {
 	return func(nc *v1beta1.NatssChannel) {
 		nc.Status.Subscribers = []duckv1.SubscriberStatus{{
 			Ready:   ready,
 			Message: message,
 		}}
+	}
+}
+func WithNatssChannelReadySubscriber(uid string) NatssChannelOption {
+	return WithNatssChannelReadySubscriberAndGeneration(uid, 0)
+}
+
+func WithNatssChannelReadySubscriberAndGeneration(uid string, observedGeneration int64) NatssChannelOption {
+	return func(nc *v1beta1.NatssChannel) {
+		nc.Status.Subscribers = append(nc.Status.Subscribers, duckv1.SubscriberStatus{
+			UID:                types.UID(uid),
+			ObservedGeneration: observedGeneration,
+			Ready:              corev1.ConditionTrue,
+		})
 	}
 }
 
