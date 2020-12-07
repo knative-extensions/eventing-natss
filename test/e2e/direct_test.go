@@ -21,6 +21,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,11 +37,17 @@ import (
 	// Uncomment the following line to load the gcp plugin (only required to authenticate against GKE clusters).
 	// _ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	_ "knative.dev/pkg/system/testing"
+	"knative.dev/reconciler-test/pkg/k8s"
 )
 
 //
 // producer ---> broker --[trigger]--> recorder
 //
+
+const (
+	interval = 1 * time.Second
+	timeout  = 5 * time.Minute
+)
 
 // DirectTestBrokerImpl makes sure an MT Broker backed by natss channel delivers events to a single consumer.
 func DirectTestBroker() *feature.Feature {
@@ -51,6 +58,21 @@ func DirectTestBroker() *feature.Feature {
 	f.Alpha("MT broker with natss goes ready").Must("goes ready", AllGoReady)
 	f.Alpha("Receives events").Must("goes ready", CheckDirectEvents)
 	return f
+}
+
+func AllGoReady(ctx context.Context, t *testing.T) {
+	env := environment.FromContext(ctx)
+	for _, ref := range env.References() {
+		if !strings.Contains(ref.APIVersion, "knative.dev") {
+			// Let's not care so much about checking the status of non-Knative
+			// resources.
+			continue
+		}
+		if err := k8s.WaitForReadyOrDone(ctx, ref, interval, timeout); err != nil {
+			t.Fatal("failed to wait for ready or done, ", err)
+		}
+	}
+	t.Log("all resources ready")
 }
 
 func CheckDirectEvents(ctx context.Context, t *testing.T) {

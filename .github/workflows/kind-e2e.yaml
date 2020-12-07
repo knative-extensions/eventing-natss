@@ -102,6 +102,7 @@ jobs:
         kind create cluster --config kind.yaml
 
     - name: Install natss
+      working-directory: ./src/knative.dev/${{ github.event.repository.name }}
       run: |
         set -x
 
