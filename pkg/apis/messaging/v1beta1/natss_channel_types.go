@@ -23,6 +23,7 @@ import (
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
+	"knative.dev/pkg/kmeta"
 )
 
 // +genclient
@@ -45,14 +46,20 @@ type NatssChannel struct {
 }
 
 // Check that Channel can be validated, can be defaulted, and has immutable fields.
-var _ apis.Validatable = (*NatssChannel)(nil)
-var _ apis.Defaultable = (*NatssChannel)(nil)
-var _ runtime.Object = (*NatssChannel)(nil)
-var _ duckv1.KRShaped = (*NatssChannel)(nil)
+var (
+	_ apis.Validatable = (*NatssChannel)(nil)
+	_ apis.Defaultable = (*NatssChannel)(nil)
+	// Check that InMemoryChannel can return its spec untyped.
+	_ apis.HasSpec = (*NatssChannel)(nil)
+	// Check that we can create OwnerReferences to an InMemoryChannel.
+	_ kmeta.OwnerRefable = (*NatssChannel)(nil)
+	_ runtime.Object     = (*NatssChannel)(nil)
+	_ duckv1.KRShaped    = (*NatssChannel)(nil)
+)
 
 // NatssChannelSpec defines the specification for a NatssChannel.
 type NatssChannelSpec struct {
-	// inherits duck/v1 ChannelableStatus, which currently provides:
+	// inherits duck/v1 ChannelableSpec, which currently provides:
 	// * SubscribableSpec - List of subscribers
 	// * DeliverySpec - contains options controlling the event delivery
 	eventingduckv1.ChannelableSpec `json:",inline"`

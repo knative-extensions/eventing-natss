@@ -353,13 +353,10 @@ function report_go_test() {
   report="$(mktemp)"
   local xml
   xml="$(mktemp_with_extension "${ARTIFACTS}"/junit_XXXXXXXX xml)"
-  local json
-  json="$(mktemp_with_extension "${ARTIFACTS}"/json_XXXXXXXX json)"
   echo "Running go test with args: ${go_test_args[*]}"
   # TODO(chizhg): change to `--format testname`?
   capture_output "${report}" gotestsum --format "${GO_TEST_VERBOSITY:-standard-verbose}" \
     --junitfile "${xml}" --junitfile-testsuite-name relative --junitfile-testcase-classname relative \
-    --jsonfile "${json}" \
     -- "${go_test_args[@]}"
   local failed=$?
   echo "Finished run, return code is ${failed}"
@@ -413,26 +410,28 @@ function start_latest_knative_serving() {
 }
 
 # Install Knative Eventing in the current cluster.
-# Parameters: $1 - Knative Eventing manifest.
+# Parameters: $1 - Knative Eventing crds manifest.
+#             $2 - Knative Eventing core manifest.
 function start_knative_eventing() {
   header "Starting Knative Eventing"
   subheader "Installing Knative Eventing"
   echo "Installing Eventing CRDs from $1"
-  kubectl apply --selector knative.dev/crd-install=true -f "$1"
-  echo "Installing the rest of eventing components from $1"
   kubectl apply -f "$1"
+  echo "Installing Eventing core components from $2"
+  kubectl apply -f "$2"
   wait_until_pods_running knative-eventing || return 1
 }
 
 # Install the stable release Knative/eventing in the current cluster.
 # Parameters: $1 - Knative Eventing version number, e.g. 0.6.0.
 function start_release_knative_eventing() {
-  start_knative_eventing "https://storage.googleapis.com/knative-releases/eventing/previous/v$1/eventing.yaml"
+  start_knative_eventing "https://storage.googleapis.com/knative-releases/eventing/previous/v$1/eventing-crds.yaml" \
+    "https://storage.googleapis.com/knative-releases/eventing/previous/v$1/eventing-core.yaml"
 }
 
 # Install the latest stable Knative Eventing in the current cluster.
 function start_latest_knative_eventing() {
-  start_knative_eventing "${KNATIVE_EVENTING_RELEASE}"
+  start_knative_eventing "${KNATIVE_EVENTING_RELEASE_CRDS}" "${KNATIVE_EVENTING_RELEASE_CORE}"
 }
 
 # Install Knative Eventing extension in the current cluster.
@@ -517,7 +516,7 @@ function go_update_deps() {
   echo "=== Update Deps for Golang"
 
   local UPGRADE=0
-  local VERSION="master"
+  local VERSION="v9000.1" # release v9000 is so far in the future, it will always pick the default branch.
   local DOMAIN="knative.dev"
   while [[ $# -ne 0 ]]; do
     parameter=$1
@@ -754,5 +753,6 @@ readonly REPO_NAME_FORMATTED="Knative $(capitalize "${REPO_NAME//-/ }")"
 readonly KNATIVE_SERVING_RELEASE_CRDS="$(get_latest_knative_yaml_source "serving" "serving-crds")"
 readonly KNATIVE_SERVING_RELEASE_CORE="$(get_latest_knative_yaml_source "serving" "serving-core")"
 readonly KNATIVE_NET_ISTIO_RELEASE="$(get_latest_knative_yaml_source "net-istio" "net-istio")"
-readonly KNATIVE_EVENTING_RELEASE="$(get_latest_knative_yaml_source "eventing" "eventing")"
+readonly KNATIVE_EVENTING_RELEASE_CRDS="$(get_latest_knative_yaml_source "eventing" "eventing-crds")"
+readonly KNATIVE_EVENTING_RELEASE_CORE="$(get_latest_knative_yaml_source "eventing" "eventing-core")"
 readonly KNATIVE_EVENTING_SUGAR_CONTROLLER_RELEASE="$(get_latest_knative_yaml_source "eventing" "eventing-sugar-controller")"

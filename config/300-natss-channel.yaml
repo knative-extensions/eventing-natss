@@ -40,22 +40,22 @@ spec:
       served: true
       storage: true
       subresources:
-        status: { }
+        status: {}
       schema:
         openAPIV3Schema:
           type: object
           # Workaround, existing schema is incomplete and fails validation.
           x-kubernetes-preserve-unknown-fields: true
-  additionalPrinterColumns:
-    - name: Ready
-      type: string
-      JSONPath: ".status.conditions[?(@.type==\"Ready\")].status"
-    - name: Reason
-      type: string
-      JSONPath: ".status.conditions[?(@.type==\"Ready\")].reason"
-    - name: URL
-      type: string
-      JSONPath: .status.address.url
-    - name: Age
-      type: date
-      JSONPath: .metadata.creationTimestamp
+      additionalPrinterColumns:
+      - name: Ready
+        type: string
+        jsonPath: ".status.conditions[?(@.type==\"Ready\")].status"
+      - name: Reason
+        type: string
+        jsonPath: ".status.conditions[?(@.type==\"Ready\")].reason"
+      - name: URL
+        type: string
+        jsonPath: .status.address.url
+      - name: Age
+        type: date
+        jsonPath: .metadata.creationTimestamp

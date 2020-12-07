@@ -21,20 +21,24 @@ import (
 	"fmt"
 	"strings"
 
-	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
-	"knative.dev/eventing/pkg/channel"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
+
+	"k8s.io/apimachinery/pkg/types"
+	"knative.dev/pkg/apis/duck"
 
 	"github.com/google/uuid"
 	"github.com/kelseyhightower/envconfig"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
+	"knative.dev/eventing/pkg/channel"
 
-	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/kmeta"
 	pkgreconciler "knative.dev/pkg/reconciler"
 
 	"go.uber.org/zap"
 
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/eventing/pkg/kncloudevents"
@@ -138,26 +142,16 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 // - set NatssChannel SubscribableStatus
 // - update host2channel map
 func (r *Reconciler) ReconcileKind(ctx context.Context, natssChannel *v1beta1.NatssChannel) pkgreconciler.Event {
-	// TODO update dispatcher API and use Channelable or NatssChannel.
-	c := toChannel(natssChannel)
-
 	// Try to subscribe.
-	failedSubscriptions, err := r.natssDispatcher.UpdateSubscriptions(ctx, c, false)
+	failedSubscriptions, err := r.natssDispatcher.UpdateSubscriptions(ctx, natssChannel.Name, natssChannel.Namespace, natssChannel.Spec.Subscribers, false)
 	if err != nil {
-		logging.FromContext(ctx).Errorw("Error updating subscriptions", zap.Any("channel", c), zap.Error(err))
+		logging.FromContext(ctx).Errorw("Error updating subscriptions", zap.Any("channel", natssChannel), zap.Error(err))
 		return err
 	}
 
-	natssChannel.Status.SubscribableStatus = r.createSubscribableStatus(natssChannel.Spec.Subscribers, failedSubscriptions)
-	if len(failedSubscriptions) > 0 {
-		var b strings.Builder
-		for _, subError := range failedSubscriptions {
-			b.WriteString("\n")
-			b.WriteString(subError.Error())
-		}
-		errMsg := b.String()
-		logging.FromContext(ctx).Error(errMsg)
-		return fmt.Errorf(errMsg)
+	if err := r.patchSubscriberStatus(ctx, natssChannel, failedSubscriptions); err != nil {
+		logging.FromContext(ctx).Errorw("Error patching subscription statuses", zap.Any("channel", natssChannel), zap.Error(err))
+		return err
 	}
 
 	natssChannels, err := r.natsschannelLister.List(labels.Everything())
@@ -177,13 +171,21 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, natssChannel *v1beta1.Na
 		logging.FromContext(ctx).Errorw("Error updating host to channel map", zap.Error(err))
 		return err
 	}
-
+	if len(failedSubscriptions) > 0 {
+		var b strings.Builder
+		for _, subError := range failedSubscriptions {
+			b.WriteString("\n")
+			b.WriteString(subError.Error())
+		}
+		errMsg := b.String()
+		logging.FromContext(ctx).Error(errMsg)
+		return fmt.Errorf(errMsg)
+	}
 	return nil
 }
 
 func (r *Reconciler) FinalizeKind(ctx context.Context, c *v1beta1.NatssChannel) pkgreconciler.Event {
-
-	if _, err := r.natssDispatcher.UpdateSubscriptions(ctx, toChannel(c), true); err != nil {
+	if _, err := r.natssDispatcher.UpdateSubscriptions(ctx, c.Name, c.Namespace, c.Spec.Subscribers, true); err != nil {
 		logging.FromContext(ctx).Errorw("Error updating subscriptions", zap.Any("channel", c), zap.Error(err))
 		return err
 	}
@@ -202,7 +204,7 @@ func (r *Reconciler) createSubscribableStatus(subscribers []eventingduckv1.Subsc
 			Ready:              corev1.ConditionTrue,
 		}
 
-		if err, ok := failedSubscriptions[sub]; ok {
+		if err := getFailedSub(sub, failedSubscriptions); err != nil {
 			status.Ready = corev1.ConditionFalse
 			status.Message = err.Error()
 		}
@@ -211,6 +213,43 @@ func (r *Reconciler) createSubscribableStatus(subscribers []eventingduckv1.Subsc
 	return eventingduckv1.SubscribableStatus{
 		Subscribers: subscriberStatus,
 	}
+}
+
+// TODO: We should really look at not using the sub as the key since it has
+// pointers in it. This is inefficient, but at least it's correct.
+func getFailedSub(sub eventingduckv1.SubscriberSpec, failedSubscriptions map[eventingduckv1.SubscriberSpec]error) error {
+	for f, e := range failedSubscriptions {
+		if f.UID == sub.UID && f.Generation == sub.Generation {
+			return e
+		}
+	}
+	return nil
+}
+
+func (r *Reconciler) patchSubscriberStatus(ctx context.Context, nc *v1beta1.NatssChannel, failedSubscriptions map[eventingduckv1.SubscriberSpec]error) error {
+	after := nc.DeepCopy()
+
+	after.Status.SubscribableStatus = r.createSubscribableStatus(after.Spec.Subscribers, failedSubscriptions)
+	jsonPatch, err := duck.CreatePatch(nc, after)
+	if err != nil {
+		return fmt.Errorf("creating JSON patch: %w", err)
+	}
+	// If there is nothing to patch, we are good, just return.
+	// Empty patch is [], hence we check for that.
+	if len(jsonPatch) == 0 {
+		return nil
+	}
+
+	patch, err := jsonPatch.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("marshaling JSON patch: %w", err)
+	}
+	patched, err := r.natssClientSet.MessagingV1beta1().NatssChannels(nc.Namespace).Patch(ctx, nc.Name, types.JSONPatchType, patch, metav1.PatchOptions{}, "status")
+	if err != nil {
+		return fmt.Errorf("Failed patching: %w", err)
+	}
+	logging.FromContext(ctx).Debugw("Patched resource", zap.Any("patch", patch), zap.Any("patched", patched))
+	return nil
 }
 
 func toChannel(natssChannel *v1beta1.NatssChannel) *messagingv1.Channel {
