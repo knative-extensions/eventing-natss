@@ -39,7 +39,7 @@ func (s *DispatcherDoNothing) Start(_ context.Context) error {
 	return nil
 }
 
-func (s *DispatcherDoNothing) UpdateSubscriptions(_ context.Context, _ *messagingv1.Channel, _ bool) (map[eventingduckv1.SubscriberSpec]error, error) {
+func (s *DispatcherDoNothing) UpdateSubscriptions(ctx context.Context, name, ns string, subscriptions []eventingduckv1.SubscriberSpec, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error) {
 	return nil, nil
 }
 
@@ -62,9 +62,9 @@ func (s *DispatcherFailNatssSubscription) Start(_ context.Context) error {
 }
 
 // UpdateSubscriptions returns a failed natss subscription
-func (s *DispatcherFailNatssSubscription) UpdateSubscriptions(_ context.Context, channel *messagingv1.Channel, _ bool) (map[eventingduckv1.SubscriberSpec]error, error) {
-	failedSubscriptions := make(map[eventingduckv1.SubscriberSpec]error, len(channel.Spec.Subscribers))
-	for _, sub := range channel.Spec.Subscribers {
+	func (s *DispatcherFailNatssSubscription) UpdateSubscriptions(ctx context.Context, name, ns string, subscriptions []eventingduckv1.SubscriberSpec, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error) {
+	failedSubscriptions := make(map[eventingduckv1.SubscriberSpec]error, len(subscriptions))
+	for _, sub := range subscriptions {
 		ss := eventingduckv1.SubscriberSpec{
 			UID:           sub.UID,
 			Generation:    sub.Generation,
@@ -72,7 +72,6 @@ func (s *DispatcherFailNatssSubscription) UpdateSubscriptions(_ context.Context,
 			ReplyURI:      sub.ReplyURI,
 			Delivery:      sub.Delivery,
 		}
-
 		failedSubscriptions[ss] = errors.New("ups")
 	}
 	return failedSubscriptions, nil
