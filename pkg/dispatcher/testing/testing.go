@@ -62,7 +62,7 @@ func (s *DispatcherFailNatssSubscription) Start(_ context.Context) error {
 }
 
 // UpdateSubscriptions returns a failed natss subscription
-	func (s *DispatcherFailNatssSubscription) UpdateSubscriptions(ctx context.Context, name, ns string, subscriptions []eventingduckv1.SubscriberSpec, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error) {
+func (s *DispatcherFailNatssSubscription) UpdateSubscriptions(ctx context.Context, name, ns string, subscriptions []eventingduckv1.SubscriberSpec, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error) {
 	failedSubscriptions := make(map[eventingduckv1.SubscriberSpec]error, len(subscriptions))
 	for _, sub := range subscriptions {
 		ss := eventingduckv1.SubscriberSpec{

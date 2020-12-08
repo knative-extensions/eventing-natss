@@ -22,15 +22,13 @@ import (
 	"os"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/types"
-	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
-	"knative.dev/pkg/apis"
-	"knative.dev/pkg/ptr"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	clientgotesting "k8s.io/client-go/testing"
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
+	"knative.dev/pkg/apis"
 	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
 	_ "knative.dev/pkg/client/injection/kube/informers/core/v1/service/fake"
 	"knative.dev/pkg/configmap"
@@ -57,38 +55,21 @@ const (
 	testNS = "test-namespace"
 	ncName = "test-nc"
 
-	twoSubscriberPatch                = `[{"op":"add","path":"/status/subscribers","value":[{"observedGeneration":1,"ready":"True","uid":"2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1"},{"observedGeneration":2,"ready":"True","uid":"34c5aec8-deb6-11e8-9f32-f2801f1b9fd1"}]}]`
-	oneSubscriberPatch                = `[{"op":"add","path":"/status/subscribers","value":[{"observedGeneration":1,"ready":"True","uid":"2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1"}]}]`
-	oneSubscriberRemovedOneAddedPatch = `[{"op":"add","path":"/status/subscribers/2","value":{"observedGeneration":2,"ready":"True","uid":"34c5aec8-deb6-11e8-9f32-f2801f1b9fd1"}},{"op":"remove","path":"/status/subscribers/0"}]`
-	twoSubscriberPatchFailed          = `[{"op":"add","path":"/status/subscribers","value":[{"message":"ups","observedGeneration":1,"ready":"False","uid":"2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1"},{"message":"ups","observedGeneration":2,"ready":"False","uid":"34c5aec8-deb6-11e8-9f32-f2801f1b9fd1"}]}]`
+	twoSubscriberPatch       = `[{"op":"add","path":"/status/subscribers","value":[{"observedGeneration":1,"ready":"True","uid":"2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1"},{"observedGeneration":2,"ready":"True","uid":"34c5aec8-deb6-11e8-9f32-f2801f1b9fd1"}]}]`
+	twoSubscriberPatchFailed = `[{"op":"add","path":"/status/subscribers","value":[{"message":"ups","observedGeneration":1,"ready":"False","uid":"2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1"},{"message":"ups","observedGeneration":2,"ready":"False","uid":"34c5aec8-deb6-11e8-9f32-f2801f1b9fd1"}]}]`
 )
 
 var (
-	linear      = eventingduckv1.BackoffPolicyLinear
-	exponential = eventingduckv1.BackoffPolicyExponential
-
 	subscriber1UID        = types.UID("2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1")
 	subscriber2UID        = types.UID("34c5aec8-deb6-11e8-9f32-f2801f1b9fd1")
-	subscriber3UID        = types.UID("43995566-deb6-11e8-9f32-f2801f1b9fd1")
 	subscriber1Generation = int64(1)
 	subscriber2Generation = int64(2)
-	subscriber3Generation = int64(2)
 
 	subscriber1 = eventingduckv1.SubscriberSpec{
 		UID:           subscriber1UID,
 		Generation:    subscriber1Generation,
 		SubscriberURI: apis.HTTP("call1"),
 		ReplyURI:      apis.HTTP("sink2"),
-	}
-	subscriber1WithLinearRetry = eventingduckv1.SubscriberSpec{
-		UID:           subscriber1UID,
-		Generation:    subscriber1Generation,
-		SubscriberURI: apis.HTTP("call1"),
-		ReplyURI:      apis.HTTP("sink2"),
-		Delivery: &eventingduckv1.DeliverySpec{
-			Retry:         ptr.Int32(3),
-			BackoffPolicy: &linear,
-		},
 	}
 
 	subscriber2 = eventingduckv1.SubscriberSpec{
@@ -97,13 +78,6 @@ var (
 		SubscriberURI: apis.HTTP("call2"),
 		ReplyURI:      apis.HTTP("sink2"),
 	}
-	subscriber3 = eventingduckv1.SubscriberSpec{
-		UID:           subscriber3UID,
-		Generation:    subscriber3Generation,
-		SubscriberURI: apis.HTTP("call3"),
-		ReplyURI:      apis.HTTP("sink2"),
-	}
-
 	subscribers = []eventingduckv1.SubscriberSpec{subscriber1, subscriber2}
 )
 

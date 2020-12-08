@@ -14,12 +14,13 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.6.0 // indirect
 	go.uber.org/zap v1.16.0
-	k8s.io/api v0.18.8
-	k8s.io/apimachinery v0.18.8
+	k8s.io/api v0.18.12
+	k8s.io/apimachinery v0.18.12
 	k8s.io/client-go v11.0.1-0.20190805182717-6502b5e7b1b5+incompatible
 	knative.dev/eventing v0.19.0
-	knative.dev/hack v0.0.0-20201103151104-3d5abc3a0075
-	knative.dev/pkg v0.0.0-20201103163404-5514ab0c1fdf
+	knative.dev/hack v0.0.0-20201118155651-b31d3bb6bff9
+	knative.dev/pkg v0.0.0-20201117221452-0fccc54273ed
+	knative.dev/reconciler-test v0.0.0-20201124190335-83a44efcdfef
 )
 
 replace (
