@@ -35,7 +35,6 @@ import (
 	sourcesv1alpha1 "knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1alpha1"
 	sourcesv1alpha2 "knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1alpha2"
 	sourcesv1beta1 "knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta1"
-	sourcesv1beta2 "knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta2"
 )
 
 type Interface interface {
@@ -50,7 +49,6 @@ type Interface interface {
 	SourcesV1alpha1() sourcesv1alpha1.SourcesV1alpha1Interface
 	SourcesV1alpha2() sourcesv1alpha2.SourcesV1alpha2Interface
 	SourcesV1beta1() sourcesv1beta1.SourcesV1beta1Interface
-	SourcesV1beta2() sourcesv1beta2.SourcesV1beta2Interface
 	SourcesV1() sourcesv1.SourcesV1Interface
 }
 
@@ -68,7 +66,6 @@ type Clientset struct {
 	sourcesV1alpha1  *sourcesv1alpha1.SourcesV1alpha1Client
 	sourcesV1alpha2  *sourcesv1alpha2.SourcesV1alpha2Client
 	sourcesV1beta1   *sourcesv1beta1.SourcesV1beta1Client
-	sourcesV1beta2   *sourcesv1beta2.SourcesV1beta2Client
 	sourcesV1        *sourcesv1.SourcesV1Client
 }
 
@@ -120,11 +117,6 @@ func (c *Clientset) SourcesV1alpha2() sourcesv1alpha2.SourcesV1alpha2Interface {
 // SourcesV1beta1 retrieves the SourcesV1beta1Client
 func (c *Clientset) SourcesV1beta1() sourcesv1beta1.SourcesV1beta1Interface {
 	return c.sourcesV1beta1
-}
-
-// SourcesV1beta2 retrieves the SourcesV1beta2Client
-func (c *Clientset) SourcesV1beta2() sourcesv1beta2.SourcesV1beta2Interface {
-	return c.sourcesV1beta2
 }
 
 // SourcesV1 retrieves the SourcesV1Client
@@ -193,10 +185,6 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 	if err != nil {
 		return nil, err
 	}
-	cs.sourcesV1beta2, err = sourcesv1beta2.NewForConfig(&configShallowCopy)
-	if err != nil {
-		return nil, err
-	}
 	cs.sourcesV1, err = sourcesv1.NewForConfig(&configShallowCopy)
 	if err != nil {
 		return nil, err
@@ -223,7 +211,6 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 	cs.sourcesV1alpha1 = sourcesv1alpha1.NewForConfigOrDie(c)
 	cs.sourcesV1alpha2 = sourcesv1alpha2.NewForConfigOrDie(c)
 	cs.sourcesV1beta1 = sourcesv1beta1.NewForConfigOrDie(c)
-	cs.sourcesV1beta2 = sourcesv1beta2.NewForConfigOrDie(c)
 	cs.sourcesV1 = sourcesv1.NewForConfigOrDie(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClientForConfigOrDie(c)
@@ -243,7 +230,6 @@ func New(c rest.Interface) *Clientset {
 	cs.sourcesV1alpha1 = sourcesv1alpha1.New(c)
 	cs.sourcesV1alpha2 = sourcesv1alpha2.New(c)
 	cs.sourcesV1beta1 = sourcesv1beta1.New(c)
-	cs.sourcesV1beta2 = sourcesv1beta2.New(c)
 	cs.sourcesV1 = sourcesv1.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
