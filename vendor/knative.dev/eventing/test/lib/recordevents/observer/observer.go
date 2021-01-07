@@ -14,11 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package receiver
+package observer
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -35,23 +34,23 @@ import (
 	"knative.dev/eventing/test/lib/recordevents"
 )
 
-// Receiver is the entry point for sinking events into the event log.
-type Receiver struct {
-	// Name is the name of this Receiver, used to filter if multiple observers.
+// Observer is the entry point for sinking events into the event log.
+type Observer struct {
+
+	// Name is the name of this Observer, used to filter if multiple observers.
 	Name string
-	// EventLogs is the list of EventLogger implementors to vent observed events.
-	EventLogs *recordevents.EventLogs
+	// EventLogs is the list of EventLog implementors to vent observed events.
+	EventLogs recordevents.EventLogs
 
 	ctx       context.Context
 	seq       uint64
-	dropSeq   uint64
 	replyFunc func(context.Context, http.ResponseWriter, recordevents.EventInfo)
 	counter   *dropevents.CounterHandler
 }
 
 type envConfig struct {
-	// ReceiverName is used to identify this instance of the receiver.
-	ReceiverName string `envconfig:"POD_NAME" default:"receiver-default" required:"true"`
+	// ObserverName is used to identify this instance of the observer.
+	ObserverName string `envconfig:"POD_NAME" default:"observer-default" required:"true"`
 
 	// Reply is used to define if the observer should reply back
 	Reply bool `envconfig:"REPLY" default:"false" required:"false"`
@@ -77,20 +76,20 @@ type envConfig struct {
 	SkipCounter uint64 `envconfig:"SKIP_COUNTER" default:"0" required:"false"`
 }
 
-func NewFromEnv(ctx context.Context, eventLogs *recordevents.EventLogs) *Receiver {
+func NewFromEnv(ctx context.Context, eventLogs ...recordevents.EventLog) *Observer {
 	var env envConfig
 	if err := envconfig.Process("", &env); err != nil {
 		logging.FromContext(ctx).Fatal("Failed to process env var", err)
 	}
 
-	logging.FromContext(ctx).Infof("Receiver environment configuration: %+v", env)
+	logging.FromContext(ctx).Infof("Observer environment configuration: %+v", env)
 
 	var replyFunc func(context.Context, http.ResponseWriter, recordevents.EventInfo)
 	if env.Reply {
-		logging.FromContext(ctx).Info("Receiver will reply with an event")
+		logging.FromContext(ctx).Info("Observer will reply with an event")
 		replyFunc = ReplyTransformerFunc(env.ReplyEventType, env.ReplyEventSource, env.ReplyEventData, env.ReplyAppendData)
 	} else {
-		logging.FromContext(ctx).Info("Receiver won't reply with an event")
+		logging.FromContext(ctx).Info("Observer won't reply with an event")
 		replyFunc = NoOpReply
 	}
 	var counter *dropevents.CounterHandler
@@ -106,8 +105,8 @@ func NewFromEnv(ctx context.Context, eventLogs *recordevents.EventLogs) *Receive
 		}
 	}
 
-	return &Receiver{
-		Name:      env.ReceiverName,
+	return &Observer{
+		Name:      env.ObserverName,
 		EventLogs: eventLogs,
 		ctx:       ctx,
 		replyFunc: replyFunc,
@@ -117,7 +116,7 @@ func NewFromEnv(ctx context.Context, eventLogs *recordevents.EventLogs) *Receive
 
 // Start will create the CloudEvents client and start listening for inbound
 // HTTP requests. This is a is a blocking call.
-func (o *Receiver) Start(ctx context.Context, handlerFuncs ...func(handler http.Handler) http.Handler) error {
+func (o *Observer) Start(ctx context.Context, handlerFuncs ...func(handler http.Handler) http.Handler) error {
 	var handler http.Handler = o
 
 	for _, dec := range handlerFuncs {
@@ -126,23 +125,20 @@ func (o *Receiver) Start(ctx context.Context, handlerFuncs ...func(handler http.
 
 	server := &http.Server{Addr: ":8080", Handler: handler}
 
-	var err error
 	go func() {
-		err = server.ListenAndServe()
+		if err := server.ListenAndServe(); err != nil {
+			logging.FromContext(ctx).Fatal("Error while starting the HTTP server", err)
+		}
 	}()
 
 	<-ctx.Done()
-
-	if err != nil {
-		return fmt.Errorf("error while starting the HTTP server: %w", err)
-	}
 
 	logging.FromContext(ctx).Info("Closing the HTTP server")
 
 	return server.Close()
 }
 
-func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+func (o *Observer) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	m := cloudeventshttp.NewMessageFromHttpRequest(request)
 	defer m.Finish(nil)
 
@@ -164,15 +160,6 @@ func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 	}
 
 	shouldSkip := o.counter.Skip()
-	var s uint64
-	var kind recordevents.EventKind
-	if shouldSkip {
-		kind = recordevents.EventRejected
-		s = atomic.AddUint64(&o.dropSeq, 1)
-	} else {
-		kind = recordevents.EventReceived
-		s = atomic.AddUint64(&o.seq, 1)
-	}
 
 	eventInfo := recordevents.EventInfo{
 		Error:       eventErrStr,
@@ -181,11 +168,19 @@ func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 		Origin:      request.RemoteAddr,
 		Observer:    o.Name,
 		Time:        time.Now(),
-		Sequence:    s,
-		Kind:        kind,
+		Sequence:    atomic.AddUint64(&o.seq, 1),
+		Dropped:     shouldSkip,
 	}
 
-	if err := o.EventLogs.Vent(eventInfo); err != nil {
+	// We still want to emit the event to make it easier to see what we had oberved, but
+	// we want to transform it a little bit before emitting so that it does not count
+	// as the real event that we want to emit.
+	if shouldSkip {
+		eventInfo.Event.SetType("dropped-" + eventInfo.Event.Type())
+	}
+
+	err := o.EventLogs.Vent(eventInfo)
+	if err != nil {
 		logging.FromContext(o.ctx).Fatalw("Error while venting the recorded event", zap.Error(err))
 	}
 

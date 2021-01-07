@@ -1,25 +1,26 @@
 /*
-Copyright 2020 The Knative Authors
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+ * Copyright 2020 The Knative Authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package channel
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	"knative.dev/pkg/configmap"
+	knconfigmap "knative.dev/pkg/configmap"
 
+	"knative.dev/eventing/pkg/configmap"
 	"knative.dev/eventing/pkg/kncloudevents"
 )
 
@@ -49,33 +50,37 @@ type EventDispatcherConfig struct {
 
 // NewEventDisPatcherConfigFromConfigMap converts a k8s configmap into EventDispatcherConfig.
 func NewEventDisPatcherConfigFromConfigMap(config *corev1.ConfigMap) (EventDispatcherConfig, error) {
-	c := EventDispatcherConfig{
-		ConnectionArgs: kncloudevents.ConnectionArgs{
-			MaxIdleConns:        defaultMaxIdleConnections,
-			MaxIdleConnsPerHost: defaultMaxIdleConnectionsPerHost,
+	c := EventDispatcherConfig{}
+	requests := []configmap.ReadIntRequest{
+		{
+			Key:          "MaxIdleConnections",
+			DefaultValue: defaultMaxIdleConnections,
+			Field:        &c.MaxIdleConns,
+		},
+		{
+			Key:          "MaxIdleConnectionsPerHost",
+			DefaultValue: defaultMaxIdleConnectionsPerHost,
+			Field:        &c.MaxIdleConnsPerHost,
 		},
 	}
-	err := configmap.Parse(
-		config.Data,
-		configmap.AsInt("MaxIdleConnections", &c.MaxIdleConns),
-		configmap.AsInt("MaxIdleConnectionsPerHost", &c.MaxIdleConnsPerHost))
+	err := configmap.ReadInt(requests, config)
 	return c, err
 }
 
 // EventDispatcherConfigStore loads/unloads untyped configuration from configmap.
 type EventDispatcherConfigStore struct {
-	logger configmap.Logger
-	*configmap.UntypedStore
+	logger knconfigmap.Logger
+	*knconfigmap.UntypedStore
 }
 
 // NewEventDispatcherConfigStore creates a configuration Store
-func NewEventDispatcherConfigStore(logger configmap.Logger, onAfterStore ...func(name string, value interface{})) *EventDispatcherConfigStore {
+func NewEventDispatcherConfigStore(logger knconfigmap.Logger, onAfterStore ...func(name string, value interface{})) *EventDispatcherConfigStore {
 	return &EventDispatcherConfigStore{
 		logger: logger,
-		UntypedStore: configmap.NewUntypedStore(
+		UntypedStore: knconfigmap.NewUntypedStore(
 			"event_dispatcher",
 			logger,
-			configmap.Constructors{
+			knconfigmap.Constructors{
 				EventDispatcherConfigMap: NewEventDisPatcherConfigFromConfigMap,
 			},
 			onAfterStore...,
