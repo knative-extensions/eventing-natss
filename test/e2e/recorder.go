@@ -35,4 +35,3 @@ func RecorderFeature() *feature.Feature {
 
 	return f
 }
-
