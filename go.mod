@@ -16,7 +16,6 @@ require (
 	go.uber.org/zap v1.16.0
 	k8s.io/api v0.18.12
 	k8s.io/apimachinery v0.18.12
-	k8s.io/apiserver v0.18.12 // indirect
 	k8s.io/client-go v11.0.1-0.20190805182717-6502b5e7b1b5+incompatible
 	knative.dev/eventing v0.19.4
 	knative.dev/hack v0.0.0-20201214230143-4ed1ecb8db24
