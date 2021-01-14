@@ -103,8 +103,6 @@ github.com/emicklei/go-restful
 github.com/emicklei/go-restful/log
 # github.com/evanphx/json-patch v4.5.0+incompatible
 github.com/evanphx/json-patch
-# github.com/ghodss/yaml v1.0.0
-github.com/ghodss/yaml
 # github.com/go-logr/logr v0.1.0
 github.com/go-logr/logr
 # github.com/go-openapi/jsonpointer v0.19.3
@@ -890,7 +888,7 @@ k8s.io/utils/buffer
 k8s.io/utils/integer
 k8s.io/utils/pointer
 k8s.io/utils/trace
-# knative.dev/eventing v0.20.0
+# knative.dev/eventing v0.20.1-0.20210113192431-1897543ff672
 ## explicit
 knative.dev/eventing/pkg/apis/config
 knative.dev/eventing/pkg/apis/configs
@@ -958,10 +956,10 @@ knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/heartbeats
 knative.dev/eventing/test/test_images/performance
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20201214230143-4ed1ecb8db24
+# knative.dev/hack v0.0.0-20210112093330-d946d2557383
 ## explicit
 knative.dev/hack
-# knative.dev/pkg v0.0.0-20210107022335-51c72e24c179
+# knative.dev/pkg v0.0.0-20210112143930-acbf2af596cf
 ## explicit
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
@@ -1042,7 +1040,7 @@ knative.dev/pkg/webhook/certificates/resources
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20210108100436-db4d65735605
+# knative.dev/reconciler-test v0.0.0-20210111135237-9b251467ccb6
 ## explicit
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
