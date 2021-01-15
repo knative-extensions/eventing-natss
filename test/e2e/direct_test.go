@@ -50,7 +50,7 @@ func DirectTestBroker() *feature.Feature {
 
 	f.Setup("install test resources", direct.Install())
 	f.Alpha("MT broker with natss goes ready").Must("goes ready", AllGoReady)
-	f.Alpha("RabbitMQ source").
+	f.Alpha("MT broker with natss delivers events").
 		Must("the recorder received all sent events within the time",
 			func(ctx context.Context, t *testing.T) {
 				// TODO: Use constraint matching instead of just counting number of events.
