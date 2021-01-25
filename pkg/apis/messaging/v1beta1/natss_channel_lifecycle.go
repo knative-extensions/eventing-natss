@@ -62,6 +62,11 @@ func (*NatssChannel) GetConditionSet() apis.ConditionSet {
 	return conditionSet
 }
 
+// GetUntypedSpec returns the spec of the InMemoryChannel.
+func (c *NatssChannel) GetUntypedSpec() interface{} {
+	return c.Spec
+}
+
 // GetCondition returns the condition currently associated with the given type, or nil.
 func (cs *NatssChannelStatus) GetCondition(t apis.ConditionType) *apis.Condition {
 	return conditionSet.Manage(cs).GetCondition(t)

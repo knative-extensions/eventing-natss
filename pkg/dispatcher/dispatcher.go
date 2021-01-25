@@ -79,7 +79,7 @@ type SubscriptionsSupervisor struct {
 
 type NatssDispatcher interface {
 	Start(ctx context.Context) error
-	UpdateSubscriptions(ctx context.Context, channel *messagingv1.Channel, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error)
+	UpdateSubscriptions(ctx context.Context, name, ns string, subscriptions []eventingduckv1.SubscriberSpec, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error)
 	ProcessChannels(ctx context.Context, chanList []messagingv1.Channel) error
 }
 
@@ -218,15 +218,16 @@ func (s *SubscriptionsSupervisor) Connect(ctx context.Context) {
 // UpdateSubscriptions creates/deletes the natss subscriptions based on channel.Spec.Subscribable.Subscribers
 // Return type:map[eventingduck.SubscriberSpec]error --> Returns a map of subscriberSpec that failed with the value=error encountered.
 // Ignore the value in case error != nil
-func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, channel *messagingv1.Channel, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error) {
+func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, name, ns string, subscribers []eventingduckv1.SubscriberSpec, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error) {
 	s.subscriptionsMux.Lock()
 	defer s.subscriptionsMux.Unlock()
 
 	failedToSubscribe := make(map[eventingduckv1.SubscriberSpec]error)
-	cRef := eventingchannels.ChannelReference{Namespace: channel.Namespace, Name: channel.Name}
-	s.logger.Info("Update subscriptions", zap.String("cRef", cRef.String()), zap.String("subscribable", fmt.Sprintf("%v", channel)), zap.Bool("isFinalizer", isFinalizer))
-	if channel.Spec.Subscribers == nil || isFinalizer {
+	cRef := eventingchannels.ChannelReference{Namespace: ns, Name: name}
+	s.logger.Info("Update subscriptions", zap.String("cRef", cRef.String()), zap.String("subscribable", fmt.Sprintf("%v", subscribers)), zap.Bool("isFinalizer", isFinalizer))
+	if len(subscribers) == 0 || isFinalizer {
 		s.logger.Sugar().Infof("Empty subscriptions for channel Ref: %v; unsubscribe all active subscriptions, if any", cRef)
+
 		chMap, ok := s.subscriptions[cRef]
 		if !ok {
 			// nothing to do
@@ -240,7 +241,6 @@ func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, chann
 		return failedToSubscribe, nil
 	}
 
-	subscriptions := channel.Spec.Subscribers
 	activeSubs := make(map[types.UID]bool) // it's logically a set
 
 	chMap, ok := s.subscriptions[cRef]
@@ -249,7 +249,7 @@ func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, chann
 		s.subscriptions[cRef] = chMap
 	}
 
-	for _, sub := range subscriptions {
+	for _, sub := range subscribers {
 		// check if the subscription already exist and do nothing in this case
 		subRef := newSubscriptionReference(sub)
 		if _, ok := chMap[subRef.UID]; ok {
