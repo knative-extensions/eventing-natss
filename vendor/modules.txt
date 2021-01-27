@@ -83,6 +83,7 @@ github.com/cloudevents/sdk-go/v2
 github.com/cloudevents/sdk-go/v2/binding
 github.com/cloudevents/sdk-go/v2/binding/format
 github.com/cloudevents/sdk-go/v2/binding/spec
+github.com/cloudevents/sdk-go/v2/binding/transformer
 github.com/cloudevents/sdk-go/v2/client
 github.com/cloudevents/sdk-go/v2/context
 github.com/cloudevents/sdk-go/v2/event
@@ -892,7 +893,7 @@ k8s.io/utils/buffer
 k8s.io/utils/integer
 k8s.io/utils/pointer
 k8s.io/utils/trace
-# knative.dev/eventing v0.20.1-0.20210126110930-81ce89802f86
+# knative.dev/eventing v0.20.1-0.20210127134430-ea452b5b6655
 ## explicit
 knative.dev/eventing/pkg/apis/config
 knative.dev/eventing/pkg/apis/configs
@@ -917,6 +918,7 @@ knative.dev/eventing/pkg/apis/sources/v1alpha2
 knative.dev/eventing/pkg/apis/sources/v1beta1
 knative.dev/eventing/pkg/apis/sources/v1beta2
 knative.dev/eventing/pkg/channel
+knative.dev/eventing/pkg/channel/attributes
 knative.dev/eventing/pkg/client/clientset/versioned
 knative.dev/eventing/pkg/client/clientset/versioned/fake
 knative.dev/eventing/pkg/client/clientset/versioned/scheme
@@ -1045,7 +1047,7 @@ knative.dev/pkg/webhook/certificates/resources
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20210125215930-c46f01f1a397
+# knative.dev/reconciler-test v0.0.0-20210127092330-fa758f87a452
 ## explicit
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
