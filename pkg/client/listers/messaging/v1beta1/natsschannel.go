@@ -26,8 +26,10 @@ import (
 )
 
 // NatssChannelLister helps list NatssChannels.
+// All objects returned here must be treated as read-only.
 type NatssChannelLister interface {
 	// List lists all NatssChannels in the indexer.
+	// Objects returned here must be treated as read-only.
 	List(selector labels.Selector) (ret []*v1beta1.NatssChannel, err error)
 	// NatssChannels returns an object that can list and get NatssChannels.
 	NatssChannels(namespace string) NatssChannelNamespaceLister
@@ -58,10 +60,13 @@ func (s *natssChannelLister) NatssChannels(namespace string) NatssChannelNamespa
 }
 
 // NatssChannelNamespaceLister helps list and get NatssChannels.
+// All objects returned here must be treated as read-only.
 type NatssChannelNamespaceLister interface {
 	// List lists all NatssChannels in the indexer for a given namespace.
+	// Objects returned here must be treated as read-only.
 	List(selector labels.Selector) (ret []*v1beta1.NatssChannel, err error)
 	// Get retrieves the NatssChannel from the indexer for a given namespace and name.
+	// Objects returned here must be treated as read-only.
 	Get(name string) (*v1beta1.NatssChannel, error)
 	NatssChannelNamespaceListerExpansion
 }

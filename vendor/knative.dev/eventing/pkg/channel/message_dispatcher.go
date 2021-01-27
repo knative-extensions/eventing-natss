@@ -19,7 +19,6 @@ package channel
 import (
 	"context"
 	"fmt"
-	"io"
 	nethttp "net/http"
 	"net/url"
 	"time"
@@ -30,7 +29,7 @@ import (
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"knative.dev/eventing/pkg/channel/attributes"
+
 	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/eventing/pkg/tracing"
 	"knative.dev/eventing/pkg/utils"
@@ -68,7 +67,6 @@ type MessageDispatcherImpl struct {
 type DispatchExecutionInfo struct {
 	Time         time.Duration
 	ResponseCode int
-	ResponseBody []byte
 }
 
 // NewMessageDispatcherFromConfig creates a new Message dispatcher based on config.
@@ -120,10 +118,9 @@ func (d *MessageDispatcherImpl) DispatchMessageWithRetries(ctx context.Context, 
 
 		ctx, responseMessage, responseAdditionalHeaders, dispatchExecutionInfo, err = d.executeRequest(ctx, destination, message, additionalHeaders, retriesConfig)
 		if err != nil {
-			// If DeadLetter is configured, then send original message with knative error extensions
+			// DeadLetter is configured, send the message to it
 			if deadLetter != nil {
-				transformers := d.dispatchExecutionInfoTransformers(dispatchExecutionInfo)
-				_, deadLetterResponse, _, dispatchExecutionInfo, deadLetterErr := d.executeRequest(ctx, deadLetter, message, additionalHeaders, retriesConfig, transformers...)
+				_, deadLetterResponse, _, dispatchExecutionInfo, deadLetterErr := d.executeRequest(ctx, deadLetter, message, additionalHeaders, retriesConfig)
 				if deadLetterErr != nil {
 					return dispatchExecutionInfo, fmt.Errorf("unable to complete request to either %s (%v) or %s (%v)", destination, err, deadLetter, deadLetterErr)
 				}
@@ -156,10 +153,9 @@ func (d *MessageDispatcherImpl) DispatchMessageWithRetries(ctx context.Context, 
 
 	ctx, responseResponseMessage, _, dispatchExecutionInfo, err := d.executeRequest(ctx, reply, responseMessage, responseAdditionalHeaders, retriesConfig)
 	if err != nil {
-		// If DeadLetter is configured, then send original message with knative error extensions
+		// DeadLetter is configured, send the message to it
 		if deadLetter != nil {
-			transformers := d.dispatchExecutionInfoTransformers(dispatchExecutionInfo)
-			_, deadLetterResponse, _, dispatchExecutionInfo, deadLetterErr := d.executeRequest(ctx, deadLetter, message, responseAdditionalHeaders, retriesConfig, transformers...)
+			_, deadLetterResponse, _, dispatchExecutionInfo, deadLetterErr := d.executeRequest(ctx, deadLetter, message, responseAdditionalHeaders, retriesConfig)
 			if deadLetterErr != nil {
 				return dispatchExecutionInfo, fmt.Errorf("failed to forward reply to %s (%v) and failed to send it to the dead letter sink %s (%v)", reply, err, deadLetter, deadLetterErr)
 			}
@@ -179,13 +175,7 @@ func (d *MessageDispatcherImpl) DispatchMessageWithRetries(ctx context.Context, 
 	return dispatchExecutionInfo, nil
 }
 
-func (d *MessageDispatcherImpl) executeRequest(ctx context.Context,
-	url *url.URL,
-	message cloudevents.Message,
-	additionalHeaders nethttp.Header,
-	configs *kncloudevents.RetryConfig,
-	transformers ...binding.Transformer) (context.Context, cloudevents.Message, nethttp.Header, *DispatchExecutionInfo, error) {
-
+func (d *MessageDispatcherImpl) executeRequest(ctx context.Context, url *url.URL, message cloudevents.Message, additionalHeaders nethttp.Header, configs *kncloudevents.RetryConfig) (context.Context, cloudevents.Message, nethttp.Header, *DispatchExecutionInfo, error) {
 	d.logger.Debug("Dispatching event", zap.String("url", url.String()))
 
 	execInfo := DispatchExecutionInfo{
@@ -201,10 +191,10 @@ func (d *MessageDispatcherImpl) executeRequest(ctx context.Context,
 	}
 
 	if span.IsRecordingEvents() {
-		transformers = append(transformers, tracing.PopulateSpan(span, url.String()))
+		err = kncloudevents.WriteHTTPRequestWithAdditionalHeaders(ctx, message, req, additionalHeaders, tracing.PopulateSpan(span, url.String()))
+	} else {
+		err = kncloudevents.WriteHTTPRequestWithAdditionalHeaders(ctx, message, req, additionalHeaders)
 	}
-
-	err = kncloudevents.WriteHTTPRequestWithAdditionalHeaders(ctx, message, req, additionalHeaders, transformers...)
 	if err != nil {
 		return ctx, nil, nil, &execInfo, err
 	}
@@ -215,7 +205,6 @@ func (d *MessageDispatcherImpl) executeRequest(ctx context.Context,
 	if err != nil {
 		execInfo.Time = dispatchTime
 		execInfo.ResponseCode = nethttp.StatusInternalServerError
-		execInfo.ResponseBody = []byte(fmt.Sprintf("dispatch error: %s", err.Error()))
 		return ctx, nil, nil, &execInfo, err
 	}
 
@@ -225,15 +214,6 @@ func (d *MessageDispatcherImpl) executeRequest(ctx context.Context,
 	execInfo.Time = dispatchTime
 
 	if isFailure(response.StatusCode) {
-		// Read response body into execInfo for failures
-		body := make([]byte, attributes.KnativeErrorDataExtensionMaxLength)
-		readLen, err := response.Body.Read(body)
-		if err != nil && err != io.EOF {
-			d.logger.Error("failed to read response body into DispatchExecutionInfo", zap.Error(err))
-			execInfo.ResponseBody = []byte(fmt.Sprintf("dispatch error: %s", err.Error()))
-		} else {
-			execInfo.ResponseBody = body[:readLen]
-		}
 		_ = response.Body.Close()
 		// Reject non-successful responses.
 		return ctx, nil, nil, &execInfo, fmt.Errorf("unexpected HTTP response, expected 2xx, got %d", response.StatusCode)
@@ -260,11 +240,6 @@ func (d *MessageDispatcherImpl) sanitizeURL(u *url.URL) *url.URL {
 		Host:   u.Host,
 		Path:   "/",
 	}
-}
-
-// dispatchExecutionTransformer returns Transformers based on the specified DispatchExecutionInfo
-func (d *MessageDispatcherImpl) dispatchExecutionInfoTransformers(dispatchExecutionInfo *DispatchExecutionInfo) binding.Transformers {
-	return attributes.KnativeErrorTransformers(dispatchExecutionInfo.ResponseCode, string(dispatchExecutionInfo.ResponseBody))
 }
 
 // isFailure returns true if the status code is not a successful HTTP status.
