@@ -18,6 +18,7 @@ package direct
 
 import (
 	"context"
+
 	"knative.dev/reconciler-test/pkg/environment"
 	"knative.dev/reconciler-test/pkg/feature"
 	"knative.dev/reconciler-test/pkg/manifest"
