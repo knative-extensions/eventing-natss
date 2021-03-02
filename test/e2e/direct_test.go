@@ -21,7 +21,6 @@ package e2e
 import (
 	"context"
 	"strings"
-	"testing"
 	"time"
 
 	"knative.dev/eventing-natss/test/e2e/config/direct"
@@ -52,14 +51,14 @@ func DirectTestBroker() *feature.Feature {
 	f.Alpha("MT broker with natss goes ready").Must("goes ready", AllGoReady)
 	f.Alpha("MT broker with natss delivers events").
 		Must("the recorder received all sent events within the time",
-			func(ctx context.Context, t *testing.T) {
+			func(ctx context.Context, t feature.T) {
 				// TODO: Use constraint matching instead of just counting number of events.
 				eventshub.StoreFromContext(ctx, "recorder").AssertAtLeast(5)
 			})
 	return f
 }
 
-func AllGoReady(ctx context.Context, t *testing.T) {
+func AllGoReady(ctx context.Context, t feature.T) {
 	env := environment.FromContext(ctx)
 	for _, ref := range env.References() {
 		if !strings.Contains(ref.APIVersion, "knative.dev") {
