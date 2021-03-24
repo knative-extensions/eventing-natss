@@ -111,7 +111,7 @@ func (mr *MagicGlobalEnvironment) Environment(opts ...EnvOpts) (context.Context,
 		panic(err)
 	}
 
-	namespace := feature.MakeK8sNamePrefix(feature.AppendRandomString("rekt"))
+	namespace := feature.MakeK8sNamePrefix(feature.AppendRandomString("test"))
 
 	env := &MagicEnvironment{
 		c:         mr.c,
@@ -238,6 +238,7 @@ func (mr *MagicEnvironment) Test(ctx context.Context, originalT *testing.T, f *f
 		if internalT.Failed() {
 			skipAssertions = true
 			skipRequirements = true // No need to test other requirements
+			break                   // No need to continue the setup
 		}
 	}
 
