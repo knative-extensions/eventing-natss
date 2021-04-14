@@ -4,7 +4,7 @@ go 1.15
 
 require (
 	github.com/cloudevents/sdk-go/protocol/stan/v2 v2.2.0
-	github.com/cloudevents/sdk-go/v2 v2.2.0
+	github.com/cloudevents/sdk-go/v2 v2.4.0
 	github.com/google/go-cmp v0.5.5
 	github.com/google/uuid v1.2.0
 	github.com/hashicorp/go-uuid v1.0.2 // indirect
@@ -16,8 +16,8 @@ require (
 	k8s.io/api v0.19.7
 	k8s.io/apimachinery v0.19.7
 	k8s.io/client-go v0.19.7
-	knative.dev/eventing v0.22.0
+	knative.dev/eventing v0.22.1-0.20210414081501-1f54d0e1f1d5
 	knative.dev/hack v0.0.0-20210325223819-b6ab329907d3
-	knative.dev/pkg v0.0.0-20210331065221-952fdd90dbb0
-	knative.dev/reconciler-test v0.0.0-20210331073522-b09f3669345a
+	knative.dev/pkg v0.0.0-20210412173742-b51994e3b312
+	knative.dev/reconciler-test v0.0.0-20210414002500-fe2c0060d76e
 )
