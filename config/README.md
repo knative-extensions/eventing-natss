@@ -76,3 +76,13 @@ env:
       fieldRef:
         fieldPath: metadata.namespace
 ```
+
+NATS dispatchers subscriptions can be configured by the following environment variables:
+
+```yaml
+env:
+  - name: ACK_WAIT_MINUTES
+    value: "1"
+  - name: MAX_INFLIGHT
+    value: "1024"
+```

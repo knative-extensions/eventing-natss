@@ -64,10 +64,12 @@ type SubscriptionsSupervisor struct {
 	subscriptionsMux sync.Mutex
 	subscriptions    SubscriptionChannelMapping
 
-	connect   chan struct{}
-	natssURL  string
-	clusterID string
-	clientID  string
+	connect        chan struct{}
+	natssURL       string
+	clusterID      string
+	clientID       string
+	ackWaitMinutes int
+	maxInflight    int
 	// natConnMux is used to protect natssConn and natssConnInProgress during
 	// the transition from not connected to connected states.
 	natssConnMux        sync.Mutex
@@ -84,12 +86,14 @@ type NatssDispatcher interface {
 }
 
 type Args struct {
-	NatssURL  string
-	ClusterID string
-	ClientID  string
-	Cargs     kncloudevents.ConnectionArgs
-	Logger    *zap.Logger
-	Reporter  eventingchannels.StatsReporter
+	NatssURL       string
+	ClusterID      string
+	ClientID       string
+	AckWaitMinutes int
+	MaxInflight    int
+	Cargs          kncloudevents.ConnectionArgs
+	Logger         *zap.Logger
+	Reporter       eventingchannels.StatsReporter
 }
 
 var _ NatssDispatcher = (*SubscriptionsSupervisor)(nil)
@@ -101,13 +105,15 @@ func NewDispatcher(args Args) (NatssDispatcher, error) {
 	}
 
 	d := &SubscriptionsSupervisor{
-		logger:        args.Logger,
-		dispatcher:    eventingchannels.NewMessageDispatcher(args.Logger),
-		subscriptions: make(SubscriptionChannelMapping),
-		connect:       make(chan struct{}, maxElements),
-		natssURL:      args.NatssURL,
-		clusterID:     args.ClusterID,
-		clientID:      args.ClientID,
+		logger:         args.Logger,
+		dispatcher:     eventingchannels.NewMessageDispatcher(args.Logger),
+		subscriptions:  make(SubscriptionChannelMapping),
+		connect:        make(chan struct{}, maxElements),
+		natssURL:       args.NatssURL,
+		clusterID:      args.ClusterID,
+		clientID:       args.ClientID,
+		ackWaitMinutes: args.AckWaitMinutes,
+		maxInflight:    args.MaxInflight,
 	}
 
 	receiver, err := eventingchannels.NewMessageReceiver(
@@ -348,7 +354,7 @@ func (s *SubscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 	}
 
 	subscriber := &natsscloudevents.RegularSubscriber{}
-	natssSub, err := subscriber.Subscribe(*currentNatssConn, ch, mcb, stan.DurableName(sub), stan.SetManualAckMode(), stan.AckWait(1*time.Minute))
+	natssSub, err := subscriber.Subscribe(*currentNatssConn, ch, mcb, stan.DurableName(sub), stan.SetManualAckMode(), stan.AckWait(time.Duration(s.ackWaitMinutes)*time.Minute), stan.MaxInflight(s.maxInflight))
 	if err != nil {
 		s.logger.Error(" Create new NATSS Subscription failed: ", zap.Error(err))
 		if err.Error() == stan.ErrConnectionClosed.Error() {
