@@ -894,7 +894,7 @@ k8s.io/utils/buffer
 k8s.io/utils/integer
 k8s.io/utils/pointer
 k8s.io/utils/trace
-# knative.dev/eventing v0.22.1-0.20210420082335-31cda4cec54b
+# knative.dev/eventing v0.22.1-0.20210511203746-d2431c7aad9d
 ## explicit
 knative.dev/eventing/pkg/apis/config
 knative.dev/eventing/pkg/apis/duck
@@ -910,9 +910,6 @@ knative.dev/eventing/pkg/apis/messaging/v1
 knative.dev/eventing/pkg/apis/sources
 knative.dev/eventing/pkg/apis/sources/config
 knative.dev/eventing/pkg/apis/sources/v1
-knative.dev/eventing/pkg/apis/sources/v1alpha1
-knative.dev/eventing/pkg/apis/sources/v1alpha2
-knative.dev/eventing/pkg/apis/sources/v1beta1
 knative.dev/eventing/pkg/apis/sources/v1beta2
 knative.dev/eventing/pkg/channel
 knative.dev/eventing/pkg/channel/attributes
@@ -929,12 +926,6 @@ knative.dev/eventing/pkg/client/clientset/versioned/typed/messaging/v1
 knative.dev/eventing/pkg/client/clientset/versioned/typed/messaging/v1/fake
 knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1
 knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1/fake
-knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1alpha1
-knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1alpha1/fake
-knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1alpha2
-knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1alpha2/fake
-knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta1
-knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta1/fake
 knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta2
 knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta2/fake
 knative.dev/eventing/pkg/client/injection/client
@@ -954,16 +945,15 @@ knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/heartbeats
 knative.dev/eventing/test/test_images/performance
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20210325223819-b6ab329907d3
+# knative.dev/hack v0.0.0-20210428122153-93ad9129c268
 ## explicit
 knative.dev/hack
-# knative.dev/pkg v0.0.0-20210420053235-1afd04993622
+# knative.dev/pkg v0.0.0-20210510175900-4564797bf3b7
 ## explicit
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
 knative.dev/pkg/apis/duck/ducktypes
 knative.dev/pkg/apis/duck/v1
-knative.dev/pkg/apis/duck/v1alpha1
 knative.dev/pkg/apis/duck/v1beta1
 knative.dev/pkg/changeset
 knative.dev/pkg/client/injection/ducks/duck/v1/addressable
@@ -1038,7 +1028,7 @@ knative.dev/pkg/webhook/certificates/resources
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20210414181401-b0c3de288f3b
+# knative.dev/reconciler-test v0.0.0-20210506205310-ed3c37806817
 ## explicit
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
