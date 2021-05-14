@@ -97,9 +97,11 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	natssConfig := util.GetNatssConfig()
 	reporter := channel.NewStatsReporter(env.ContainerName, kmeta.ChildName(env.PodName, uuid.New().String()))
 	dispatcherArgs := dispatcher.Args{
-		NatssURL:  util.GetDefaultNatssURL(),
-		ClusterID: util.GetDefaultClusterID(),
-		ClientID:  natssConfig.ClientID,
+		NatssURL:       util.GetDefaultNatssURL(),
+		ClusterID:      util.GetDefaultClusterID(),
+		ClientID:       natssConfig.ClientID,
+		AckWaitMinutes: util.GetAckWaitMinutes(),
+		MaxInflight:    util.GetMaxInflight(),
 		Cargs: kncloudevents.ConnectionArgs{
 			MaxIdleConns:        natssConfig.MaxIdleConns,
 			MaxIdleConnsPerHost: natssConfig.MaxIdleConnsPerHost,
