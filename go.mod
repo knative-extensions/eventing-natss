@@ -1,6 +1,6 @@
 module knative.dev/eventing-natss
 
-go 1.15
+go 1.16
 
 require (
 	github.com/cloudevents/sdk-go/protocol/stan/v2 v2.2.0
