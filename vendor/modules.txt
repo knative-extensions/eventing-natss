@@ -956,10 +956,10 @@ knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/heartbeats
 knative.dev/eventing/test/test_images/performance
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20210609124042-e35bcb8f21ec
+# knative.dev/hack v0.0.0-20210610231243-3d4b264d9472
 ## explicit
 knative.dev/hack
-# knative.dev/pkg v0.0.0-20210610171444-c96c7beb09df
+# knative.dev/pkg v0.0.0-20210611022643-8d21ce6c6355
 ## explicit
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
