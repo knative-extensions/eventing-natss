@@ -23,6 +23,7 @@ import (
 
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	cache "k8s.io/client-go/tools/cache"
+	v1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	v1beta1 "knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
 )
 
@@ -52,7 +53,11 @@ func (f *genericInformer) Lister() cache.GenericLister {
 // TODO extend this to unknown resources with a client pool
 func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource) (GenericInformer, error) {
 	switch resource {
-	// Group=messaging.knative.dev, Version=v1beta1
+	// Group=messaging.knative.dev, Version=v1alpha1
+	case v1alpha1.SchemeGroupVersion.WithResource("natsjetstreamchannels"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Messaging().V1alpha1().NatsJetStreamChannels().Informer()}, nil
+
+		// Group=messaging.knative.dev, Version=v1beta1
 	case v1beta1.SchemeGroupVersion.WithResource("natsschannels"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Messaging().V1beta1().NatssChannels().Informer()}, nil
 
