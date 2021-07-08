@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1aplha1 is the v1aplha1 version of the API.
+// Package v1alpha1 is the v1alpha1 version of the API.
 // +k8s:deepcopy-gen=package
 // +groupName=messaging.knative.dev
-package v1aplha1
+package v1alpha1
