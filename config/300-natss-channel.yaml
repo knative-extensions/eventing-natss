@@ -17,7 +17,7 @@ kind: CustomResourceDefinition
 metadata:
   name: natsschannels.messaging.knative.dev
   labels:
-    natss.eventing.knative.dev/release: devel
+    nats.eventing.knative.dev/release: devel
     knative.dev/crd-install: "true"
     messaging.knative.dev/subscribable: "true"
     duck.knative.dev/addressable: "true"

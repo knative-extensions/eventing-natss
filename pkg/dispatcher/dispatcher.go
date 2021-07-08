@@ -36,7 +36,7 @@ import (
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/kncloudevents"
 
-	"knative.dev/eventing-natss/pkg/stanutil"
+	"knative.dev/eventing-natss/pkg/natsutil"
 
 	natsscloudevents "github.com/cloudevents/sdk-go/protocol/stan/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
@@ -181,7 +181,7 @@ func (s *SubscriptionsSupervisor) connectWithRetry(ctx context.Context) {
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
 	for {
-		nConn, err := stanutil.Connect(s.clusterID, s.clientID, s.natssURL, s.logger.Sugar())
+		nConn, err := natsutil.Connect(s.clusterID, s.clientID, s.natssURL, s.logger.Sugar())
 		if err == nil {
 			// Locking here in order to reduce time in locked state.
 			s.natssConnMux.Lock()

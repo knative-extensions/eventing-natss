@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package natss
 
 import (
 	"context"
@@ -40,7 +40,7 @@ import (
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
 	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
 	"knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1beta1/natsschannel"
-	"knative.dev/eventing-natss/pkg/reconciler/controller/resources"
+	"knative.dev/eventing-natss/pkg/reconciler/controller/natss/resources"
 	reconciletesting "knative.dev/eventing-natss/pkg/reconciler/testing"
 )
 

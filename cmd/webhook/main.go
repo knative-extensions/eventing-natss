@@ -97,10 +97,10 @@ func NewValidationAdmissionController(ctx context.Context, cmw configmap.Watcher
 func main() {
 	// Set up a signal context with our webhook options
 	ctx := webhook.WithOptions(signals.NewContext(), webhook.Options{
-		ServiceName: "natss-webhook",
+		ServiceName: "nats-webhook",
 		Port:        webhook.PortFromEnv(8443),
 		// SecretName must match the name of the Secret created in the configuration.
-		SecretName: "natss-webhook-certs",
+		SecretName: "nats-webhook-certs",
 	})
 
 	sharedmain.WebhookMainWithContext(ctx, "natss-webhook",

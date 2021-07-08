@@ -15,9 +15,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: natss-channelable-manipulator
+  name: nats-channelable-manipulator
   labels:
-    natss.eventing.knative.dev/release: devel
+    nats.eventing.knative.dev/release: devel
     duck.knative.dev/channelable: "true"
 # Do not use this role directly. These rules will be added to the "channelable-manipulator" role.
 rules:
@@ -26,6 +26,8 @@ rules:
     resources:
       - natsschannels
       - natsschannels/status
+      - jetstreamschannels
+      - jetstreamschannels/status
     verbs:
       - create
       - get

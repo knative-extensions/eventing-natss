@@ -15,9 +15,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: natss-addressable-resolver
+  name: nats-addressable-resolver
   labels:
-    natss.eventing.knative.dev/release: devel
+    nats.eventing.knative.dev/release: devel
     duck.knative.dev/addressable: "true"
 # Do not use this role directly. These rules will be added to the "addressable-resolver" role.
 rules:
@@ -26,6 +26,8 @@ rules:
     resources:
       - natsschannels
       - natsschannels/status
+      - jetstreamschannels
+      - jetstreamchannels/status
     verbs:
       - get
       - list

@@ -15,15 +15,17 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: natss-ch-controller
+  name: nats-ch-controller
   labels:
-    natss.eventing.knative.dev/release: devel
+    nats.eventing.knative.dev/release: devel
 rules:
   - apiGroups:
       - messaging.knative.dev
     resources:
       - natsschannels
       - natsschannels/status
+      - jetstreamchannels
+      - jetstreamchannels/status
     verbs:
       - get
       - list
@@ -34,6 +36,7 @@ rules:
       - messaging.knative.dev
     resources:
       - natsschannels/finalizers
+      - jetstreamchannels/finalizers
     verbs:
       - update
   - apiGroups:

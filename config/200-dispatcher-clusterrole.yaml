@@ -15,13 +15,15 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: natss-ch-dispatcher
+  name: nats-ch-dispatcher
 rules:
   - apiGroups:
       - messaging.knative.dev
     resources:
       - natsschannels
       - natsschannels/status
+      - jetstreamchannels
+      - jetstreamchannels/status
     verbs:
       - get
       - list
@@ -32,6 +34,7 @@ rules:
       - messaging.knative.dev
     resources:
       - natsschannels/finalizers
+      - jetstreamchannels/finalizers
     verbs:
       - update
   - apiGroups:

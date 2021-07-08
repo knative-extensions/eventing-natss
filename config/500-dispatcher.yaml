@@ -18,7 +18,7 @@ metadata:
   name: natss-ch-dispatcher
   namespace: knative-eventing
   labels:
-    natss.eventing.knative.dev/release: devel
+    nats.eventing.knative.dev/release: devel
 spec:
   replicas: 1
   selector:
@@ -29,7 +29,7 @@ spec:
     metadata:
       labels: *labels
     spec:
-      serviceAccountName: natss-ch-dispatcher
+      serviceAccountName: nats-ch-dispatcher
       containers:
         - name: dispatcher
           image: ko://knative.dev/eventing-natss/cmd/channel_dispatcher

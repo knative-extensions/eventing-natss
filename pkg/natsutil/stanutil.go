@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package stanutil
+package natsutil
 
 import (
 	"github.com/nats-io/stan.go"
