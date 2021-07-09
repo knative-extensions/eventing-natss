@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package dispatcher
+package natss
 
 import (
 	"context"
@@ -27,6 +27,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
+	natsscloudevents "github.com/cloudevents/sdk-go/protocol/stan/v2"
+	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/nats-io/stan.go"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -36,10 +38,8 @@ import (
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/kncloudevents"
 
+	"knative.dev/eventing-natss/pkg/dispatcher"
 	"knative.dev/eventing-natss/pkg/natsutil"
-
-	natsscloudevents "github.com/cloudevents/sdk-go/protocol/stan/v2"
-	"github.com/cloudevents/sdk-go/v2/binding"
 )
 
 const (
@@ -79,12 +79,6 @@ type SubscriptionsSupervisor struct {
 	hostToChannelMap atomic.Value
 }
 
-type NatssDispatcher interface {
-	Start(ctx context.Context) error
-	UpdateSubscriptions(ctx context.Context, name, ns string, subscriptions []eventingduckv1.SubscriberSpec, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error)
-	ProcessChannels(ctx context.Context, chanList []messagingv1.Channel) error
-}
-
 type Args struct {
 	NatssURL       string
 	ClusterID      string
@@ -96,10 +90,10 @@ type Args struct {
 	Reporter       eventingchannels.StatsReporter
 }
 
-var _ NatssDispatcher = (*SubscriptionsSupervisor)(nil)
+var _ dispatcher.NatsDispatcher = (*SubscriptionsSupervisor)(nil)
 
-// NewDispatcher returns a new NatssDispatcher.
-func NewDispatcher(args Args) (NatssDispatcher, error) {
+// NewDispatcher returns a new NatsDispatcher.
+func NewDispatcher(args Args) (NatsDispatcher, error) {
 	if args.Logger == nil {
 		args.Logger = zap.NewNop()
 	}
@@ -257,7 +251,7 @@ func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, name,
 
 	for _, sub := range subscribers {
 		// check if the subscription already exist and do nothing in this case
-		subRef := newSubscriptionReference(sub)
+		subRef := dispatcher.NewSubscriptionReference(sub)
 		if _, ok := chMap[subRef.UID]; ok {
 			activeSubs[subRef.UID] = true
 			s.logger.Sugar().Infof("Subscription: %v already active for channel: %v", sub, cRef)
@@ -268,7 +262,7 @@ func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, name,
 		if err != nil {
 			s.logger.Sugar().Errorf("failed to subscribe (subscription:%q) to channel: %v. Error:%s", sub, cRef, err.Error())
 
-			sub := newSubscriptionReference(sub)
+			sub := dispatcher.NewSubscriptionReference(sub)
 			failedToSubscribe[eventingduckv1.SubscriberSpec(sub)] = err
 			continue
 		}
@@ -288,7 +282,7 @@ func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, name,
 	return failedToSubscribe, nil
 }
 
-func (s *SubscriptionsSupervisor) subscribe(ctx context.Context, channel eventingchannels.ChannelReference, subscription subscriptionReference) (*stan.Subscription, error) {
+func (s *SubscriptionsSupervisor) subscribe(ctx context.Context, channel eventingchannels.ChannelReference, subscription dispatcher.SubscriptionReference) (*stan.Subscription, error) {
 	s.logger.Info("Subscribe to channel:", zap.Any("channel", channel), zap.Any("subscription", subscription))
 
 	mcb := func(stanMsg *stan.Msg) {
