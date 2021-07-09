@@ -1,5 +1,5 @@
 /*
-Copyright 2019 The Knative Authors
+Copyright 2021 The Knative Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,41 +14,41 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package natss
+package jetstream
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
-	"github.com/kelseyhightower/envconfig"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/google/uuid"
+	"github.com/kelseyhightower/envconfig"
+
+	"go.uber.org/zap"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
 	"knative.dev/eventing/pkg/channel"
 	"knative.dev/pkg/apis/duck"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
-	"knative.dev/pkg/kmeta"
-	pkgreconciler "knative.dev/pkg/reconciler"
-
-	"go.uber.org/zap"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
-	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
+	"knative.dev/pkg/kmeta"
 	"knative.dev/pkg/logging"
+	pkgreconciler "knative.dev/pkg/reconciler"
 
-	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
+	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	clientset "knative.dev/eventing-natss/pkg/client/clientset/versioned"
 	"knative.dev/eventing-natss/pkg/client/injection/client"
-	"knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1beta1/natsschannel"
-	natsschannelreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1beta1/natsschannel"
-	listers "knative.dev/eventing-natss/pkg/client/listers/messaging/v1beta1"
+	"knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1alpha1/natsjetstreamchannel"
+	jetstreamchannelreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsjetstreamchannel"
+	listers "knative.dev/eventing-natss/pkg/client/listers/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/dispatcher"
 	"knative.dev/eventing-natss/pkg/util"
 )
@@ -56,24 +56,24 @@ import (
 const (
 	// controllerAgentName is the string used by this controller to identify
 	// itself when creating events.
-	controllerAgentName = "natss-ch-dispatcher"
+	controllerAgentName = "jetstream-ch-dispatcher"
 
 	finalizerName = controllerAgentName
 )
 
-// Reconciler reconciles NATSS Channels.
+// Reconciler reconciles NATS JetStream Channels.
 type Reconciler struct {
-	natssDispatcher dispatcher.NatsDispatcher
+	jetStreamDispatcher dispatcher.NatsDispatcher
 
-	natssClientSet clientset.Interface
+	jetStreamClientSet clientset.Interface
 
-	natsschannelLister listers.NatssChannelLister
-	impl               *controller.Impl
+	jetStreamchannelLister listers.NatsJetStreamChannelLister
+	impl                   *controller.Impl
 }
 
 // Check that our Reconciler implements controller.Reconciler.
-var _ natsschannelreconciler.Interface = (*Reconciler)(nil)
-var _ natsschannelreconciler.Finalizer = (*Reconciler)(nil)
+var _ jetstreamchannelreconciler.Interface = (*Reconciler)(nil)
+var _ jetstreamchannelreconciler.Finalizer = (*Reconciler)(nil)
 
 type envConfig struct {
 	PodName       string `envconfig:"POD_NAME" required:"true"`
@@ -91,37 +91,33 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		logger.Fatalw("Failed to process env var", zap.Error(err))
 	}
 
-	natssConfig := util.GetNatssConfig()
+	//natssConfig := util.GetNatssConfig()
 	reporter := channel.NewStatsReporter(env.ContainerName, kmeta.ChildName(env.PodName, uuid.New().String()))
-	dispatcherArgs := dispatcher.Args{
-		NatssURL:       util.GetDefaultNatssURL(),
-		ClusterID:      util.GetDefaultClusterID(),
-		ClientID:       natssConfig.ClientID,
-		AckWaitMinutes: util.GetAckWaitMinutes(),
-		MaxInflight:    util.GetMaxInflight(),
-		Cargs: kncloudevents.ConnectionArgs{
-			MaxIdleConns:        natssConfig.MaxIdleConns,
-			MaxIdleConnsPerHost: natssConfig.MaxIdleConnsPerHost,
-		},
+	dispatcherArgs := dispatcher.JetArgs{
+		JetStreamURL: util.GetDefaultJetStreamURL(),
+		//Cargs: kncloudevents.ConnectionArgs{
+		//	MaxIdleConns:        natssConfig.MaxIdleConns,
+		//	MaxIdleConnsPerHost: natssConfig.MaxIdleConnsPerHost,
+		//},
 		Logger:   logger.Desugar(),
 		Reporter: reporter,
 	}
-	natssDispatcher, err := dispatcher.NewNatssDispatcher(dispatcherArgs)
+	jetstreamDispatcher, err := dispatcher.NewJetStreamDispatcher(dispatcherArgs)
 	if err != nil {
-		logger.Fatal("Unable to create natss dispatcher", zap.Error(err))
+		logger.Fatal("Unable to create nats jet stream dispatcher", zap.Error(err))
 	}
 
 	logger = logger.With(zap.String("controller/impl", "pkg"))
-	logger.Info("Starting the NATSS dispatcher")
+	logger.Info("Starting the NATS JetStream dispatcher")
 
-	channelInformer := natsschannel.Get(ctx)
+	channelInformer := natsjetstreamchannel.Get(ctx)
 
 	r := &Reconciler{
-		natssDispatcher:    natssDispatcher,
-		natsschannelLister: channelInformer.Lister(),
-		natssClientSet:     client.Get(ctx),
+		jetStreamDispatcher:    jetstreamDispatcher,
+		jetStreamchannelLister: channelInformer.Lister(),
+		jetStreamClientSet:     client.Get(ctx),
 	}
-	r.impl = natsschannelreconciler.NewImpl(ctx, r)
+	r.impl = jetstreamchannelreconciler.NewImpl(ctx, r)
 
 	logger.Info("Setting up event handlers")
 
@@ -129,7 +125,7 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 
 	logger.Info("Starting dispatcher.")
 	go func() {
-		if err := natssDispatcher.Start(ctx); err != nil {
+		if err := jetstreamDispatcher.Start(ctx); err != nil {
 			logger.Errorw("Cannot start dispatcher", zap.Error(err))
 		}
 	}()
@@ -137,36 +133,38 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 }
 
 // reconcile performs the following steps
-// - update natss subscriptions
-// - set NatssChannel SubscribableStatus
+// - update nats jet stream subscriptions
+// - set NatsJetStreamChannel SubscribableStatus
 // - update host2channel map
-func (r *Reconciler) ReconcileKind(ctx context.Context, natssChannel *v1beta1.NatssChannel) pkgreconciler.Event {
+func (r *Reconciler) ReconcileKind(ctx context.Context, natsJetStreamChannel *v1alpha1.NatsJetStreamChannel) pkgreconciler.Event {
 	// Try to subscribe.
-	failedSubscriptions, err := r.natssDispatcher.UpdateSubscriptions(ctx, natssChannel.Name, natssChannel.Namespace, natssChannel.Spec.Subscribers, false)
+	logging.FromContext(ctx).Infof("ReconcileKind() jetstream:%s/%s 's subscriber %#v",natsJetStreamChannel.Namespace,natsJetStreamChannel.Name,natsJetStreamChannel.Spec.Subscribers)
+	failedSubscriptions, err := r.jetStreamDispatcher.UpdateSubscriptions(ctx, natsJetStreamChannel.Name, natsJetStreamChannel.Namespace, natsJetStreamChannel.Spec.Subscribers, false)
 	if err != nil {
-		logging.FromContext(ctx).Errorw("Error updating subscriptions", zap.Any("channel", natssChannel), zap.Error(err))
+		logging.FromContext(ctx).Errorw("Error updating subscriptions", zap.Any("channel", natsJetStreamChannel), zap.Error(err))
+		return err
+	}
+	logging.FromContext(ctx).Infof("ReconcileKind() jetstream:%s/%s failedSubscriptions %#v",natsJetStreamChannel.Namespace,natsJetStreamChannel.Name,failedSubscriptions)
+
+	if err := r.patchSubscriberStatus(ctx, natsJetStreamChannel, failedSubscriptions); err != nil {
+		logging.FromContext(ctx).Errorw("Error patching subscription statuses", zap.Any("channel", natsJetStreamChannel), zap.Error(err))
 		return err
 	}
 
-	if err := r.patchSubscriberStatus(ctx, natssChannel, failedSubscriptions); err != nil {
-		logging.FromContext(ctx).Errorw("Error patching subscription statuses", zap.Any("channel", natssChannel), zap.Error(err))
-		return err
-	}
-
-	natssChannels, err := r.natsschannelLister.List(labels.Everything())
+	natsJetStreamChannels, err := r.jetStreamchannelLister.List(labels.Everything())
 	if err != nil {
-		logging.FromContext(ctx).Error("Error listing natss channels")
+		logging.FromContext(ctx).Error("Error listing nats jetstream channels")
 		return err
 	}
 
 	channels := make([]messagingv1.Channel, 0)
-	for _, nc := range natssChannels {
+	for _, nc := range natsJetStreamChannels {
 		if nc.Status.IsReady() {
 			channels = append(channels, *toChannel(nc))
 		}
 	}
 
-	if err := r.natssDispatcher.ProcessChannels(ctx, channels); err != nil {
+	if err := r.jetStreamDispatcher.ProcessChannels(ctx, channels); err != nil {
 		logging.FromContext(ctx).Errorw("Error updating host to channel map", zap.Error(err))
 		return err
 	}
@@ -183,8 +181,8 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, natssChannel *v1beta1.Na
 	return nil
 }
 
-func (r *Reconciler) FinalizeKind(ctx context.Context, c *v1beta1.NatssChannel) pkgreconciler.Event {
-	if _, err := r.natssDispatcher.UpdateSubscriptions(ctx, c.Name, c.Namespace, c.Spec.Subscribers, true); err != nil {
+func (r *Reconciler) FinalizeKind(ctx context.Context, c *v1alpha1.NatsJetStreamChannel) pkgreconciler.Event {
+	if _, err := r.jetStreamDispatcher.UpdateSubscriptions(ctx, c.Name, c.Namespace, c.Spec.Subscribers, true); err != nil {
 		logging.FromContext(ctx).Errorw("Error updating subscriptions", zap.Any("channel", c), zap.Error(err))
 		return err
 	}
@@ -192,7 +190,7 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, c *v1beta1.NatssChannel) 
 }
 
 // createSubscribableStatus creates the SubscribableStatus based on the failedSubscriptions
-// checks for each subscriber on the natss channel if there is a failed subscription on natss side
+// checks for each subscriber on the nats jetstream channel if there is a failed subscription on nats jetstream side
 // if there is no failed subscription => set ready status
 func (r *Reconciler) createSubscribableStatus(subscribers []eventingduckv1.SubscriberSpec, failedSubscriptions map[eventingduckv1.SubscriberSpec]error) eventingduckv1.SubscribableStatus {
 	subscriberStatus := make([]eventingduckv1.SubscriberStatus, 0)
@@ -225,11 +223,13 @@ func getFailedSub(sub eventingduckv1.SubscriberSpec, failedSubscriptions map[eve
 	return nil
 }
 
-func (r *Reconciler) patchSubscriberStatus(ctx context.Context, nc *v1beta1.NatssChannel, failedSubscriptions map[eventingduckv1.SubscriberSpec]error) error {
+func (r *Reconciler) patchSubscriberStatus(ctx context.Context, nc *v1alpha1.NatsJetStreamChannel, failedSubscriptions map[eventingduckv1.SubscriberSpec]error) error {
 	after := nc.DeepCopy()
-
+	logging.FromContext(ctx).Infof("Subscribers %#v  failedSubscriptions %#v",after.Spec.Subscribers, failedSubscriptions)
 	after.Status.SubscribableStatus = r.createSubscribableStatus(after.Spec.Subscribers, failedSubscriptions)
 	jsonPatch, err := duck.CreatePatch(nc, after)
+
+	logging.FromContext(ctx).Infof("patchSubscriberStatus %s/%s  Patched resource %#v",nc.Namespace,nc.Name, jsonPatch)
 	if err != nil {
 		return fmt.Errorf("creating JSON patch: %w", err)
 	}
@@ -243,7 +243,7 @@ func (r *Reconciler) patchSubscriberStatus(ctx context.Context, nc *v1beta1.Nats
 	if err != nil {
 		return fmt.Errorf("marshaling JSON patch: %w", err)
 	}
-	patched, err := r.natssClientSet.MessagingV1beta1().NatssChannels(nc.Namespace).Patch(ctx, nc.Name, types.JSONPatchType, patch, metav1.PatchOptions{}, "status")
+	patched, err := r.jetStreamClientSet.MessagingV1alpha1().NatsJetStreamChannels(nc.Namespace).Patch(ctx, nc.Name, types.JSONPatchType, patch, metav1.PatchOptions{}, "status")
 	if err != nil {
 		return fmt.Errorf("Failed patching: %w", err)
 	}
@@ -251,11 +251,11 @@ func (r *Reconciler) patchSubscriberStatus(ctx context.Context, nc *v1beta1.Nats
 	return nil
 }
 
-func toChannel(natssChannel *v1beta1.NatssChannel) *messagingv1.Channel {
+func toChannel(jetStreamChannel *v1alpha1.NatsJetStreamChannel) *messagingv1.Channel {
 	channel := &messagingv1.Channel{
 		ObjectMeta: v1.ObjectMeta{
-			Name:      natssChannel.Name,
-			Namespace: natssChannel.Namespace,
+			Name:      jetStreamChannel.Name,
+			Namespace: jetStreamChannel.Namespace,
 		},
 		Spec: messagingv1.ChannelSpec{
 			ChannelTemplate: nil,
@@ -265,12 +265,12 @@ func toChannel(natssChannel *v1beta1.NatssChannel) *messagingv1.Channel {
 		},
 	}
 
-	if natssChannel.Status.Address != nil {
+	if jetStreamChannel.Status.Address != nil {
 		channel.Status = messagingv1.ChannelStatus{
 			ChannelableStatus: eventingduckv1.ChannelableStatus{
 				AddressStatus: duckv1.AddressStatus{
 					Address: &duckv1.Addressable{
-						URL: natssChannel.Status.Address.URL,
+						URL: jetStreamChannel.Status.Address.URL,
 					}},
 				SubscribableStatus: eventingduckv1.SubscribableStatus{},
 				DeadLetterChannel:  nil,
@@ -279,7 +279,7 @@ func toChannel(natssChannel *v1beta1.NatssChannel) *messagingv1.Channel {
 		}
 	}
 
-	for _, s := range natssChannel.Spec.Subscribers {
+	for _, s := range jetStreamChannel.Spec.Subscribers {
 		sbeta1 := eventingduckv1.SubscriberSpec{
 			UID:           s.UID,
 			Generation:    s.Generation,

@@ -22,16 +22,15 @@ import (
 
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
-
 	"knative.dev/eventing-natss/pkg/dispatcher"
 )
 
 // DispatcherDoNothing is a mock which doesn't do anything
 type DispatcherDoNothing struct{}
 
-var _ dispatcher.NatssDispatcher = (*DispatcherDoNothing)(nil)
+var _ dispatcher.NatsDispatcher = (*DispatcherDoNothing)(nil)
 
-func NewDispatcherDoNothing() dispatcher.NatssDispatcher {
+func NewDispatcherDoNothing() dispatcher.NatsDispatcher {
 	return &DispatcherDoNothing{}
 }
 
@@ -51,7 +50,7 @@ func (s *DispatcherDoNothing) ProcessChannels(_ context.Context, _ []messagingv1
 type DispatcherFailNatssSubscription struct {
 }
 
-var _ dispatcher.NatssDispatcher = (*DispatcherFailNatssSubscription)(nil)
+var _ dispatcher.NatsDispatcher = (*DispatcherFailNatssSubscription)(nil)
 
 func NewDispatcherFailNatssSubscription() *DispatcherFailNatssSubscription {
 	return &DispatcherFailNatssSubscription{}

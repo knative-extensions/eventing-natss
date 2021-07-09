@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Knative Authors
+Copyright 2019 The Knative Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,17 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package natsutil
+package main
 
 import (
-	"testing"
+	"os"
+
+	"knative.dev/pkg/injection"
+	"knative.dev/pkg/injection/sharedmain"
+	"knative.dev/pkg/signals"
+
+	"knative.dev/eventing-natss/pkg/reconciler/dispatcher/jetstream"
 )
 
-func TestJetStreamConnect(t *testing.T) {
-	_, err := JetStreamConnect("nats://10.211.55.5:4222", setupLogger())
-	if err != nil {
-		t.Errorf("Connect() expecting err")
-		return
+const component = "jetstream-schannel-dispatcher"
+
+func main() {
+	ctx := signals.NewContext()
+	ns := os.Getenv("NAMESPACE")
+	if ns != "" {
+		ctx = injection.WithNamespaceScope(ctx, ns)
 	}
 
+	sharedmain.MainWithContext(ctx, component, jetstream.NewController)
 }

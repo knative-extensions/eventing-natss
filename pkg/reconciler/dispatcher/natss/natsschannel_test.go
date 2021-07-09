@@ -22,6 +22,8 @@ import (
 	"os"
 	"testing"
 
+	"go.uber.org/zap"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -37,18 +39,17 @@ import (
 	fakedynamicclient "knative.dev/pkg/injection/clients/dynamicclient/fake"
 	"knative.dev/pkg/logging"
 	. "knative.dev/pkg/reconciler/testing"
-
 	fakeeventingclient "knative.dev/eventing/pkg/client/injection/client/fake"
 
 	"knative.dev/eventing-natss/pkg/client/injection/client"
 	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
 	_ "knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1beta1/natsschannel/fake"
 	natsschannelreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1beta1/natsschannel"
-	"knative.dev/eventing-natss/pkg/dispatcher"
 	dispatchertesting "knative.dev/eventing-natss/pkg/dispatcher/testing"
 	reconciletesting "knative.dev/eventing-natss/pkg/reconciler/testing"
+	"knative.dev/eventing-natss/pkg/dispatcher"
 
-	"go.uber.org/zap"
+
 )
 
 const (
@@ -173,7 +174,7 @@ func TestAllCases(t *testing.T) {
 	}
 
 	table.Test(t, reconciletesting.MakeFactory(func(ctx context.Context, listers *reconciletesting.Listers) controller.Reconciler {
-		return createReconciler(ctx, listers, func() dispatcher.NatssDispatcher {
+		return createReconciler(ctx, listers, func() dispatcher.NatsDispatcher {
 			return dispatchertesting.NewDispatcherDoNothing()
 		})
 	}))
@@ -247,7 +248,7 @@ func TestFailedNatssSubscription(t *testing.T) {
 	}
 
 	table.Test(t, reconciletesting.MakeFactory(func(ctx context.Context, listers *reconciletesting.Listers) controller.Reconciler {
-		return createReconciler(ctx, listers, func() dispatcher.NatssDispatcher {
+		return createReconciler(ctx, listers, func() dispatcher.NatsDispatcher {
 			return dispatchertesting.NewDispatcherFailNatssSubscription()
 		})
 	}))
@@ -270,7 +271,7 @@ func makePatch(namespace, name, patch string) clientgotesting.PatchActionImpl {
 func createReconciler(
 	ctx context.Context,
 	listers *reconciletesting.Listers,
-	dispatcherFactory func() dispatcher.NatssDispatcher,
+	dispatcherFactory func() dispatcher.NatsDispatcher,
 ) controller.Reconciler {
 
 	return natsschannelreconciler.NewReconciler(

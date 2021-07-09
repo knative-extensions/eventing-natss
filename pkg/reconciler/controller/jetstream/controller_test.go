@@ -14,17 +14,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package natsutil
+package jetstream
 
 import (
+	"context"
 	"testing"
+
+	"k8s.io/client-go/rest"
+
+	"knative.dev/pkg/injection"
+
+	_ "knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1alpha1/natsjetstreamchannel/fake"
+	_ "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment/fake"
+	_ "knative.dev/pkg/client/injection/kube/informers/core/v1/endpoints/fake"
+	_ "knative.dev/pkg/client/injection/kube/informers/core/v1/service/fake"
 )
 
-func TestJetStreamConnect(t *testing.T) {
-	_, err := JetStreamConnect("nats://10.211.55.5:4222", setupLogger())
-	if err != nil {
-		t.Errorf("Connect() expecting err")
-		return
-	}
-
+func TestNewController(t *testing.T) {
+	ctx, _ := injection.Fake.SetupInformers(context.Background(), &rest.Config{})
+	// no panic
+	_ = NewController(ctx)
 }

@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+   http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package natss
+package dispatcher
 
 import (
 	"context"
@@ -38,7 +38,6 @@ import (
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/kncloudevents"
 
-	"knative.dev/eventing-natss/pkg/dispatcher"
 	"knative.dev/eventing-natss/pkg/natsutil"
 )
 
@@ -54,8 +53,8 @@ var (
 
 type SubscriptionChannelMapping map[eventingchannels.ChannelReference]map[types.UID]*stan.Subscription
 
-// SubscriptionsSupervisor manages the state of NATS Streaming subscriptions
-type SubscriptionsSupervisor struct {
+// subscriptionsSupervisor manages the state of NATS Streaming subscriptions
+type subscriptionsSupervisor struct {
 	logger *zap.Logger
 
 	receiver   *eventingchannels.MessageReceiver
@@ -90,15 +89,15 @@ type Args struct {
 	Reporter       eventingchannels.StatsReporter
 }
 
-var _ dispatcher.NatsDispatcher = (*SubscriptionsSupervisor)(nil)
+var _ NatsDispatcher = (*subscriptionsSupervisor)(nil)
 
-// NewDispatcher returns a new NatsDispatcher.
-func NewDispatcher(args Args) (NatsDispatcher, error) {
+// NewNatssDispatcher returns a new NatsDispatcher.
+func NewNatssDispatcher(args Args) (NatsDispatcher, error) {
 	if args.Logger == nil {
 		args.Logger = zap.NewNop()
 	}
 
-	d := &SubscriptionsSupervisor{
+	d := &subscriptionsSupervisor{
 		logger:         args.Logger,
 		dispatcher:     eventingchannels.NewMessageDispatcher(args.Logger),
 		subscriptions:  make(SubscriptionChannelMapping),
@@ -123,7 +122,7 @@ func NewDispatcher(args Args) (NatsDispatcher, error) {
 	return d, nil
 }
 
-func (s *SubscriptionsSupervisor) signalReconnect() {
+func (s *subscriptionsSupervisor) signalReconnect() {
 	select {
 	case s.connect <- struct{}{}:
 		// Sent.
@@ -132,7 +131,7 @@ func (s *SubscriptionsSupervisor) signalReconnect() {
 	}
 }
 
-func messageReceiverFunc(s *SubscriptionsSupervisor) eventingchannels.UnbufferedMessageReceiverFunc {
+func messageReceiverFunc(s *subscriptionsSupervisor) eventingchannels.UnbufferedMessageReceiverFunc {
 	return func(ctx context.Context, channel eventingchannels.ChannelReference, message binding.Message, transformers []binding.Transformer, header http.Header) error {
 		s.logger.Info("Received event", zap.String("channel", channel.String()))
 
@@ -162,7 +161,7 @@ func messageReceiverFunc(s *SubscriptionsSupervisor) eventingchannels.Unbuffered
 	}
 }
 
-func (s *SubscriptionsSupervisor) Start(ctx context.Context) error {
+func (s *subscriptionsSupervisor) Start(ctx context.Context) error {
 	// Starting Connect to establish connection with NATS
 	go s.Connect(ctx)
 	// Trigger Connect to establish connection with NATS
@@ -170,7 +169,7 @@ func (s *SubscriptionsSupervisor) Start(ctx context.Context) error {
 	return s.receiver.Start(ctx)
 }
 
-func (s *SubscriptionsSupervisor) connectWithRetry(ctx context.Context) {
+func (s *subscriptionsSupervisor) connectWithRetry(ctx context.Context) {
 	// re-attempting evey 1 second until the connection is established.
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
@@ -195,7 +194,7 @@ func (s *SubscriptionsSupervisor) connectWithRetry(ctx context.Context) {
 }
 
 // Connect is called for initial connection as well as after every disconnect
-func (s *SubscriptionsSupervisor) Connect(ctx context.Context) {
+func (s *subscriptionsSupervisor) Connect(ctx context.Context) {
 	for {
 		select {
 		case <-s.connect:
@@ -218,7 +217,7 @@ func (s *SubscriptionsSupervisor) Connect(ctx context.Context) {
 // UpdateSubscriptions creates/deletes the natss subscriptions based on channel.Spec.Subscribable.Subscribers
 // Return type:map[eventingduck.SubscriberSpec]error --> Returns a map of subscriberSpec that failed with the value=error encountered.
 // Ignore the value in case error != nil
-func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, name, ns string, subscribers []eventingduckv1.SubscriberSpec, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error) {
+func (s *subscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, name, ns string, subscribers []eventingduckv1.SubscriberSpec, isFinalizer bool) (map[eventingduckv1.SubscriberSpec]error, error) {
 	s.subscriptionsMux.Lock()
 	defer s.subscriptionsMux.Unlock()
 
@@ -251,7 +250,7 @@ func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, name,
 
 	for _, sub := range subscribers {
 		// check if the subscription already exist and do nothing in this case
-		subRef := dispatcher.NewSubscriptionReference(sub)
+		subRef := newSubscriptionReference(sub)
 		if _, ok := chMap[subRef.UID]; ok {
 			activeSubs[subRef.UID] = true
 			s.logger.Sugar().Infof("Subscription: %v already active for channel: %v", sub, cRef)
@@ -262,7 +261,7 @@ func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, name,
 		if err != nil {
 			s.logger.Sugar().Errorf("failed to subscribe (subscription:%q) to channel: %v. Error:%s", sub, cRef, err.Error())
 
-			sub := dispatcher.NewSubscriptionReference(sub)
+			sub := newSubscriptionReference(sub)
 			failedToSubscribe[eventingduckv1.SubscriberSpec(sub)] = err
 			continue
 		}
@@ -282,7 +281,7 @@ func (s *SubscriptionsSupervisor) UpdateSubscriptions(ctx context.Context, name,
 	return failedToSubscribe, nil
 }
 
-func (s *SubscriptionsSupervisor) subscribe(ctx context.Context, channel eventingchannels.ChannelReference, subscription dispatcher.SubscriptionReference) (*stan.Subscription, error) {
+func (s *subscriptionsSupervisor) subscribe(ctx context.Context, channel eventingchannels.ChannelReference, subscription subscriptionReference) (*stan.Subscription, error) {
 	s.logger.Info("Subscribe to channel:", zap.Any("channel", channel), zap.Any("subscription", subscription))
 
 	mcb := func(stanMsg *stan.Msg) {
@@ -353,7 +352,7 @@ func (s *SubscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 		s.logger.Error(" Create new NATSS Subscription failed: ", zap.Error(err))
 		if err.Error() == stan.ErrConnectionClosed.Error() {
 			s.logger.Error("Connection to NATSS has been lost, attempting to reconnect.")
-			// Informing SubscriptionsSupervisor to re-establish connection to NATS
+			// Informing subscriptionsSupervisor to re-establish connection to NATS
 			s.signalReconnect()
 			return nil, err
 		}
@@ -365,7 +364,7 @@ func (s *SubscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 }
 
 // should be called only while holding subscriptionsMux
-func (s *SubscriptionsSupervisor) unsubscribe(channel eventingchannels.ChannelReference, subscription types.UID) error {
+func (s *subscriptionsSupervisor) unsubscribe(channel eventingchannels.ChannelReference, subscription types.UID) error {
 	s.logger.Info("Unsubscribe from channel:", zap.Any("channel", channel), zap.Any("subscription", subscription))
 
 	if stanSub, ok := s.subscriptions[channel][subscription]; ok {
@@ -382,11 +381,11 @@ func getSubject(channel eventingchannels.ChannelReference) string {
 	return channel.Name + "." + channel.Namespace
 }
 
-func (s *SubscriptionsSupervisor) getHostToChannelMap() map[string]eventingchannels.ChannelReference {
+func (s *subscriptionsSupervisor) getHostToChannelMap() map[string]eventingchannels.ChannelReference {
 	return s.hostToChannelMap.Load().(map[string]eventingchannels.ChannelReference)
 }
 
-func (s *SubscriptionsSupervisor) setHostToChannelMap(hcMap map[string]eventingchannels.ChannelReference) {
+func (s *subscriptionsSupervisor) setHostToChannelMap(hcMap map[string]eventingchannels.ChannelReference) {
 	s.hostToChannelMap.Store(hcMap)
 }
 
@@ -412,7 +411,7 @@ func newHostNameToChannelRefMap(cList []messagingv1.Channel) (map[string]eventin
 // ProcessChannels will be called from the controller that watches natss channels.
 // It will update internal hostToChannelMap which is used to resolve the hostHeader of the
 // incoming request to the correct ChannelReference in the receiver function.
-func (s *SubscriptionsSupervisor) ProcessChannels(ctx context.Context, chanList []messagingv1.Channel) error {
+func (s *subscriptionsSupervisor) ProcessChannels(ctx context.Context, chanList []messagingv1.Channel) error {
 	s.logger.Debug("ProcessChannels", zap.Any("chanList", chanList))
 	hostToChanMap, err := newHostNameToChannelRefMap(chanList)
 	if err != nil {
@@ -424,7 +423,7 @@ func (s *SubscriptionsSupervisor) ProcessChannels(ctx context.Context, chanList 
 	return nil
 }
 
-func (s *SubscriptionsSupervisor) getChannelReferenceFromHost(host string) (eventingchannels.ChannelReference, error) {
+func (s *subscriptionsSupervisor) getChannelReferenceFromHost(host string) (eventingchannels.ChannelReference, error) {
 	chMap := s.getHostToChannelMap()
 	cr, ok := chMap[host]
 	if !ok {
