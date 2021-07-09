@@ -22,8 +22,8 @@ rules:
     resources:
       - natsschannels
       - natsschannels/status
-      - jetstreamchannels
-      - jetstreamchannels/status
+      - natsjetstreamchannels
+      - natsjetstreamchannels/status
     verbs:
       - get
       - list
@@ -34,7 +34,7 @@ rules:
       - messaging.knative.dev
     resources:
       - natsschannels/finalizers
-      - jetstreamchannels/finalizers
+      - natsjetstreamchannels/finalizers
     verbs:
       - update
   - apiGroups:

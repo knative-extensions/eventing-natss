@@ -26,8 +26,8 @@ rules:
     resources:
       - natsschannels
       - natsschannels/status
-      - jetstreamschannels
-      - jetstreamschannels/status
+      - natsjetstreamchannels
+      - natsjetstreamchannels/status
     verbs:
       - create
       - get
