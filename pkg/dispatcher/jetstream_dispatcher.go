@@ -77,14 +77,14 @@ type jetSubscriptionsSupervisor struct {
 }
 
 type JetArgs struct {
-	JetStreamURL   string
+	JetStreamURL string
 	//ClusterID      string
 	//ClientID       string
 	//AckWaitMinutes int
 	//MaxInflight    int
 	//Cargs          kncloudevents.ConnectionArgs
-	Logger         *zap.Logger
-	Reporter       eventingchannels.StatsReporter
+	Logger   *zap.Logger
+	Reporter eventingchannels.StatsReporter
 }
 
 var _ NatsDispatcher = (*jetSubscriptionsSupervisor)(nil)
@@ -140,6 +140,8 @@ func jetmessageReceiverFunc(s *jetSubscriptionsSupervisor) eventingchannels.Unbu
 			s.logger.Error("no Connection to NATSS")
 			return errors.New("no Connection to NATSS")
 		}
+
+		// TODO update to jetstream  when this issue is done https://github.com/cloudevents/sdk-go/issues/694
 		sender, err := natscloudevents.NewSenderFromConn(currentNatssConn, getJetStreamSubject(channel))
 		if err != nil {
 			s.logger.Error("could not create natss sender", zap.Error(err))
@@ -405,5 +407,5 @@ func (s *jetSubscriptionsSupervisor) getChannelReferenceFromHost(host string) (e
 }
 
 func getJetStreamSubject(channel eventingchannels.ChannelReference) string {
-	return natsutil.StreamName +"."+ channel.Name + "." + channel.Namespace
+	return natsutil.StreamName + "." + channel.Name + "." + channel.Namespace
 }

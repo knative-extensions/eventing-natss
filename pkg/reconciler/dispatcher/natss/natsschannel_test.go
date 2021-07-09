@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/rest"
 	clientgotesting "k8s.io/client-go/testing"
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
+	fakeeventingclient "knative.dev/eventing/pkg/client/injection/client/fake"
 	"knative.dev/pkg/apis"
 	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
 	_ "knative.dev/pkg/client/injection/kube/informers/core/v1/service/fake"
@@ -39,17 +40,14 @@ import (
 	fakedynamicclient "knative.dev/pkg/injection/clients/dynamicclient/fake"
 	"knative.dev/pkg/logging"
 	. "knative.dev/pkg/reconciler/testing"
-	fakeeventingclient "knative.dev/eventing/pkg/client/injection/client/fake"
 
 	"knative.dev/eventing-natss/pkg/client/injection/client"
 	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
 	_ "knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1beta1/natsschannel/fake"
 	natsschannelreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1beta1/natsschannel"
+	"knative.dev/eventing-natss/pkg/dispatcher"
 	dispatchertesting "knative.dev/eventing-natss/pkg/dispatcher/testing"
 	reconciletesting "knative.dev/eventing-natss/pkg/reconciler/testing"
-	"knative.dev/eventing-natss/pkg/dispatcher"
-
-
 )
 
 const (

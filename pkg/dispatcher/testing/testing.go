@@ -20,9 +20,9 @@ import (
 	"context"
 	"errors"
 
+	"knative.dev/eventing-natss/pkg/dispatcher"
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
-	"knative.dev/eventing-natss/pkg/dispatcher"
 )
 
 // DispatcherDoNothing is a mock which doesn't do anything

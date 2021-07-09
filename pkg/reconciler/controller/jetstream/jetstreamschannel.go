@@ -40,8 +40,6 @@ import (
 )
 
 const (
-	ReconcilerName = "NatssChannel"
-
 	// Name of the corev1.Events emitted from the reconciliation process.
 	dispatcherDeploymentNotFound = "DispatcherDeploymentDoesNotExist"
 	dispatcherDeploymentFailed   = "DispatcherDeploymentFailed"
@@ -161,7 +159,7 @@ func (r *Reconciler) reconcileChannelService(ctx context.Context, channel *v1alp
 		logger.Error("Unable to get the channel service", zap.Error(err))
 		return nil, err
 	}
-	// Check to make sure that the NatssChannel owns this service and if not, complain.
+	// Check to make sure that the NatsJetStreamChannel owns this service and if not, complain.
 	if !metav1.IsControlledBy(svc, channel) {
 		return nil, fmt.Errorf("jetstreamchannel: %s/%s does not own Service: %q", channel.Namespace, channel.Name, svc.Name)
 	}

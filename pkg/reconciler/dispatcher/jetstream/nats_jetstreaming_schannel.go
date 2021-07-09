@@ -54,11 +54,11 @@ import (
 )
 
 const (
-	// controllerAgentName is the string used by this controller to identify
-	// itself when creating events.
-	controllerAgentName = "jetstream-ch-dispatcher"
+// controllerAgentName is the string used by this controller to identify
+// itself when creating events.
+//controllerAgentName = "jetstream-ch-dispatcher"
 
-	finalizerName = controllerAgentName
+//finalizerName = controllerAgentName
 )
 
 // Reconciler reconciles NATS JetStream Channels.
@@ -138,13 +138,13 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 // - update host2channel map
 func (r *Reconciler) ReconcileKind(ctx context.Context, natsJetStreamChannel *v1alpha1.NatsJetStreamChannel) pkgreconciler.Event {
 	// Try to subscribe.
-	logging.FromContext(ctx).Infof("ReconcileKind() jetstream:%s/%s 's subscriber %#v",natsJetStreamChannel.Namespace,natsJetStreamChannel.Name,natsJetStreamChannel.Spec.Subscribers)
+	logging.FromContext(ctx).Infof("ReconcileKind() jetstream:%s/%s 's subscriber %#v", natsJetStreamChannel.Namespace, natsJetStreamChannel.Name, natsJetStreamChannel.Spec.Subscribers)
 	failedSubscriptions, err := r.jetStreamDispatcher.UpdateSubscriptions(ctx, natsJetStreamChannel.Name, natsJetStreamChannel.Namespace, natsJetStreamChannel.Spec.Subscribers, false)
 	if err != nil {
 		logging.FromContext(ctx).Errorw("Error updating subscriptions", zap.Any("channel", natsJetStreamChannel), zap.Error(err))
 		return err
 	}
-	logging.FromContext(ctx).Infof("ReconcileKind() jetstream:%s/%s failedSubscriptions %#v",natsJetStreamChannel.Namespace,natsJetStreamChannel.Name,failedSubscriptions)
+	logging.FromContext(ctx).Infof("ReconcileKind() jetstream:%s/%s failedSubscriptions %#v", natsJetStreamChannel.Namespace, natsJetStreamChannel.Name, failedSubscriptions)
 
 	if err := r.patchSubscriberStatus(ctx, natsJetStreamChannel, failedSubscriptions); err != nil {
 		logging.FromContext(ctx).Errorw("Error patching subscription statuses", zap.Any("channel", natsJetStreamChannel), zap.Error(err))
@@ -225,11 +225,11 @@ func getFailedSub(sub eventingduckv1.SubscriberSpec, failedSubscriptions map[eve
 
 func (r *Reconciler) patchSubscriberStatus(ctx context.Context, nc *v1alpha1.NatsJetStreamChannel, failedSubscriptions map[eventingduckv1.SubscriberSpec]error) error {
 	after := nc.DeepCopy()
-	logging.FromContext(ctx).Infof("Subscribers %#v  failedSubscriptions %#v",after.Spec.Subscribers, failedSubscriptions)
+	logging.FromContext(ctx).Infof("Subscribers %#v  failedSubscriptions %#v", after.Spec.Subscribers, failedSubscriptions)
 	after.Status.SubscribableStatus = r.createSubscribableStatus(after.Spec.Subscribers, failedSubscriptions)
 	jsonPatch, err := duck.CreatePatch(nc, after)
 
-	logging.FromContext(ctx).Infof("patchSubscriberStatus %s/%s  Patched resource %#v",nc.Namespace,nc.Name, jsonPatch)
+	logging.FromContext(ctx).Infof("patchSubscriberStatus %s/%s  Patched resource %#v", nc.Namespace, nc.Name, jsonPatch)
 	if err != nil {
 		return fmt.Errorf("creating JSON patch: %w", err)
 	}

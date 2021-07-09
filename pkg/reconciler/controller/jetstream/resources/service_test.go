@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"knative.dev/pkg/kmeta"
 
-
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 )
 

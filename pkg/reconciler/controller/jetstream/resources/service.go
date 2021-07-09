@@ -18,13 +18,14 @@ package resources
 
 import (
 	"fmt"
-	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 
+	"knative.dev/pkg/kmeta"
 	"knative.dev/pkg/network"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/pkg/kmeta"
+
+	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 )
 
 const (
