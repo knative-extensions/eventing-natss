@@ -11,12 +11,12 @@ require (
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/nats-io/stan.go v0.6.0
 	github.com/pkg/errors v0.9.1
-	go.uber.org/zap v1.17.0
+	go.uber.org/zap v1.18.1
 	k8s.io/api v0.20.7
 	k8s.io/apimachinery v0.20.7
 	k8s.io/client-go v0.20.7
-	knative.dev/eventing v0.24.1-0.20210706174220-9ced57400dce
+	knative.dev/eventing v0.24.1-0.20210712133522-8678c3c7fda0
 	knative.dev/hack v0.0.0-20210622141627-e28525d8d260
-	knative.dev/pkg v0.0.0-20210706174620-fe90576475ca
-	knative.dev/reconciler-test v0.0.0-20210707164418-32f0df0c7399
+	knative.dev/pkg v0.0.0-20210712150822-e8973c6acbf7
+	knative.dev/reconciler-test v0.0.0-20210712152422-2b7893cc2eb4
 )
