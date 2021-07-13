@@ -906,7 +906,7 @@ k8s.io/utils/buffer
 k8s.io/utils/integer
 k8s.io/utils/pointer
 k8s.io/utils/trace
-# knative.dev/eventing v0.24.1-0.20210712133522-8678c3c7fda0
+# knative.dev/eventing v0.24.1-0.20210712225150-5add4858c67d
 ## explicit
 knative.dev/eventing/pkg/apis/config
 knative.dev/eventing/pkg/apis/duck
@@ -944,6 +944,7 @@ knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta2/fake
 knative.dev/eventing/pkg/client/injection/client
 knative.dev/eventing/pkg/client/injection/client/fake
 knative.dev/eventing/pkg/kncloudevents
+knative.dev/eventing/pkg/metrics
 knative.dev/eventing/pkg/tracing
 knative.dev/eventing/pkg/utils
 knative.dev/eventing/test/lib/sender
