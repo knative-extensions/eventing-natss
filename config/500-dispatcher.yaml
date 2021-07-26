@@ -50,6 +50,10 @@ spec:
               value: config-logging
             - name: METRICS_DOMAIN
               value: knative.dev/eventing
+            - name: DEFAULT_NATSS_URL
+              value: nats://nats-streaming.natss.svc.cluster.local:4222
+            - name: DEFAULT_CLUSTER_ID
+              value: knative-nats-streaming
             - name: SYSTEM_NAMESPACE
               valueFrom:
                 fieldRef:
