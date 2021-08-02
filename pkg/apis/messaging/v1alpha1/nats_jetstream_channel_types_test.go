@@ -25,16 +25,16 @@ import (
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 )
 
-func TestNatssChannel_GetGroupVersionKind(t *testing.T) {
+func TestNatsJetStreamChannel_GetGroupVersionKind(t *testing.T) {
 	chn := NatsJetStreamChannel{}
 	gvk := chn.GetGroupVersionKind()
 
-	if gvk.Kind != "NatssChannel" {
-		t.Errorf("Should be 'NatssChannel'.")
+	if gvk.Kind != "NatsJetStreamChannel" {
+		t.Errorf("Should be 'NatsJetStreamChannel'.")
 	}
 }
 
-func TestNatssChannelGetStatus(t *testing.T) {
+func TestNatsJetStreamChannelGetStatus(t *testing.T) {
 	status := &duckv1.Status{}
 	config := NatsJetStreamChannel{
 		Status: NatsJetStreamChannelStatus{
