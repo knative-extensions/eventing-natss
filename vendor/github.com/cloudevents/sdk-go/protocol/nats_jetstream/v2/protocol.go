@@ -1,4 +1,9 @@
-package nats
+/*
+ Copyright 2021 The CloudEvents Authors
+ SPDX-License-Identifier: Apache-2.0
+*/
+
+package nats_jetstream
 
 import (
 	"context"
@@ -13,23 +18,23 @@ import (
 type Protocol struct {
 	Conn *nats.Conn
 
-	Consumer        *Consumer
-	consumerOptions []ConsumerOption
+	Consumer *Consumer
+	//consumerOptions []ConsumerOption
 
-	Sender        *Sender
-	senderOptions []SenderOption
+	Sender *Sender
+	//senderOptions []SenderOption
 
-	connOwned bool // whether this protocol created the stan connection
+	connOwned bool // whether this protocol created the nats connection
 }
 
 // NewProtocol creates a new NATS protocol.
-func NewProtocol(url, sendSubject, receiveSubject string, natsOpts []nats.Option, opts ...ProtocolOption) (*Protocol, error) {
+func NewProtocol(url, stream, sendSubject, receiveSubject string, natsOpts []nats.Option, jsOps []nats.JSOpt, subOpts []nats.SubOpt, opts ...ProtocolOption) (*Protocol, error) {
 	conn, err := nats.Connect(url, natsOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	p, err := NewProtocolFromConn(conn, sendSubject, receiveSubject, opts...)
+	p, err := NewProtocolFromConn(conn, stream, sendSubject, receiveSubject, jsOps, subOpts, opts...)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -40,7 +45,7 @@ func NewProtocol(url, sendSubject, receiveSubject string, natsOpts []nats.Option
 	return p, nil
 }
 
-func NewProtocolFromConn(conn *nats.Conn, sendSubject, receiveSubject string, opts ...ProtocolOption) (*Protocol, error) {
+func NewProtocolFromConn(conn *nats.Conn, stream, sendSubject, receiveSubject string, jsOpts []nats.JSOpt, subOpts []nats.SubOpt, opts ...ProtocolOption) (*Protocol, error) {
 	var err error
 	p := &Protocol{
 		Conn: conn,
@@ -50,11 +55,11 @@ func NewProtocolFromConn(conn *nats.Conn, sendSubject, receiveSubject string, op
 		return nil, err
 	}
 
-	if p.Consumer, err = NewConsumerFromConn(conn, receiveSubject, p.consumerOptions...); err != nil {
+	if p.Consumer, err = NewConsumerFromConn(conn, stream, receiveSubject, jsOpts, subOpts); err != nil {
 		return nil, err
 	}
 
-	if p.Sender, err = NewSenderFromConn(conn, sendSubject, p.senderOptions...); err != nil {
+	if p.Sender, err = NewSenderFromConn(conn, stream, sendSubject, jsOpts); err != nil {
 		return nil, err
 	}
 

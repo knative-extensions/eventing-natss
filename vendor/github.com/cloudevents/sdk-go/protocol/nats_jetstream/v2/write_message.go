@@ -1,4 +1,9 @@
-package nats
+/*
+ Copyright 2021 The CloudEvents Authors
+ SPDX-License-Identifier: Apache-2.0
+*/
+
+package nats_jetstream
 
 import (
 	"context"
@@ -26,6 +31,7 @@ type natsMessageWriter struct {
 	io.ReaderFrom
 }
 
+// StructuredWriter  implements StructuredWriter.SetStructuredEvent
 func (w *natsMessageWriter) SetStructuredEvent(_ context.Context, _ format.Format, event io.Reader) error {
 	if _, err := w.ReadFrom(event); err != nil {
 		return err

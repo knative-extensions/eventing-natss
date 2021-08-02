@@ -29,7 +29,7 @@ spec:
     metadata:
       labels: *labels
     spec:
-      serviceAccountName: nats-ch-dispatcher
+      serviceAccountName: nats-jsm-ch-dispatcher
       containers:
         - name: dispatcher
           image: ko://knative.dev/eventing-natss/cmd/jetstream_channel_dispatcher
@@ -51,7 +51,7 @@ spec:
             - name: METRICS_DOMAIN
               value: knative.dev/eventing
             - name: DEFAULT_JETSTREAM_URL
-              value: nats://10.211.55.5:4222
+              value: nats://10.251.247.131:4222
             - name: SYSTEM_NAMESPACE
               valueFrom:
                 fieldRef:

@@ -89,7 +89,7 @@ type NatsJetStreamChannelList struct {
 
 // GetGroupVersionKind returns GroupVersionKind for NatssChannels
 func (*NatsJetStreamChannel) GetGroupVersionKind() schema.GroupVersionKind {
-	return SchemeGroupVersion.WithKind("NatssChannel")
+	return SchemeGroupVersion.WithKind("NatsJetStreamChannel")
 }
 
 // GetStatus retrieves the duck status for this resource. Implements the KRShaped interface.

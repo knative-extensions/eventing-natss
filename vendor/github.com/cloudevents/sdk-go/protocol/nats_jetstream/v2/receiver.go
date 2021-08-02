@@ -1,4 +1,9 @@
-package nats
+/*
+ Copyright 2021 The CloudEvents Authors
+ SPDX-License-Identifier: Apache-2.0
+*/
+
+package nats_jetstream
 
 import (
 	"context"
@@ -19,6 +24,7 @@ type Receiver struct {
 	incoming chan msgErr
 }
 
+// NewReceiver creates a new protocol.Receiver responsible for receiving messages.
 func NewReceiver() *Receiver {
 	return &Receiver{
 		incoming: make(chan msgErr),
@@ -31,6 +37,7 @@ func (r *Receiver) MsgHandler(msg *nats.Msg) {
 	r.incoming <- msgErr{msg: NewMessage(msg)}
 }
 
+// Receive implements Receiver.Receive.
 func (r *Receiver) Receive(ctx context.Context) (binding.Message, error) {
 	select {
 	case msgErr, ok := <-r.incoming:
@@ -47,21 +54,23 @@ type Consumer struct {
 	Receiver
 
 	Conn       *nats.Conn
+	Jsm        nats.JetStreamContext
 	Subject    string
 	Subscriber Subscriber
+	SubOpt     []nats.SubOpt
 
 	subMtx        sync.Mutex
 	internalClose chan struct{}
 	connOwned     bool
 }
 
-func NewConsumer(url, subject string, natsOpts []nats.Option, opts ...ConsumerOption) (*Consumer, error) {
+func NewConsumer(url, stream, subject string, natsOpts []nats.Option, jsmOpts []nats.JSOpt, subOpts []nats.SubOpt, opts ...ConsumerOption) (*Consumer, error) {
 	conn, err := nats.Connect(url, natsOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	c, err := NewConsumerFromConn(conn, subject, opts...)
+	c, err := NewConsumerFromConn(conn, stream, subject, jsmOpts, subOpts, opts...)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -72,16 +81,35 @@ func NewConsumer(url, subject string, natsOpts []nats.Option, opts ...ConsumerOp
 	return c, err
 }
 
-func NewConsumerFromConn(conn *nats.Conn, subject string, opts ...ConsumerOption) (*Consumer, error) {
+func NewConsumerFromConn(conn *nats.Conn, stream, subject string, jsmOpts []nats.JSOpt, subOpts []nats.SubOpt, opts ...ConsumerOption) (*Consumer, error) {
+	jsm, err := conn.JetStream(jsmOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	streamInfo, err := jsm.StreamInfo(stream, jsmOpts...)
+
+	if streamInfo == nil || err != nil && err.Error() == "stream not found" {
+		_, err = jsm.AddStream(&nats.StreamConfig{
+			Name:     stream,
+			Subjects: []string{stream + ".*"},
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	c := &Consumer{
 		Receiver:      *NewReceiver(),
 		Conn:          conn,
+		Jsm:           jsm,
 		Subject:       subject,
+		SubOpt:        subOpts,
 		Subscriber:    &RegularSubscriber{},
 		internalClose: make(chan struct{}, 1),
 	}
 
-	err := c.applyOptions(opts...)
+	err = c.applyOptions(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +122,7 @@ func (c *Consumer) OpenInbound(ctx context.Context) error {
 	defer c.subMtx.Unlock()
 
 	// Subscribe
-	sub, err := c.Subscriber.Subscribe(c.Conn, c.Subject, c.MsgHandler)
+	sub, err := c.Subscriber.Subscribe(c.Jsm, c.Subject, c.MsgHandler, c.SubOpt...)
 	if err != nil {
 		return err
 	}

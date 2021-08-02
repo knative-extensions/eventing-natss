@@ -32,13 +32,13 @@ const (
 	portName           = "http"
 	portNumber         = 80
 	MessagingRoleLabel = "messaging.knative.dev/role"
-	MessagingRole      = "nats-channel"
+	MessagingRole      = "nats-jetstream-channel"
 )
 
 // ServiceOption can be used to optionally modify the K8s service in MakeK8sService.
 type ServiceOption func(*corev1.Service) error
 
-func MakeChannelServiceName(name string) string {
+func MakeJSMChannelServiceName(name string) string {
 	return fmt.Sprintf("%s-kn-channel", name)
 }
 
@@ -66,7 +66,7 @@ func MakeK8sService(kc *v1alpha1.NatsJetStreamChannel, opts ...ServiceOption) (*
 			Kind:       "Service",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      MakeChannelServiceName(kc.ObjectMeta.Name),
+			Name:      MakeJSMChannelServiceName(kc.ObjectMeta.Name),
 			Namespace: kc.Namespace,
 			Labels: map[string]string{
 				MessagingRoleLabel: MessagingRole,

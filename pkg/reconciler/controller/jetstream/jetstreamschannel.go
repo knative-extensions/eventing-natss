@@ -141,7 +141,7 @@ func (r *Reconciler) reconcileChannelService(ctx context.Context, channel *v1alp
 	// We don't do anything with the service because it's status contains nothing useful, so just do
 	// an existence check. Then below we check the endpoints targeting it.
 	// We may change this name later, so we have to ensure we use proper addressable when resolving these.
-	svc, err := r.serviceLister.Services(channel.Namespace).Get(resources.MakeChannelServiceName(channel.Name))
+	svc, err := r.serviceLister.Services(channel.Namespace).Get(resources.MakeJSMChannelServiceName(channel.Name))
 	if err != nil {
 		if apierrs.IsNotFound(err) {
 			svc, err = resources.MakeK8sService(channel, resources.ExternalService(r.dispatcherNamespace, r.dispatcherServiceName))

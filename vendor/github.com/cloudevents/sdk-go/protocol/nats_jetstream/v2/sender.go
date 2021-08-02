@@ -1,30 +1,37 @@
-package nats
+/*
+ Copyright 2021 The CloudEvents Authors
+ SPDX-License-Identifier: Apache-2.0
+*/
+
+package nats_jetstream
 
 import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/cloudevents/sdk-go/v2/binding"
-	"github.com/cloudevents/sdk-go/v2/protocol"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/cloudevents/sdk-go/v2/binding"
+	"github.com/cloudevents/sdk-go/v2/protocol"
 )
 
 type Sender struct {
-	Conn    *nats.Conn
-	Subject string
-
+	Jsm       nats.JetStreamContext
+	Conn      *nats.Conn
+	Subject   string
+	Stream    string
 	connOwned bool
 }
 
-// NewSender creates a new protocol.Sender responsible for opening and closing the STAN connection
-func NewSender(url, subject string, natsOpts []nats.Option, opts ...SenderOption) (*Sender, error) {
+// NewSender creates a new protocol.Sender responsible for opening and closing the NATS connection
+func NewSender(url, stream, subject string, natsOpts []nats.Option, jsmOpts []nats.JSOpt, opts ...SenderOption) (*Sender, error) {
 	conn, err := nats.Connect(url, natsOpts...)
 	if err != nil {
 		return nil, err
 	}
 
-	s, err := NewSenderFromConn(conn, subject, opts...)
+	s, err := NewSenderFromConn(conn, stream, subject, jsmOpts, opts...)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -37,13 +44,32 @@ func NewSender(url, subject string, natsOpts []nats.Option, opts ...SenderOption
 
 // NewSenderFromConn creates a new protocol.Sender which leaves responsibility for opening and closing the STAN
 // connection to the caller
-func NewSenderFromConn(conn *nats.Conn, subject string, opts ...SenderOption) (*Sender, error) {
+func NewSenderFromConn(conn *nats.Conn, stream, subject string, jsmOpts []nats.JSOpt, opts ...SenderOption) (*Sender, error) {
+	jsm, err := conn.JetStream(jsmOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	streamInfo, err := jsm.StreamInfo(stream, jsmOpts...)
+
+	if streamInfo == nil || err != nil && err.Error() == "stream not found" {
+		_, err = jsm.AddStream(&nats.StreamConfig{
+			Name:     stream,
+			Subjects: []string{stream + ".*"},
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	s := &Sender{
+		Jsm:     jsm,
 		Conn:    conn,
+		Stream:  stream,
 		Subject: subject,
 	}
 
-	err := s.applyOptions(opts...)
+	err = s.applyOptions(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +77,8 @@ func NewSenderFromConn(conn *nats.Conn, subject string, opts ...SenderOption) (*
 	return s, nil
 }
 
+// Close implements Sender.Sender
+// Sender sends messages.
 func (s *Sender) Send(ctx context.Context, in binding.Message, transformers ...binding.Transformer) (err error) {
 	defer func() {
 		if err2 := in.Finish(err); err2 != nil {
@@ -66,7 +94,9 @@ func (s *Sender) Send(ctx context.Context, in binding.Message, transformers ...b
 	if err = WriteMsg(ctx, in, writer, transformers...); err != nil {
 		return err
 	}
-	return s.Conn.Publish(s.Subject, writer.Bytes())
+	_, err = s.Jsm.Publish(s.Subject, writer.Bytes())
+
+	return err
 }
 
 // Close implements Closer.Close

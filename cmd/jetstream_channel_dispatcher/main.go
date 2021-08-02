@@ -26,7 +26,7 @@ import (
 	"knative.dev/eventing-natss/pkg/reconciler/dispatcher/jetstream"
 )
 
-const component = "jetstream-schannel-dispatcher"
+const component = "jetstream-channel-dispatcher"
 
 func main() {
 	ctx := signals.NewContext()

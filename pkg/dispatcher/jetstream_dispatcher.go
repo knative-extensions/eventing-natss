@@ -27,7 +27,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
-	natscloudevents "github.com/cloudevents/sdk-go/protocol/nats/v2"
+	jsmcloudevents "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/stan.go"
@@ -137,15 +137,14 @@ func jetmessageReceiverFunc(s *jetSubscriptionsSupervisor) eventingchannels.Unbu
 		currentNatssConn := s.natsConn
 		s.natsConnMux.Unlock()
 		if currentNatssConn == nil {
-			s.logger.Error("no Connection to NATSS")
-			return errors.New("no Connection to NATSS")
+			s.logger.Error("no Connection to NATS JetStream")
+			return errors.New("no Connection to NATS JetStream")
 		}
 
-		// TODO update to jetstream  when this issue is done https://github.com/cloudevents/sdk-go/issues/694
-		sender, err := natscloudevents.NewSenderFromConn(currentNatssConn, getJetStreamSubject(channel))
+		sender, err := jsmcloudevents.NewSenderFromConn(currentNatssConn, natsutil.StreamName, getJetStreamSubject(channel), nil)
 		if err != nil {
-			s.logger.Error("could not create natss sender", zap.Error(err))
-			return errors.Wrap(err, "could not create natss sender")
+			s.logger.Error("could not create nats jetstream sender", zap.Error(err))
+			return errors.Wrap(err, "could not create nats jetstream sender")
 		}
 		if err := sender.Send(ctx, message); err != nil {
 			errMsg := "error during send"
@@ -295,7 +294,7 @@ func (s *jetSubscriptionsSupervisor) subscribe(ctx context.Context, channel even
 			}
 		}()
 
-		message := natscloudevents.NewMessage(stanMsg)
+		message := jsmcloudevents.NewMessage(stanMsg)
 
 		s.logger.Debug("NATS JetStream message received", zap.String("subject", stanMsg.Subject))
 
@@ -343,12 +342,18 @@ func (s *jetSubscriptionsSupervisor) subscribe(ctx context.Context, channel even
 		return nil, errors.New("no Connection to NATS JetStream")
 	}
 
-	subscriber := &natscloudevents.RegularSubscriber{}
-	natssSub, err := subscriber.Subscribe(currentNatssConn, ch, mcb)
+	jsm, err := currentNatssConn.JetStream(nil...)
+	if jsm == nil || err != nil {
+		return nil, fmt.Errorf("get JetStream Context from Connection err,err:%s", err.Error())
+	}
+
+	subscriber := &jsmcloudevents.RegularSubscriber{}
+	natssSub, err := subscriber.Subscribe(jsm, ch, mcb)
+	s.logger.Sugar().Infof("====nats jetstream subject %s", ch)
 	if err != nil {
-		s.logger.Error(" Create new NATSS Subscription failed: ", zap.Error(err))
+		s.logger.Error(" Create new NATS JetStream Subscription failed: ", zap.Error(err))
 		if err.Error() == stan.ErrConnectionClosed.Error() {
-			s.logger.Error("Connection to NATSS has been lost, attempting to reconnect.")
+			s.logger.Error("Connection to NATS JetStream has been lost, attempting to reconnect.")
 			// Informing subscriptionsSupervisor to re-establish connection to NATS
 			s.signalReconnect()
 			return nil, err
@@ -407,5 +412,5 @@ func (s *jetSubscriptionsSupervisor) getChannelReferenceFromHost(host string) (e
 }
 
 func getJetStreamSubject(channel eventingchannels.ChannelReference) string {
-	return natsutil.StreamName + "." + channel.Name + "." + channel.Namespace
+	return natsutil.StreamName + "." + channel.Name + "-" + channel.Namespace
 }
