@@ -38,8 +38,6 @@ spec:
               value: config-logging
             - name: METRICS_DOMAIN
               value: knative.dev/eventing
-            - name: DEFAULT_NATSS_URL
-              value: nats://10.251.247.131:4222
             - name: SYSTEM_NAMESPACE
               valueFrom:
                 fieldRef:

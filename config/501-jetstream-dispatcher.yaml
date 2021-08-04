@@ -51,7 +51,7 @@ spec:
             - name: METRICS_DOMAIN
               value: knative.dev/eventing
             - name: DEFAULT_JETSTREAM_URL
-              value: nats://10.251.247.131:4222
+              value: nats://jetstream.nats.svc.cluster.local:4222
             - name: SYSTEM_NAMESPACE
               valueFrom:
                 fieldRef:
