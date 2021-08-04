@@ -15,7 +15,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nats-webhook
+  name: natss-webhook
   namespace: knative-eventing
   labels:
     nats.eventing.knative.dev/release: devel
@@ -23,8 +23,8 @@ spec:
   replicas: 1
   selector:
     matchLabels: &labels
-      app: nats-webhook
-      role: nats-webhook
+      app: natss-webhook
+      role: natss-webhook
   template:
     metadata:
       labels: *labels
@@ -36,14 +36,14 @@ spec:
           - podAffinityTerm:
               labelSelector:
                 matchLabels:
-                  app: nats-webhook
+                  app: natss-webhook
               topologyKey: kubernetes.io/hostname
             weight: 100
 
-      serviceAccountName: nats-webhook
+      serviceAccountName: natss-webhook
 
       containers:
-      - name: nats-webhook
+      - name: natss-webhook
         terminationMessagePolicy: FallbackToLogsOnError
 
         # This is the Go import path for the binary that is containerized
@@ -70,7 +70,7 @@ spec:
         - name: METRICS_DOMAIN
           value: knative.dev/channels
         - name: WEBHOOK_NAME
-          value: nats-webhook
+          value: natss-webhook
         - name: WEBHOOK_PORT
           value: "8443"
 
@@ -107,8 +107,8 @@ kind: Service
 metadata:
   labels:
     nats.eventing.knative.dev/release: devel
-    role: nats-webhook
-  name: nats-webhook
+    role: natss-webhook
+  name: natss-webhook
   namespace: knative-eventing
 spec:
   ports:
@@ -116,4 +116,4 @@ spec:
       port: 443
       targetPort: 8443
   selector:
-    role: nats-webhook
+    role: natss-webhook

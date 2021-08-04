@@ -29,7 +29,7 @@ spec:
     metadata:
       labels: *labels
     spec:
-      serviceAccountName: nats-ch-dispatcher
+      serviceAccountName: natss-ch-dispatcher
       containers:
         - name: dispatcher
           image: ko://knative.dev/eventing-natss/cmd/channel_dispatcher

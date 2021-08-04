@@ -29,7 +29,7 @@ spec:
     metadata:
       labels: *labels
     spec:
-      serviceAccountName: nats-ch-controller
+      serviceAccountName: natss-ch-controller
       containers:
         - name: controller
           image: ko://knative.dev/eventing-natss/cmd/channel_controller
