@@ -19,11 +19,11 @@ metadata:
   namespace: knative-eventing
   labels:
     nats.eventing.knative.dev/release: devel
-    messaging.knative.dev/channel: jetstream-channel
+    messaging.knative.dev/channel: natsjsm-channel
     messaging.knative.dev/role: dispatcher
 spec:
   selector:
-    messaging.knative.dev/channel: jetstream-channel
+    messaging.knative.dev/channel: natsjsm-channel
     messaging.knative.dev/role: dispatcher
   ports:
   - name: http-dispatcher

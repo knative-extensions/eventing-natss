@@ -23,7 +23,7 @@ spec:
   replicas: 1
   selector:
     matchLabels: &labels
-      messaging.knative.dev/channel: jetstream-channel
+      messaging.knative.dev/channel: natsjsm-channel
       messaging.knative.dev/role: controller
   template:
     metadata:

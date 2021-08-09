@@ -29,6 +29,7 @@ import (
 
 	"k8s.io/client-go/tools/cache"
 
+	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1beta1/natsschannel"
 	natssChannelReconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1beta1/natsschannel"
 )
@@ -78,6 +79,11 @@ func NewController(ctx context.Context) *controller.Impl {
 	endpointsInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: filterFunc,
 		Handler:    controller.HandleAll(grCh),
+	})
+
+	serviceInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
+		FilterFunc: controller.FilterControllerGK(v1alpha1.Kind("NatsJetStreamChannel")),
+		Handler:    controller.HandleAll(impl.EnqueueControllerOf),
 	})
 
 	return impl

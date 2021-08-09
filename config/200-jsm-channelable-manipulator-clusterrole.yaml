@@ -1,4 +1,4 @@
-# Copyright 2019 The Knative Authors
+# Copyright 2021 The Knative Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ kind: ClusterRole
 metadata:
   name: nats-jsm-channelable-manipulator
   labels:
-    natsjsm.eventing.knative.dev/release: devel
+    nats.eventing.knative.dev/release: devel
     duck.knative.dev/channelable: "true"
 # Do not use this role directly. These rules will be added to the "channelable-manipulator" role.
 rules:
