@@ -10,8 +10,8 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/influxdata/tdigest v0.0.1 // indirect
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/nats-io/stan.go v0.9.0
 	github.com/nats-io/nats.go v1.11.1-0.20210623165838-4b75fc59ae30
+	github.com/nats-io/stan.go v0.9.0
 	github.com/pkg/errors v0.9.1
 	go.uber.org/zap v1.18.1
 	k8s.io/api v0.20.7

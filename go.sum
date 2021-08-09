@@ -130,10 +130,12 @@ github.com/cloudevents/conformance v0.2.0 h1:NvSXOKlagcsOWMEbi8U7Ex/0oQ4JZE1HQ45
 github.com/cloudevents/conformance v0.2.0/go.mod h1:rHKDwylBH89Rns6U3wL9ww8bg9/4GbwRCDNuyoC6bcc=
 github.com/cloudevents/sdk-go/observability/opencensus/v2 v2.4.1 h1:UHjY9+DJyjELyFA8vU/KHHXix1F1z7QLFskzdJZkP+0=
 github.com/cloudevents/sdk-go/observability/opencensus/v2 v2.4.1/go.mod h1:lhEpxMrIUkeu9rVRgoAbyqZ8GR8Hd3DUy+thHUxAHoI=
-github.com/cloudevents/sdk-go/protocol/stan/v2 v2.4.1 h1:DENxjIgRjYPFmdHDRf2gK3+4zrY0TGOq0JH52BqIQio=
-github.com/cloudevents/sdk-go/protocol/stan/v2 v2.4.1/go.mod h1:LHujxKkMYGCz+mo1Ko6EporWmEJQMcxMwxC0NlYk+GI=
-github.com/cloudevents/sdk-go/v2 v2.4.1 h1:rZJoz9QVLbWQmnvLPDFEmv17Czu+CfSPwMO6lhJ72xQ=
-github.com/cloudevents/sdk-go/v2 v2.4.1/go.mod h1:MZiMwmAh5tGj+fPFvtHv9hKurKqXtdB9haJYMJ/7GJY=
+github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.0.0-20210715165402-49fda7a51425 h1:/bRvN66kOR+AyvyFU+OI4J6ujUq7tlf7iqfj+D+bcHU=
+github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.0.0-20210715165402-49fda7a51425/go.mod h1:IQH1RoZ2yWDm4yC1k6YY8z/GrE+zP8l/YS4RVFyDkjw=
+github.com/cloudevents/sdk-go/protocol/stan/v2 v2.2.0 h1:BngF6foto2hnaV9lMgv2zBH6smzroVtv5yOnLGI+TJg=
+github.com/cloudevents/sdk-go/protocol/stan/v2 v2.2.0/go.mod h1:gg+no/2NUEdnhEk+TMRN0wmLuujoBvsDuNZ0TZyenpE=
+github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425 h1:VkGj+xcPzsJdbm7U6hOiKTRNH06Le8jxrCMi+GyN16Y=
+github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425/go.mod h1:nlXhgFkf0uTopxmRXalyMwS2LG70cRGPrxzmjJgSG0U=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=
 github.com/cncf/udpa/go v0.0.0-20201120205902-5459f2c99403/go.mod h1:WmhPx2Nbnhtbo57+VJT5O0JRkEi1Wbu0z5j0R8u5Hbk=
 github.com/cncf/xds/go v0.0.0-20210312221358-fbca930ec8ed/go.mod h1:eXthEFrGJvWHgFFCl3hGmgk+/aYT6PnTQLykKQRLhEs=
@@ -505,6 +507,7 @@ github.com/nats-io/nats-streaming-server v0.17.0 h1:eYhSmjRmRsCYNsoUshmZ+RgKbhq6
 github.com/nats-io/nats-streaming-server v0.17.0/go.mod h1:ewPBEsmp62Znl3dcRsYtlcfwudxHEdYMtYqUQSt4fE0=
 github.com/nats-io/nats.go v1.9.1/go.mod h1:ZjDU1L/7fJ09jvUSRVBR2e7+RnLiiIQyqyzEE/Zbp4w=
 github.com/nats-io/nats.go v1.10.0/go.mod h1:AjGArbfyR50+afOUotNX2Xs5SYHf+CoOa5HH1eEl2HE=
+github.com/nats-io/nats.go v1.11.0/go.mod h1:BPko4oXsySz4aSWeFgOHLZs3G4Jq4ZAyE6/zMCxRT6w=
 github.com/nats-io/nats.go v1.11.1-0.20210623165838-4b75fc59ae30 h1:9GqilBhZaR3xYis0JgMlJjNw933WIobdjKhilXm+Vls=
 github.com/nats-io/nats.go v1.11.1-0.20210623165838-4b75fc59ae30/go.mod h1:BPko4oXsySz4aSWeFgOHLZs3G4Jq4ZAyE6/zMCxRT6w=
 github.com/nats-io/nkeys v0.1.0/go.mod h1:xpnFELMwJABBLVhffcfd1MZx6VsNRFpEugbxziKVo7w=
