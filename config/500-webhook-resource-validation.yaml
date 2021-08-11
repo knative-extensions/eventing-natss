@@ -15,9 +15,9 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: validation.webhook.natss.messaging.knative.dev
+  name: validation.webhook.nats.messaging.knative.dev
   labels:
-    natss.messaging.knative.dev/release: devel
+    nats.eventing.knative.dev/release: devel
 webhooks:
 - admissionReviewVersions: ["v1beta1"]
   clientConfig:
@@ -26,5 +26,5 @@ webhooks:
       namespace: knative-eventing
   sideEffects: None
   failurePolicy: Fail
-  name: validation.webhook.natss.messaging.knative.dev
+  name: validation.webhook.nats.messaging.knative.dev
   timeoutSeconds: 2

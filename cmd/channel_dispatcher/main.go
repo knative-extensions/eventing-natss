@@ -19,12 +19,11 @@ package main
 import (
 	"os"
 
-	controller "knative.dev/eventing-natss/pkg/reconciler/dispatcher"
-
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
-
 	"knative.dev/pkg/signals"
+
+	"knative.dev/eventing-natss/pkg/reconciler/dispatcher/natss"
 )
 
 const component = "natsschannel-dispatcher"
@@ -36,5 +35,5 @@ func main() {
 		ctx = injection.WithNamespaceScope(ctx, ns)
 	}
 
-	sharedmain.MainWithContext(ctx, component, controller.NewController)
+	sharedmain.MainWithContext(ctx, component, natss.NewController)
 }

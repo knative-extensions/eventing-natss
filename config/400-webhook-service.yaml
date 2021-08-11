@@ -18,5 +18,5 @@ metadata:
   name: natss-webhook-certs
   namespace: knative-eventing
   labels:
-    natss.messaging.knative.dev/release: devel
+    nats.messaging.knative.dev/release: devel
 # The data is populated at install time.

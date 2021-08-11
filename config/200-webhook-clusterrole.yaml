@@ -17,7 +17,7 @@ kind: ClusterRole
 metadata:
   name: natss-webhook
   labels:
-    natss.messaging.knative.dev/release: devel
+    nats.messaging.knative.dev/release: devel
 rules:
   # For watching logging configuration and getting certs.
   - apiGroups:
