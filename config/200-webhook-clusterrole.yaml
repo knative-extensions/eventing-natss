@@ -15,7 +15,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: natss-webhook
+  name: nats-webhook
   labels:
     nats.messaging.knative.dev/release: devel
 rules:

@@ -22,7 +22,7 @@ webhooks:
 - admissionReviewVersions: ["v1beta1"]
   clientConfig:
     service:
-      name: natss-webhook
+      name: nats-webhook
       namespace: knative-eventing
   sideEffects: None
   failurePolicy: Fail
