@@ -15,7 +15,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: natss-webhook-certs
+  name: nats-webhook-certs
   namespace: knative-eventing
   labels:
     nats.messaging.knative.dev/release: devel
