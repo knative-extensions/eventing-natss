@@ -121,7 +121,7 @@ jobs:
         kubectl create namespace natss
         kubectl apply -n natss -f ./config/broker/natss.yaml
         # Create a ConfigMap that we use to instruct Broker to create natss channels.
-        kubectl apply -n natss -f ./config/broker/config-br-default-channel.yaml
+        kubectl apply -n natss -f ./config/broker/config-br-default-channel-natss.yaml
 
     - name: Install Knative Eventing
       run: |
