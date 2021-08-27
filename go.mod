@@ -13,13 +13,13 @@ require (
 	github.com/nats-io/nats.go v1.11.1-0.20210623165838-4b75fc59ae30
 	github.com/nats-io/stan.go v0.9.0
 	github.com/pkg/errors v0.9.1
-	go.uber.org/zap v1.18.1
+	go.uber.org/zap v1.19.0
 	k8s.io/api v0.20.7
 	k8s.io/apimachinery v0.20.7
 	k8s.io/client-go v0.20.7
-	knative.dev/eventing v0.25.1-0.20210826135832-eb3b6813e40c
+	knative.dev/eventing v0.25.1-0.20210827141738-ea5ed9adf51f
 	knative.dev/hack v0.0.0-20210806075220-815cd312d65c
-	knative.dev/pkg v0.0.0-20210826154032-ddd97e9fb8cc
+	knative.dev/pkg v0.0.0-20210827112638-4472e04552d3
 	knative.dev/reconciler-test v0.0.0-20210820180205-a25de6a08087
 )
 
