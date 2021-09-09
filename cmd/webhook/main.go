@@ -31,13 +31,15 @@ import (
 	"knative.dev/pkg/webhook/resourcesemantics/defaulting"
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
 
+	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
 )
 
 var ourTypes = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
 	// For group messaging.knative.dev.
 	// v1beta1
-	v1beta1.SchemeGroupVersion.WithKind("NatssChannel"): &v1beta1.NatssChannel{},
+	v1beta1.SchemeGroupVersion.WithKind("NatssChannel"):          &v1beta1.NatssChannel{},
+	v1alpha1.SchemeGroupVersion.WithKind("NatsJetStreamChannel"): &v1alpha1.NatsJetStreamChannel{},
 }
 
 var callbacks = map[schema.GroupVersionKind]validation.Callback{}
@@ -51,7 +53,7 @@ func NewDefaultingAdmissionController(ctx context.Context, cmw configmap.Watcher
 	return defaulting.NewAdmissionController(ctx,
 
 		// Name of the resource webhook.
-		"webhook.natss.messaging.knative.dev",
+		"webhook.nats.messaging.knative.dev",
 
 		// The path on which to serve the webhook.
 		"/defaulting",
@@ -75,7 +77,7 @@ func NewValidationAdmissionController(ctx context.Context, cmw configmap.Watcher
 	return validation.NewAdmissionController(ctx,
 
 		// Name of the resource webhook.
-		"validation.webhook.natss.messaging.knative.dev",
+		"validation.webhook.nats.messaging.knative.dev",
 
 		// The path on which to serve the webhook.
 		"/resource-validation",
@@ -97,13 +99,13 @@ func NewValidationAdmissionController(ctx context.Context, cmw configmap.Watcher
 func main() {
 	// Set up a signal context with our webhook options
 	ctx := webhook.WithOptions(signals.NewContext(), webhook.Options{
-		ServiceName: "natss-webhook",
+		ServiceName: "nats-webhook",
 		Port:        webhook.PortFromEnv(8443),
 		// SecretName must match the name of the Secret created in the configuration.
-		SecretName: "natss-webhook-certs",
+		SecretName: "nats-webhook-certs",
 	})
 
-	sharedmain.WebhookMainWithContext(ctx, "natss-webhook",
+	sharedmain.WebhookMainWithContext(ctx, "nats-webhook",
 		certificates.NewController,
 		NewValidationAdmissionController,
 		NewDefaultingAdmissionController,

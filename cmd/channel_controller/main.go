@@ -27,7 +27,7 @@ import (
 	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/signals"
 
-	"knative.dev/eventing-natss/pkg/reconciler/controller"
+	"knative.dev/eventing-natss/pkg/reconciler/controller/natss"
 )
 
 const component = "natsschannel-controller"
@@ -41,6 +41,6 @@ func main() {
 	}
 
 	sharedmain.MainWithContext(ctx, component, func(ctx context.Context, watcher configmap.Watcher) *kncontroller.Impl {
-		return controller.NewController(ctx)
+		return natss.NewController(ctx)
 	})
 }

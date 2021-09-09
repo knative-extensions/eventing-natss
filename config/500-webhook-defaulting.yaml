@@ -15,16 +15,16 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: webhook.natss.messaging.knative.dev
+  name: webhook.nats.messaging.knative.dev
   labels:
-    natss.messaging.knative.dev/release: devel
+    nats.eventing.knative.dev/release: devel
 webhooks:
 - admissionReviewVersions: ["v1beta1"]
   clientConfig:
     service:
-      name: natss-webhook
+      name: nats-webhook
       namespace: knative-eventing
   sideEffects: None
   failurePolicy: Fail
-  name: webhook.natss.messaging.knative.dev
+  name: webhook.nats.messaging.knative.dev
   timeoutSeconds: 2

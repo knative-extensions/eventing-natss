@@ -21,39 +21,50 @@ import (
 	"errors"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/tools/cache"
+	"knative.dev/pkg/client/injection/ducks/duck/v1/addressable"
+	"knative.dev/pkg/controller"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/types"
-
 	"knative.dev/pkg/apis"
 	pkgapisduck "knative.dev/pkg/apis/duck"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	duckv1beta1 "knative.dev/pkg/apis/duck/v1beta1"
-	"knative.dev/pkg/controller"
 	"knative.dev/pkg/network"
 	"knative.dev/pkg/tracker"
-
-	"knative.dev/pkg/client/injection/ducks/duck/v1/addressable"
 )
+
+// RefResolverFunc resolves ObjectReferences into a URI.
+// It returns true when it handled the reference, in which case it also returns the resolved URI or an error.
+type RefResolverFunc func(ctx context.Context, ref *corev1.ObjectReference) (bool, *apis.URL, error)
 
 // URIResolver resolves Destinations and ObjectReferences into a URI.
 type URIResolver struct {
-	tracker         tracker.Interface
-	informerFactory pkgapisduck.InformerFactory
+	tracker       tracker.Interface
+	listerFactory func(schema.GroupVersionResource) (cache.GenericLister, error)
+	resolvers     []RefResolverFunc
 }
 
-// NewURIResolver constructs a new URIResolver with context and a callback
-// for a given listableType (Listable) passed to the URIResolver's tracker.
-func NewURIResolver(ctx context.Context, callback func(types.NamespacedName)) *URIResolver {
-	ret := &URIResolver{}
+// NewURIResolverFromTracker constructs a new URIResolver with context, a tracker and an optional list of custom resolvers.
+func NewURIResolverFromTracker(ctx context.Context, t tracker.Interface, resolvers ...RefResolverFunc) *URIResolver {
+	ret := &URIResolver{
+		tracker:   t,
+		resolvers: resolvers,
+	}
 
-	ret.tracker = tracker.New(callback, controller.GetTrackerLease(ctx))
-	ret.informerFactory = &pkgapisduck.CachedInformerFactory{
+	informerFactory := &pkgapisduck.CachedInformerFactory{
 		Delegate: &pkgapisduck.EnqueueInformerFactory{
 			Delegate:     addressable.Get(ctx),
 			EventHandler: controller.HandleAll(ret.tracker.OnChanged),
 		},
+	}
+
+	ret.listerFactory = func(gvr schema.GroupVersionResource) (cache.GenericLister, error) {
+		_, l, err := informerFactory.Get(ctx, gvr)
+		return l, err
 	}
 
 	return ret
@@ -141,6 +152,16 @@ func (r *URIResolver) URIFromObjectReference(ctx context.Context, ref *corev1.Ob
 		return nil, apierrs.NewBadRequest("ref is nil")
 	}
 
+	// try custom resolvers first
+	for _, resolver := range r.resolvers {
+		handled, url, err := resolver(ctx, ref)
+		if handled {
+			return url, err
+		}
+
+		// when handled is false, both url and err are ignored.
+	}
+
 	gvr, _ := meta.UnsafeGuessKindToResource(ref.GroupVersionKind())
 	if err := r.tracker.TrackReference(tracker.Reference{
 		APIVersion: ref.APIVersion,
@@ -151,19 +172,7 @@ func (r *URIResolver) URIFromObjectReference(ctx context.Context, ref *corev1.Ob
 		return nil, apierrs.NewNotFound(gvr.GroupResource(), ref.Name)
 	}
 
-	// K8s Services are special cased. They can be called, even though they do not satisfy the
-	// Callable interface.
-	// TODO(spencer-p,n3wscott) Verify that the service actually exists in K8s.
-	if ref.APIVersion == "v1" && ref.Kind == "Service" {
-		url := &apis.URL{
-			Scheme: "http",
-			Host:   network.GetServiceHostname(ref.Name, ref.Namespace),
-			Path:   "/",
-		}
-		return url, nil
-	}
-
-	_, lister, err := r.informerFactory.Get(ctx, gvr)
+	lister, err := r.listerFactory(gvr)
 	if err != nil {
 		return nil, apierrs.NewNotFound(gvr.GroupResource(), "Lister")
 	}
@@ -171,6 +180,17 @@ func (r *URIResolver) URIFromObjectReference(ctx context.Context, ref *corev1.Ob
 	obj, err := lister.ByNamespace(ref.Namespace).Get(ref.Name)
 	if err != nil {
 		return nil, apierrs.NewNotFound(gvr.GroupResource(), ref.Name)
+	}
+
+	// K8s Services are special cased. They can be called, even though they do not satisfy the
+	// Callable interface.
+	if ref.APIVersion == "v1" && ref.Kind == "Service" {
+		url := &apis.URL{
+			Scheme: "http",
+			Host:   network.GetServiceHostname(ref.Name, ref.Namespace),
+			Path:   "",
+		}
+		return url, nil
 	}
 
 	addressable, ok := obj.(*duckv1.AddressableType)

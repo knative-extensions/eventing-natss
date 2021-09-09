@@ -22,7 +22,6 @@ import (
 	context "context"
 	json "encoding/json"
 	fmt "fmt"
-	reflect "reflect"
 
 	zap "go.uber.org/zap"
 	v1 "k8s.io/api/core/v1"
@@ -74,16 +73,6 @@ type ReadOnlyInterface interface {
 	ObserveKind(ctx context.Context, o *v1beta1.NatssChannel) reconciler.Event
 }
 
-// ReadOnlyFinalizer defines the strongly typed interfaces to be implemented by a
-// controller finalizing v1beta1.NatssChannel if they want to process tombstoned resources
-// even when they are not the leader.  Due to the nature of how finalizers are handled
-// there are no guarantees that this will be called.
-type ReadOnlyFinalizer interface {
-	// ObserveFinalizeKind implements custom logic to observe the final state of v1beta1.NatssChannel.
-	// This method should not write to the API.
-	ObserveFinalizeKind(ctx context.Context, o *v1beta1.NatssChannel) reconciler.Event
-}
-
 type doReconcile func(ctx context.Context, o *v1beta1.NatssChannel) reconciler.Event
 
 // reconcilerImpl implements controller.Reconciler for v1beta1.NatssChannel resources.
@@ -133,7 +122,6 @@ func NewReconciler(ctx context.Context, logger *zap.SugaredLogger, client versio
 	if _, ok := r.(reconciler.LeaderAware); ok {
 		logger.Fatalf("%T implements the incorrect LeaderAware interface. Promote() should not take an argument as genreconciler handles the enqueuing automatically.", r)
 	}
-	// TODO: Consider validating when folks implement ReadOnlyFinalizer, but not Finalizer.
 
 	rec := &reconcilerImpl{
 		LeaderAwareFuncs: reconciler.LeaderAwareFuncs{
@@ -263,10 +251,6 @@ func (r *reconcilerImpl) Reconcile(ctx context.Context, key string) error {
 			return fmt.Errorf("failed to clear finalizers: %w", err)
 		}
 
-	case reconciler.DoObserveKind, reconciler.DoObserveFinalizeKind:
-		// Observe any changes to this resource, since we are not the leader.
-		reconcileEvent = do(ctx, resource)
-
 	}
 
 	// Synchronize the status.
@@ -297,7 +281,7 @@ func (r *reconcilerImpl) Reconcile(ctx context.Context, key string) error {
 		var event *reconciler.ReconcilerEvent
 		if reconciler.EventAs(reconcileEvent, &event) {
 			logger.Infow("Returned an event", zap.Any("event", reconcileEvent))
-			r.Recorder.Eventf(resource, event.EventType, event.Reason, event.Format, event.Args...)
+			r.Recorder.Event(resource, event.EventType, event.Reason, event.Error())
 
 			// the event was wrapped inside an error, consider the reconciliation as failed
 			if _, isEvent := reconcileEvent.(*reconciler.ReconcilerEvent); !isEvent {
@@ -306,8 +290,14 @@ func (r *reconcilerImpl) Reconcile(ctx context.Context, key string) error {
 			return nil
 		}
 
-		logger.Errorw("Returned an error", zap.Error(reconcileEvent))
-		r.Recorder.Event(resource, v1.EventTypeWarning, "InternalError", reconcileEvent.Error())
+		if controller.IsSkipKey(reconcileEvent) {
+			// This is a wrapped error, don't emit an event.
+		} else if ok, _ := controller.IsRequeueKey(reconcileEvent); ok {
+			// This is a wrapped error, don't emit an event.
+		} else {
+			logger.Errorw("Returned an error", zap.Error(reconcileEvent))
+			r.Recorder.Event(resource, v1.EventTypeWarning, "InternalError", reconcileEvent.Error())
+		}
 		return reconcileEvent
 	}
 
@@ -329,7 +319,7 @@ func (r *reconcilerImpl) updateStatus(ctx context.Context, existing *v1beta1.Nat
 		}
 
 		// If there's nothing to update, just return.
-		if reflect.DeepEqual(existing.Status, desired.Status) {
+		if equality.Semantic.DeepEqual(existing.Status, desired.Status) {
 			return nil
 		}
 
