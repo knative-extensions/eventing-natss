@@ -14,11 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package feature
+package eventshub
 
-const (
-	KReferenceGroup   = "kreference-group"
-	DeliveryTimeout   = "delivery-timeout"
-	KReferenceMapping = "kreference-mapping"
-	StrictSubscriber  = "strict-subscriber"
+import (
+	"context"
+	"embed"
+
+	"knative.dev/reconciler-test/pkg/feature"
+	"knative.dev/reconciler-test/pkg/manifest"
 )
+
+//go:embed *.yaml
+var templates embed.FS
+
+// Install creates the necessary ServiceAccount, Role, RoleBinding for the eventshub.
+// The resources are named according to the current namespace defined in the environment.
+func Install() feature.StepFn {
+	return func(ctx context.Context, t feature.T) {
+		if _, err := manifest.InstallYamlFS(ctx, templates, map[string]interface{}{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
