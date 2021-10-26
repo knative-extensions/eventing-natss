@@ -858,7 +858,7 @@ k8s.io/utils/buffer
 k8s.io/utils/integer
 k8s.io/utils/pointer
 k8s.io/utils/trace
-# knative.dev/eventing v0.26.1-0.20211019092333-7af98bbb4491
+# knative.dev/eventing v0.26.1-0.20211025155038-6ce29caf717f
 ## explicit
 knative.dev/eventing/pkg/apis/config
 knative.dev/eventing/pkg/apis/duck
@@ -911,10 +911,10 @@ knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/heartbeats
 knative.dev/eventing/test/test_images/performance
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20211019034732-ced8ce706528
+# knative.dev/hack v0.0.0-20211025203920-02860f59a556
 ## explicit
 knative.dev/hack
-# knative.dev/pkg v0.0.0-20211019132235-ba2b2b1bf268
+# knative.dev/pkg v0.0.0-20211025151738-819d556cdaa5
 ## explicit
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
