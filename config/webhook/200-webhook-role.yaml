@@ -1,0 +1,52 @@
+# Copyright 2021 The Knative Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nats-webhook
+  namespace: knative-eventing
+  labels:
+    nats.eventing.knative.dev/release: devel
+rules:
+  # webhook requires access to manage the nats-webhook-cert, the informers uses the system namespace scope so only
+  # requires to be a Role and not a ClusterRole
+  - apiGroups:
+      - ""
+    resources:
+      - "secrets"
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+  # required for leader election in case of multiple controller replicas
+  - apiGroups:
+      - "coordination.k8s.io"
+    resources:
+      - "leases"
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+      - patch
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - "namespaces"
+    verbs:
+      - get

@@ -1,0 +1,76 @@
+apiVersion: messaging.knative.dev/v1alpha1
+kind: NatsJetStreamChannel
+metadata:
+  name: channel-defaults
+  namespace: knative-eventing
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: event-display
+  namespace: knative-eventing
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/min-scale: "1"
+    spec:
+      containers:
+        - name: display
+          image: gcr.io/knative-releases/knative.dev/eventing/cmd/event_display
+          ports:
+            - containerPort: 8080
+---
+apiVersion: sources.knative.dev/v1
+kind: PingSource
+metadata:
+  name: ping
+  namespace: knative-eventing
+spec:
+  schedule: "* * * * *"
+  contentType: "application/json"
+  data: |
+    { "message": "Hello, World!" }
+  sink:
+    ref:
+      apiVersion: messaging.knative.dev/v1alpha1
+      kind: NatsJetStreamChannel
+      name: channel-defaults
+---
+apiVersion: messaging.knative.dev/v1
+kind: Subscription
+metadata:
+  name: subscription
+  namespace: knative-eventing
+spec:
+  channel:
+    apiVersion: messaging.knative.dev/v1alpha1
+    kind: NatsJetStreamChannel
+    name: channel-defaults
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: event-display
+  delivery:
+    deadLetterSink:
+      ref:
+        apiVersion: serving.knative.dev/v1
+        kind: Service
+        name: dead-letter-display
+---
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: dead-letter-display
+  namespace: knative-eventing
+spec:
+  template:
+    spec:
+      containers:
+        - name: display
+          image: gcr.io/knative-releases/knative.dev/eventing/cmd/event_display
+          ports:
+            - containerPort: 8080
+

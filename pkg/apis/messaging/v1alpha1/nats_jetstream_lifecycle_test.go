@@ -30,12 +30,12 @@ import (
 )
 
 var condReady = apis.Condition{
-	Type:   NatssChannelConditionReady,
+	Type:   NatsJetStreamChannelConditionReady,
 	Status: corev1.ConditionTrue,
 }
 
 var condDispatcherNotReady = apis.Condition{
-	Type:   NatssChannelConditionDispatcherReady,
+	Type:   NatsJetStreamChannelConditionDispatcherReady,
 	Status: corev1.ConditionFalse,
 }
 
@@ -56,7 +56,7 @@ var ignoreAllButTypeAndStatus = cmpopts.IgnoreFields(
 	apis.Condition{},
 	"LastTransitionTime", "Message", "Reason", "Severity")
 
-func TestNatssChannelGetConditionSet(t *testing.T) {
+func TestNatsJetStreamChannelGetConditionSet(t *testing.T) {
 	r := &NatsJetStreamChannel{}
 
 	if got, want := r.GetConditionSet().GetTopLevelConditionType(), apis.ConditionReady; got != want {
@@ -121,22 +121,25 @@ func TestChannelInitializeConditions(t *testing.T) {
 			ChannelableStatus: eventingduckv1.ChannelableStatus{
 				Status: duckv1.Status{
 					Conditions: []apis.Condition{{
-						Type:   NatssChannelConditionAddressable,
+						Type:   NatsJetStreamChannelConditionAddressable,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionChannelServiceReady,
+						Type:   NatsJetStreamChannelConditionChannelServiceReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionDispatcherReady,
+						Type:   NatsJetStreamChannelConditionDispatcherReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionEndpointsReady,
+						Type:   NatsJetStreamChannelConditionEndpointsReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionReady,
+						Type:   NatsJetStreamChannelConditionReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionServiceReady,
+						Type:   NatsJetStreamChannelConditionServiceReady,
+						Status: corev1.ConditionUnknown,
+					}, {
+						Type:   NatsJetStreamChannelConditionStreamReady,
 						Status: corev1.ConditionUnknown,
 					}},
 				},
@@ -148,7 +151,7 @@ func TestChannelInitializeConditions(t *testing.T) {
 			ChannelableStatus: eventingduckv1.ChannelableStatus{
 				Status: duckv1.Status{
 					Conditions: []apis.Condition{{
-						Type:   NatssChannelConditionDispatcherReady,
+						Type:   NatsJetStreamChannelConditionDispatcherReady,
 						Status: corev1.ConditionFalse,
 					}},
 				},
@@ -158,22 +161,25 @@ func TestChannelInitializeConditions(t *testing.T) {
 			ChannelableStatus: eventingduckv1.ChannelableStatus{
 				Status: duckv1.Status{
 					Conditions: []apis.Condition{{
-						Type:   NatssChannelConditionAddressable,
+						Type:   NatsJetStreamChannelConditionAddressable,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionChannelServiceReady,
+						Type:   NatsJetStreamChannelConditionChannelServiceReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionDispatcherReady,
+						Type:   NatsJetStreamChannelConditionDispatcherReady,
 						Status: corev1.ConditionFalse,
 					}, {
-						Type:   NatssChannelConditionEndpointsReady,
+						Type:   NatsJetStreamChannelConditionEndpointsReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionReady,
+						Type:   NatsJetStreamChannelConditionReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionServiceReady,
+						Type:   NatsJetStreamChannelConditionServiceReady,
+						Status: corev1.ConditionUnknown,
+					}, {
+						Type:   NatsJetStreamChannelConditionStreamReady,
 						Status: corev1.ConditionUnknown,
 					}},
 				},
@@ -185,7 +191,7 @@ func TestChannelInitializeConditions(t *testing.T) {
 			ChannelableStatus: eventingduckv1.ChannelableStatus{
 				Status: duckv1.Status{
 					Conditions: []apis.Condition{{
-						Type:   NatssChannelConditionDispatcherReady,
+						Type:   NatsJetStreamChannelConditionDispatcherReady,
 						Status: corev1.ConditionTrue,
 					}},
 				},
@@ -195,22 +201,25 @@ func TestChannelInitializeConditions(t *testing.T) {
 			ChannelableStatus: eventingduckv1.ChannelableStatus{
 				Status: duckv1.Status{
 					Conditions: []apis.Condition{{
-						Type:   NatssChannelConditionAddressable,
+						Type:   NatsJetStreamChannelConditionAddressable,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionChannelServiceReady,
+						Type:   NatsJetStreamChannelConditionChannelServiceReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionDispatcherReady,
+						Type:   NatsJetStreamChannelConditionDispatcherReady,
 						Status: corev1.ConditionTrue,
 					}, {
-						Type:   NatssChannelConditionEndpointsReady,
+						Type:   NatsJetStreamChannelConditionEndpointsReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionReady,
+						Type:   NatsJetStreamChannelConditionReady,
 						Status: corev1.ConditionUnknown,
 					}, {
-						Type:   NatssChannelConditionServiceReady,
+						Type:   NatsJetStreamChannelConditionServiceReady,
+						Status: corev1.ConditionUnknown,
+					}, {
+						Type:   NatsJetStreamChannelConditionStreamReady,
 						Status: corev1.ConditionUnknown,
 					}},
 				},
@@ -235,6 +244,7 @@ func TestChannelIsReady(t *testing.T) {
 		markChannelServiceReady bool
 		setAddress              bool
 		markEndpointsReady      bool
+		markStreamReady         bool
 		wantReady               bool
 		dispatcherStatus        *appsv1.DeploymentStatus
 	}{{
@@ -242,6 +252,7 @@ func TestChannelIsReady(t *testing.T) {
 		markServiceReady:        true,
 		markChannelServiceReady: true,
 		markEndpointsReady:      true,
+		markStreamReady:         true,
 		dispatcherStatus:        deploymentStatusReady,
 		setAddress:              true,
 		wantReady:               true,
@@ -250,6 +261,7 @@ func TestChannelIsReady(t *testing.T) {
 		markServiceReady:        false,
 		markChannelServiceReady: false,
 		markEndpointsReady:      true,
+		markStreamReady:         false,
 		dispatcherStatus:        deploymentStatusReady,
 		setAddress:              true,
 		wantReady:               false,
@@ -258,6 +270,7 @@ func TestChannelIsReady(t *testing.T) {
 		markServiceReady:        true,
 		markChannelServiceReady: false,
 		markEndpointsReady:      false,
+		markStreamReady:         false,
 		dispatcherStatus:        deploymentStatusReady,
 		setAddress:              true,
 		wantReady:               false,
@@ -266,6 +279,7 @@ func TestChannelIsReady(t *testing.T) {
 		markServiceReady:        true,
 		markEndpointsReady:      true,
 		markChannelServiceReady: false,
+		markStreamReady:         false,
 		dispatcherStatus:        deploymentStatusNotReady,
 		setAddress:              true,
 		wantReady:               false,
@@ -274,6 +288,7 @@ func TestChannelIsReady(t *testing.T) {
 		markServiceReady:        true,
 		markChannelServiceReady: false,
 		markEndpointsReady:      true,
+		markStreamReady:         false,
 		dispatcherStatus:        deploymentStatusReady,
 		setAddress:              false,
 		wantReady:               false,
@@ -282,6 +297,16 @@ func TestChannelIsReady(t *testing.T) {
 		markServiceReady:        true,
 		markChannelServiceReady: false,
 		markEndpointsReady:      true,
+		markStreamReady:         false,
+		dispatcherStatus:        deploymentStatusReady,
+		setAddress:              true,
+		wantReady:               false,
+	}, {
+		name:                    "stream not ready",
+		markServiceReady:        true,
+		markChannelServiceReady: true,
+		markEndpointsReady:      true,
+		markStreamReady:         false,
 		dispatcherStatus:        deploymentStatusReady,
 		setAddress:              true,
 		wantReady:               false,
@@ -313,6 +338,11 @@ func TestChannelIsReady(t *testing.T) {
 			} else {
 				cs.MarkDispatcherFailed("NotReadyDispatcher", "testing")
 			}
+			if test.markStreamReady {
+				cs.MarkStreamTrue()
+			} else {
+				cs.MarkServiceFailed("NotReadyStream", "testing")
+			}
 			got := cs.IsReady()
 			if test.wantReady != got {
 				t.Errorf("unexpected readiness: want %v, got %v", test.wantReady, got)
@@ -321,7 +351,7 @@ func TestChannelIsReady(t *testing.T) {
 	}
 }
 
-func TestNatssChannelStatus_SetAddressable(t *testing.T) {
+func TestNatsJetStreamChannelStatus_SetAddressable(t *testing.T) {
 	testCases := map[string]struct {
 		url  *apis.URL
 		want *NatsJetStreamChannelStatus
@@ -332,13 +362,13 @@ func TestNatssChannelStatus_SetAddressable(t *testing.T) {
 					Status: duckv1.Status{
 						Conditions: []apis.Condition{
 							{
-								Type:   NatssChannelConditionAddressable,
+								Type:   NatsJetStreamChannelConditionAddressable,
 								Status: corev1.ConditionFalse,
 							},
 							// Note that Ready is here because when the condition is marked False, duck
 							// automatically sets Ready to false.
 							{
-								Type:   NatssChannelConditionReady,
+								Type:   NatsJetStreamChannelConditionReady,
 								Status: corev1.ConditionFalse,
 							},
 						},
@@ -361,11 +391,11 @@ func TestNatssChannelStatus_SetAddressable(t *testing.T) {
 					},
 					Status: duckv1.Status{
 						Conditions: []apis.Condition{{
-							Type:   NatssChannelConditionAddressable,
+							Type:   NatsJetStreamChannelConditionAddressable,
 							Status: corev1.ConditionTrue,
 						}, {
 							// Ready unknown comes from other dependent conditions via MarkTrue.
-							Type:   NatssChannelConditionReady,
+							Type:   NatsJetStreamChannelConditionReady,
 							Status: corev1.ConditionUnknown,
 						}},
 					},
