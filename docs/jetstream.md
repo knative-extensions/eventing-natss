@@ -11,22 +11,90 @@ There are two components to this implementation:
 
 ### Controller
 
-The controller reconciles `NatsJetStreamChannel` CRDs by checking the availability of the `jetstream-channel-dispatcher`
-and ensures a `Service` corresponding to the channel exists with an `externalName` pointing to the 
-`jetstream-channel-dispatcher`.
+The controller reconciles `NatsJetStreamChannel` CRDs by ensuring the `Deployment` named `jetstream-ch-dispatcher`
+exists and ensures a `Service` corresponding to the channel exists with an `externalName` pointing to the
+`jetstream-ch-dispatcher`.
+
+#### Scoping
+
+`NatsJetStreamChannel` resources may be scoped to a namespace by adding the annotation
+`eventing.knative.dev/scope: namespace`, allowing the use of dedicated dispatcher deployments per namespace. This has
+two main benefits:
+
+- Channels across different namespaces cannot be starved of resources based on channels in other namespaces.
+- Channels across different namespaces can be configured with different credentials.
+
+#### Controller Dispatcher Configuration
+
+The controller dispatcher configuration tells the controller how dispatchers should be managed. It is not configuration
+for the dispatcher itself. This is implemented as a `ConfigMap` which is volume-mounted into the controller pod and must
+contain a file `jetstream-dispatcher-config`.
+
+In the below example, you may already have a `ConfigMap` named `config-jetstream` in `my-namespace` which serves another
+purpose, in these circumstances you can tell the controller to use a different `ConfigMap` when creating a dispatcher in
+that namespace.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+    name: config-ch-jetstream-defaults
+    namespace: knative-eventing
+data:
+    jetstream-dispatcher-config: |
+        clusterDefault:
+            configName: config-jetstream
+        namespaceDefaults:
+            my-namespace:
+                configName: custom-jetstream-config     # for dispatchers in the namespace, "my-namespace", use the 
+                                                        # ConfigMap "custom-jetstream-config". Only applicable when 
+                                                        # namespace-scoping is enabled.
+```
 
 ### Dispatcher
+
+The dispatcher is not deployed manually, but is created by the controller when a `NatsJetStreamChannel` is reconciled
+and the dispatcher does not exist.
 
 The dispatcher has 3 roles:
 
 1. Ensuring a Stream per `NatsJetStreamChannel` exists with the correct configuration. The Stream is configured based on
-   defaults set in a `ConfigMap` or by explicit configuration within the `NatsJetStreamChannel` resource itself.
+   the configuration within the `NatsJetStreamChannel` resource itself.
 2. Ensuring each subscriber for a `NatsJetStreamChannel` (from `.spec.subscribers`) has an associated JetStream Consumer
-   consuming messages from the Stream. Each received message is forwarded to the underlying subscriber workload (by the 
+   consuming messages from the Stream. Each received message is forwarded to the underlying subscriber workload (by the
    `.spec.subscriber.ref` or `.spec.subsriber.uri` field in the `Subscription`)
 3. An event receiver, receiving Cloudevents over HTTP, matching the `Host` header to a `NatsJetStreamChannel` (recall
-   that events are sent to the channel's address which is an `ExternalName` to the dispatcher, so each channel has a 
+   that events are sent to the channel's address which is an `ExternalName` to the dispatcher, so each channel has a
    unique address). Each received event is then published to the correct JetStream queue.
+
+#### Dispatcher configuration
+
+The dispatcher is configured by a `ConfigMap` which should contain a file in yaml format called `eventing-jetstream`.
+This config map is mounted as a volume by the controller when it creates the dispatcher. Which config map is mounted is
+configurable by the [Controller Dispatcher Configuration](#Controller Dispatcher Configuration) documented above.
+
+This config map should follow the shape outlined below:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+    name: config-jetstream
+    namespace: knative-eventing
+data:
+    eventing-jetstream: |
+        url: ""                         # the URL to the JetStream-enabled NATS server
+        auth:                           # only one of the following keys may be set (see "Future Functionality" below)
+            credentialFile:             # details of the NATS credential file to use for authentication, initially only
+                                        # 'secret' will be supported, but other options may be implemented in the future.
+                secret:
+                    key: ""             # the key of the secret containing the credentials, defaults to "nats.creds"
+                    secretName: ""      # the secret containing a NATS credentials file.
+        tls:
+            secretName: ""              # a secret containing the same keys as the "kubernetes.io/tls" type, if only a 
+                                        # `ca.crt` is present then we skip client verification but still ensure the 
+                                        # connection is encrypted with server verification.
+```
 
 ## JetStream integration
 
@@ -34,16 +102,16 @@ This section outlines the features of NATS/JetStream which should be supported b
 
 ### Stream/Consumer configuration
 
-Each `NatsJetStreamChannel` should have the ability to configure the details of the created Streams and Consumers from 
-it's `spec` field. For instances where `NatsJetStreamChannel` is configured as the default implementation for `Channel` 
+Each `NatsJetStreamChannel` should have the ability to configure the details of the created Streams and Consumers from
+it's `spec` field. For instances where `NatsJetStreamChannel` is configured as the default implementation for `Channel`
 resources, it's up to the user to configure these fields correctly in the `default-ch-webhook` config map.
 
-Channels will by default create a stream name based of the channel namespace/name, however a name can be overridden to 
+Channels will by default create a stream name based of the channel namespace/name, however a name can be overridden to
 bind an existing stream which may already contain events.
 
 Consumers will be created with the default configuration:
 
-- Durable - the durable name will be the same as the consumer name. All Knative eventing consumers must be durable to 
+- Durable - the durable name will be the same as the consumer name. All Knative eventing consumers must be durable to
   ensure delivery, this cannot be disabled.
 - Pull based - the dispatcher is responsible for pulling messages as it's ready, push-based options cannot be configured
 - Ack Policy is Explicit - this is the only allowed option for pull-based consumers
@@ -52,15 +120,19 @@ Other configuration elements use the JetStream defaults, and can be overridden i
 
 ### Security
 
-The following security features should be supported:
+The dispatcher will support the following security features:
 
 - Unsecured NATS clusters (i.e. for usage within private networks)
 - Secured NATS clusters with a Credentials File (https://docs.nats.io/developing-with-nats/security/creds)
-  - Globally-scoped credentials by a ConfigMap/Secret in the `knative-eventing` namespace
-  - Namespace-scoped credentials by a ConfigMap/Secret in the same namespace as the `NatsJetStreamChannel`
-  - Channel-scoped credentials specified by a Secret and referenced in the `NatsJetStreamChannel` resource.
+    - Globally-scoped credentials by a ConfigMap/Secret in the `knative-eventing` namespace
+    - Namespace-scoped credentials by a ConfigMap/Secret in the same namespace as the `NatsJetStreamChannel`
+    - Channel-scoped credentials specified by a Secret and referenced in the `NatsJetStreamChannel` resource.
 - TLS-enabled clusters (https://docs.nats.io/developing-with-nats/security/tls)
-  - CA should be defined in a ConfigMap/Secret in the `knative-eventing` namespace.
+    - CA should be defined in a ConfigMap/Secret in the `knative-eventing` namespace.
+
+All `NatsJetStreamChannel` resources managed by a dispatcher will inherit the same security configuration. If you wish
+for different channels use separate credentials then they must exist in different namespaces and scoped to that
+namespace (see [Scoping](#Scoping) above).
 
 ## `NatsJetStreamChannel` CRD
 
@@ -72,16 +144,6 @@ metadata:
 spec:
     subscribers: []                 # SubscribableSpec
     delivery: {}                    # DeliverySpec
-    natsURL: ""                     # the URL to the JetStream-enabled NATS server
-    authentication:                 # only one of the following keys may be set (see "Future Functionality" below)
-        credentialFile:
-            secret:
-                key: ""             # the key of the secret containing the credentials, defaults to "nats.creds"
-                secretName: ""      # the secret containing a NATS credentials file.
-    tls:
-        secretName: ""              # a secret containing the same keys as the "kubernetes.io/tls" type, if only a 
-                                    # `ca.crt` is present then we skip client verification but still ensure the 
-                                    # connection is encrypted with server verification.
     stream:
         overrideName: ""            # stream name defaults to be based on the namespace/name of the channel, use this 
                                     # to override it
@@ -128,69 +190,26 @@ spec:
         idleHeartbeat: ""           # if set, a time.Duration for the idle heartbeat the server sends to the client
 ```
 
-### Defaults
-
-> I'm not 100% certain on this aspect, if anybody wanted to comment on this design doc, this is the section I'd 
-> appreciate feedback the most. For my requirements I need separate accounts per namespace, so providing this can be 
-> achieved I don't mind the approach. It's similar to the Kafka approach but I'm not sure if Kafka allows this 
-> customisation per-namespace like I'm suggesting.
-
-Some CRD configuration can be defaulted by creating a ConfigMap containing a channel template. Global defaults 
-should be defined in the Knative Eventing namespace (for most users this is `knative-eventing`), or namespace-scoped 
-defaults in that corresponding namespace; the latter approach allows different NATS accounts per namespace.
-
-The name of the config map is configurable in the eventing-nats Deployment by the `CONFIG_JETSTREAM_NAME` environment
-variable and defaults to `config-ch-jetstream`. The eventing-nats controller will first look for the ConfigMap of this 
-name in the same namespace as the `NatsJetStreamChannel`, and will fall back to the namespace the deployment is running 
-in (i.e. `knative-eventing`) if the ConfigMap doesn't exist. If no ConfigMap is found, no defaults are applied.
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-    name: config-ch-jetstream
-data:
-    channelTemplateSpec: |
-        apiVersion: messaging.knative.dev/v1alpha1
-        kind: NatsJetStreamChannel
-        spec:
-            natsURL: ""
-            authentication:
-                credentialFile:
-                    secret:
-                        key: ""
-                        secretName: ""
-            tls:
-                secretName: ""
-            ...
-```
-
 ### Future functionality
 
-- **Flow control** - this relies on some client-side functionality to resume delivery so isn't planned for the initial 
+- **Flow control** - this relies on some client-side functionality to resume delivery so isn't planned for the initial
   implementation
-- Additional authentication mechanisms - initially only credential files will be supported.
+- Additional authentication mechanisms - initially only credential files will be supported, but the following should be
+  added to the roadmap:
 
-```yaml
-apiVersion: messaging.knative.dev/v1alpha1
-kind: NatsJetStreamChannel
-metadata:
-    name: foo
-spec:
-    authentication:
-        usernamePassword:
-            secret:
-                usernameKey: ""     # the key of the secret containing the username, defaults to "username"
-                passwordKey: ""     # the key of the secret containing the password, defaults to "password"
-                secretName: ""      # the secret containing the username and password
-        token:
-            secret:
-                key: ""             # the key of the secret containing the token, defaults to "token"
-                secretName: ""      # the secret containing a token.
-        nKey:                       # NKey authentication requires some client-side 
-            secret:
-                key: ""             # the key of the secret containing the credentials, defaults to "nats.creds"
-                secretName: ""      # the secret containing a NATS credentials file.
-    consumerConfigTemplate:         # a consumer per .spec.subscribers[] will be created with these defaults
-        flowControl: false          # whether to enable flow control: https://docs.nats.io/jetstream/concepts/consumers#flowcontrol
-```
+  ```yaml
+  auth:
+      usernamePassword:
+          secret:
+              usernameKey: ""     # the key of the secret containing the username, defaults to "username"
+              passwordKey: ""     # the key of the secret containing the password, defaults to "password"
+              secretName: ""      # the secret containing the username and password
+      token:
+          secret:
+              key: ""             # the key of the secret containing the token, defaults to "token"
+              secretName: ""      # the secret containing a token.
+      nKey:                       # NKey authentication requires some client-side 
+          secret:
+              key: ""             # the key of the secret containing the credentials, defaults to "nats.creds"
+              secretName: ""      # the secret containing a NATS credentials file.
+  ```
