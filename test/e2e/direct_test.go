@@ -24,10 +24,11 @@ import (
 	"strings"
 	"time"
 
-	"knative.dev/eventing-natss/test/e2e/config/direct"
 	"knative.dev/reconciler-test/pkg/environment"
 	"knative.dev/reconciler-test/pkg/eventshub"
 	"knative.dev/reconciler-test/pkg/feature"
+
+	"knative.dev/eventing-natss/test/e2e/config/direct"
 
 	// Uncomment the following line to load the gcp plugin (only required to authenticate against GKE clusters).
 	// _ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -67,7 +68,7 @@ func AllGoReady(ctx context.Context, t feature.T) {
 			// resources.
 			continue
 		}
-		if err := k8s.WaitForReadyOrDone(ctx, ref, interval, timeout); err != nil {
+		if err := k8s.WaitForReadyOrDone(ctx, t, ref, interval, timeout); err != nil {
 			t.Fatal("failed to wait for ready or done, ", err)
 		}
 	}
