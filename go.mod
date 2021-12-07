@@ -20,7 +20,7 @@ require (
 	knative.dev/eventing v0.27.1-0.20211203061837-ab80d13b52fa
 	knative.dev/hack v0.0.0-20211203062838-e11ac125e707
 	knative.dev/pkg v0.0.0-20211203062937-d37811b71d6a
-	knative.dev/reconciler-test v0.0.0-20211112132636-ae9e2e21972f
+	knative.dev/reconciler-test v0.0.0-20211206091826-80584b570590
 )
 
 replace github.com/cloudevents/sdk-go/v2 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
