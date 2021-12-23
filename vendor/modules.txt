@@ -37,7 +37,7 @@ github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2
 # github.com/cloudevents/sdk-go/protocol/stan/v2 v2.2.0
 ## explicit
 github.com/cloudevents/sdk-go/protocol/stan/v2
-# github.com/cloudevents/sdk-go/v2 v2.4.1 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
+# github.com/cloudevents/sdk-go/v2 v2.7.0 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
 ## explicit
 github.com/cloudevents/sdk-go/v2
 github.com/cloudevents/sdk-go/v2/binding
@@ -311,6 +311,7 @@ golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 golang.org/x/text/width
 # golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
+## explicit
 golang.org/x/time/rate
 # golang.org/x/tools v0.1.8
 golang.org/x/tools/go/ast/astutil
@@ -859,7 +860,7 @@ k8s.io/utils/buffer
 k8s.io/utils/integer
 k8s.io/utils/pointer
 k8s.io/utils/trace
-# knative.dev/eventing v0.28.0
+# knative.dev/eventing v0.28.1-0.20211222204918-d8297456d455
 ## explicit
 knative.dev/eventing/pkg/apis/config
 knative.dev/eventing/pkg/apis/duck
@@ -912,10 +913,10 @@ knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/heartbeats
 knative.dev/eventing/test/test_images/performance
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20211203062838-e11ac125e707
+# knative.dev/hack v0.0.0-20211222071919-abd085fc43de
 ## explicit
 knative.dev/hack
-# knative.dev/pkg v0.0.0-20211206113427-18589ac7627e
+# knative.dev/pkg v0.0.0-20211216142117-79271798f696
 ## explicit
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
@@ -998,7 +999,7 @@ knative.dev/pkg/webhook/json
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20211207070557-0d138a88867b
+# knative.dev/reconciler-test v0.0.0-20211222120418-816f2192fec9
 ## explicit
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment

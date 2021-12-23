@@ -5,7 +5,7 @@ go 1.16
 require (
 	github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.0.0-20210715165402-49fda7a51425
 	github.com/cloudevents/sdk-go/protocol/stan/v2 v2.2.0
-	github.com/cloudevents/sdk-go/v2 v2.4.1
+	github.com/cloudevents/sdk-go/v2 v2.7.0
 	github.com/google/go-cmp v0.5.6
 	github.com/google/uuid v1.3.0
 	github.com/influxdata/tdigest v0.0.1 // indirect
@@ -14,13 +14,14 @@ require (
 	github.com/nats-io/stan.go v0.9.0
 	github.com/pkg/errors v0.9.1
 	go.uber.org/zap v1.19.1
+	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac // indirect
 	k8s.io/api v0.21.4
 	k8s.io/apimachinery v0.21.4
 	k8s.io/client-go v0.21.4
-	knative.dev/eventing v0.28.0
-	knative.dev/hack v0.0.0-20211203062838-e11ac125e707
-	knative.dev/pkg v0.0.0-20211206113427-18589ac7627e
-	knative.dev/reconciler-test v0.0.0-20211207070557-0d138a88867b
+	knative.dev/eventing v0.28.1-0.20211222204918-d8297456d455
+	knative.dev/hack v0.0.0-20211222071919-abd085fc43de
+	knative.dev/pkg v0.0.0-20211216142117-79271798f696
+	knative.dev/reconciler-test v0.0.0-20211222120418-816f2192fec9
 )
 
 replace github.com/cloudevents/sdk-go/v2 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
