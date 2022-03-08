@@ -17,10 +17,10 @@ require (
 	k8s.io/api v0.22.5
 	k8s.io/apimachinery v0.22.5
 	k8s.io/client-go v0.22.5
-	knative.dev/eventing v0.29.0
-	knative.dev/hack v0.0.0-20220118141833-9b2ed8471e30
-	knative.dev/pkg v0.0.0-20220118160532-77555ea48cd4
-	knative.dev/reconciler-test v0.0.0-20220118183433-c8bfbe66bada
+	knative.dev/eventing v0.30.0
+	knative.dev/hack v0.0.0-20220224013837-e1785985d364
+	knative.dev/pkg v0.0.0-20220301181942-2fdd5f232e77
+	knative.dev/reconciler-test v0.0.0-20220303141206-84821d26ed1f
 )
 
 replace github.com/cloudevents/sdk-go/v2 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
