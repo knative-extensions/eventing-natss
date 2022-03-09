@@ -43,7 +43,7 @@ function build_release() {
     local config="${COMPONENTS[${yaml}]}"
     echo "Building Knative Eventing NATSS - ${config}"
     # TODO(chizhg): reenable --strict mode after https://github.com/knative/test-infra/issues/1262 is fixed.
-    ko resolve ${KO_FLAGS} -f ${config}/ | "${LABEL_YAML_CMD[@]}" > ${yaml}
+    ko resolve -j 1 ${KO_FLAGS} -f ${config}/ | "${LABEL_YAML_CMD[@]}" > ${yaml}
     all_yamls+=(${yaml})
   done
   ARTIFACTS_TO_PUBLISH="${all_yamls[@]}"
