@@ -117,7 +117,7 @@ func (c *FakeNatsJetStreamChannels) UpdateStatus(ctx context.Context, natsJetStr
 // Delete takes name of the natsJetStreamChannel and deletes it. Returns an error if one occurs.
 func (c *FakeNatsJetStreamChannels) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(natsjetstreamchannelsResource, c.ns, name), &v1alpha1.NatsJetStreamChannel{})
+		Invokes(testing.NewDeleteActionWithOptions(natsjetstreamchannelsResource, c.ns, name, opts), &v1alpha1.NatsJetStreamChannel{})
 
 	return err
 }
