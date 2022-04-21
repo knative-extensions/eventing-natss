@@ -20,12 +20,18 @@ metadata:
   labels:
     app: eventshub-{{ .name }}
 spec:
-  serviceAccountName: "{{ .name }}"
+  serviceAccountName: "{{ .namespace }}"
   restartPolicy: "Never"
   containers:
     - name: eventshub
       image: {{ .image }}
       imagePullPolicy: "IfNotPresent"
+      {{ if .withReadiness }}
+      readinessProbe:
+        httpGet:
+          port: 8080
+          path: /health/ready
+      {{ end }}
       env:
         - name: "SYSTEM_NAMESPACE"
           valueFrom:

@@ -117,7 +117,7 @@ func (c *FakeNatssChannels) UpdateStatus(ctx context.Context, natssChannel *v1be
 // Delete takes name of the natssChannel and deletes it. Returns an error if one occurs.
 func (c *FakeNatssChannels) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(natsschannelsResource, c.ns, name), &v1beta1.NatssChannel{})
+		Invokes(testing.NewDeleteActionWithOptions(natsschannelsResource, c.ns, name, opts), &v1beta1.NatssChannel{})
 
 	return err
 }
