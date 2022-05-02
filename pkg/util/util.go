@@ -10,15 +10,17 @@ import (
 
 const (
 	// DefaultNatssURLKey is the environment variable that can be set to specify the natss url
-	defaultNatssURLVar  = "DEFAULT_NATSS_URL"
-	defaultClusterIDVar = "DEFAULT_CLUSTER_ID"
-	ackWaitMinutesVar   = "ACK_WAIT_MINUTES"
-	maxInflightVar      = "MAX_INFLIGHT"
+	defaultNatssURLVar    = "DEFAULT_NATSS_URL"
+	defaultClusterIDVar   = "DEFAULT_CLUSTER_ID"
+	ackWaitMinutesVar     = "ACK_WAIT_MINUTES"
+	maxInflightVar        = "MAX_INFLIGHT"
+	concurrentDispatching = "CONCURRENT_DISPATCHING"
 
-	fallbackDefaultNatssURLTmpl = "nats://nats-streaming.natss.svc.%s:4222"
-	fallbackDefaultClusterID    = "knative-nats-streaming"
-	fallbackAckWaitMinutes      = 1
-	fallbackMaxInflight         = 1024
+	fallbackDefaultNatssURLTmpl   = "nats://nats-streaming.natss.svc.%s:4222"
+	fallbackDefaultClusterID      = "knative-nats-streaming"
+	fallbackAckWaitMinutes        = 1
+	fallbackMaxInflight           = 1024
+	fallbackConcurrentDispatching = false
 
 	defaultMaxIdleConnections        = 1000
 	defaultMaxIdleConnectionsPerHost = 100
@@ -58,6 +60,10 @@ func GetMaxInflight() int {
 	return getEnvAsInt(maxInflightVar, fallbackMaxInflight)
 }
 
+func GetConcurrentDispatching() bool {
+	return getEnvAsBool(concurrentDispatching, fallbackConcurrentDispatching)
+}
+
 // getMaxIdleConnections returns the max number of idle connections
 func getMaxIdleConnections() int {
 	return defaultMaxIdleConnections
@@ -79,6 +85,14 @@ func getEnv(envKey string, fallback string) string {
 func getEnvAsInt(envKey string, fallback int) int {
 	valueStr := getEnv(envKey, "")
 	if value, err := strconv.Atoi(valueStr); err == nil {
+		return value
+	}
+	return fallback
+}
+
+func getEnvAsBool(envKey string, fallback bool) bool {
+	valueBool := getEnv(envKey, "")
+	if value, err := strconv.ParseBool(valueBool); err == nil {
 		return value
 	}
 	return fallback
