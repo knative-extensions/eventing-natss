@@ -94,7 +94,9 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	//natssConfig := util.GetNatssConfig()
 	reporter := channel.NewStatsReporter(env.ContainerName, kmeta.ChildName(env.PodName, uuid.New().String()))
 	dispatcherArgs := dispatcher.JetArgs{
-		JetStreamURL: util.GetDefaultJetStreamURL(),
+		JetStreamURL:          util.GetDefaultJetStreamURL(),
+		NatsUserOrChainedFile: util.GetDefaultNatsUserOrChainedFile(),
+		NatsSeedFiles:         util.GetDefaultNatsSeedFiles(),
 		//Cargs: kncloudevents.ConnectionArgs{
 		//	MaxIdleConns:        natssConfig.MaxIdleConns,
 		//	MaxIdleConnsPerHost: natssConfig.MaxIdleConnsPerHost,

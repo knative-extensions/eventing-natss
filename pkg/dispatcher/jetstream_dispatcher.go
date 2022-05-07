@@ -65,6 +65,9 @@ type jetSubscriptionsSupervisor struct {
 	connect      chan struct{}
 	jetStreamURL string
 
+	natsUserOrChainedFile string
+	natsSeedFiles         []string
+
 	//ackWaitMinutes int
 	//maxInflight    int
 	// natConnMux is used to protect natsConn and natsConnInProgress during
@@ -77,7 +80,9 @@ type jetSubscriptionsSupervisor struct {
 }
 
 type JetArgs struct {
-	JetStreamURL string
+	JetStreamURL          string
+	NatsUserOrChainedFile string
+	NatsSeedFiles         []string
 	//ClusterID      string
 	//ClientID       string
 	//AckWaitMinutes int
@@ -101,6 +106,9 @@ func NewJetStreamDispatcher(args JetArgs) (NatsDispatcher, error) {
 		subscriptions: make(JetSubscriptionChannelMapping),
 		connect:       make(chan struct{}, maxJetElements),
 		jetStreamURL:  args.JetStreamURL,
+
+		natsUserOrChainedFile: args.NatsUserOrChainedFile,
+		natsSeedFiles:         args.NatsSeedFiles,
 		//clusterID:      args.ClusterID,
 		//clientID:       args.ClientID,
 		//ackWaitMinutes: args.AckWaitMinutes,
@@ -173,7 +181,7 @@ func (s *jetSubscriptionsSupervisor) connectWithRetry(ctx context.Context) {
 	ticker := time.NewTicker(jetRetryInterval)
 	defer ticker.Stop()
 	for {
-		nConn, err := natsutil.JetStreamConnect(s.jetStreamURL, s.logger.Sugar())
+		nConn, err := natsutil.JetStreamConnect(s.jetStreamURL, s.logger.Sugar(), s.natsUserOrChainedFile, s.natsSeedFiles)
 		if err == nil {
 			// Locking here in order to reduce time in locked state.
 			s.natsConnMux.Lock()

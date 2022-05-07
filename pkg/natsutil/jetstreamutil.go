@@ -2,7 +2,6 @@ package natsutil
 
 import (
 	"github.com/nats-io/nats.go"
-
 	"go.uber.org/zap"
 )
 
@@ -15,9 +14,18 @@ const (
 )
 
 // JetStreamConnect creates a new NATS JetStream connection
-func JetStreamConnect(jetStreamUrl string, logger *zap.SugaredLogger) (*nats.Conn, error) {
+func JetStreamConnect(jetStreamUrl string, logger *zap.SugaredLogger, natsUserOrChainedFile string, natsSeedFiles []string) (*nats.Conn, error) {
 	logger.Infof("JetStreamConnect():  jetStreamUrl: %v", jetStreamUrl)
-	nc, err := nats.Connect(jetStreamUrl)
+
+	var nc *nats.Conn
+	var err error
+
+	if natsUserOrChainedFile == "" || natsSeedFiles == nil || len(natsSeedFiles) == 0 {
+		nc, err = nats.Connect(jetStreamUrl)
+	} else {
+		nc, err = nats.Connect(jetStreamUrl, nats.UserCredentials(natsUserOrChainedFile, natsSeedFiles...))
+	}
+
 	if err != nil {
 		logger.Errorf("Connect(): create new connection failed: %v", err)
 		return nil, err

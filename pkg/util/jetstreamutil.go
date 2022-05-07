@@ -18,6 +18,7 @@ package util
 
 import (
 	"fmt"
+	"strings"
 
 	"knative.dev/pkg/network"
 )
@@ -26,10 +27,27 @@ const (
 	// defaultJetStreamURLVar is the environment variable that can be set to specify the nats jetStream url
 	defaultJetStreamURLVar = "DEFAULT_JETSTREAM_URL"
 
+	defaultNatsUserOrChainedFile = "DEFAULT_USER_OR_CHAINED_FILE"
+	defaultNatsSeedFiles         = "DEFAULT_SEED_FILES"
+
 	fallbackDefaultJetStreamURLTmpl = "nats://jet-stream.nats.svc.%s:4222"
 )
 
 // GetDefaultJetStreamURL returns the default jet stream url to connect to
 func GetDefaultJetStreamURL() string {
 	return getEnv(defaultJetStreamURLVar, fmt.Sprintf(fallbackDefaultJetStreamURLTmpl, network.GetClusterDomainName()))
+}
+
+// GetDefaultNatsUserOrChainedFile returns the default user or chained file
+func GetDefaultNatsUserOrChainedFile() string {
+	return getEnv(defaultNatsUserOrChainedFile, "")
+}
+
+// GetDefaultNatsSeedFiles returns the default seed files (comma separated)
+func GetDefaultNatsSeedFiles() []string {
+	seedFiles := getEnv(defaultNatsSeedFiles, "")
+	if seedFiles == "" {
+		return nil
+	}
+	return strings.Split(seedFiles, ",")
 }
