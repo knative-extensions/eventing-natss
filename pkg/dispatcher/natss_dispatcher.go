@@ -18,7 +18,11 @@ package dispatcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
+	"go.opencensus.io/plugin/ochttp/propagation/tracecontext"
+	"go.opencensus.io/trace"
 	"net/http"
 	"net/url"
 	"sync"
@@ -29,6 +33,7 @@ import (
 
 	natsscloudevents "github.com/cloudevents/sdk-go/protocol/stan/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
+	"github.com/cloudevents/sdk-go/v2/binding/transformer"
 	"github.com/nats-io/stan.go"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -43,12 +48,15 @@ import (
 
 const (
 	// maxElements defines a maximum number of outstanding re-connect requests
-	maxElements = 10
+	maxElements       = 10
+	traceParentHeader = "traceparent"
+	traceStateHeader  = "tracestate"
 )
 
 var (
 	// retryInterval defines delay in seconds for the next attempt to reconnect to NATSS streaming server
 	retryInterval = 1 * time.Second
+	format        = tracecontext.HTTPFormat{}
 )
 
 type SubscriptionChannelMapping map[eventingchannels.ChannelReference]map[types.UID]*stan.Subscription
@@ -134,6 +142,7 @@ func (s *subscriptionsSupervisor) signalReconnect() {
 func messageReceiverFunc(s *subscriptionsSupervisor) eventingchannels.UnbufferedMessageReceiverFunc {
 	return func(ctx context.Context, channel eventingchannels.ChannelReference, message binding.Message, transformers []binding.Transformer, header http.Header) error {
 		s.logger.Info("Received event", zap.String("channel", channel.String()))
+		parentSpan := trace.FromContext(ctx)
 
 		s.natssConnMux.Lock()
 		currentNatssConn := s.natssConn
@@ -147,7 +156,11 @@ func messageReceiverFunc(s *subscriptionsSupervisor) eventingchannels.Unbuffered
 			s.logger.Error("could not create natss sender", zap.Error(err))
 			return errors.Wrap(err, "could not create natss sender")
 		}
-		if err := sender.Send(ctx, message); err != nil {
+
+		s.logger.Debug(">>> parentSpan TraceID: ", zap.String("TraceID", parentSpan.SpanContext().TraceID.String()))
+		s.logger.Debug(">>> parentSpan SpanID: ", zap.String("SpanID", parentSpan.SpanContext().SpanID.String()))
+
+		if err := sender.Send(ctx, message, transformer.SetExtension(traceParentHeader, traceParentTransformer(parentSpan))); err != nil {
 			errMsg := "error during send"
 			if err.Error() == stan.ErrConnectionClosed.Error() {
 				errMsg += " - connection to NATSS has been lost, attempting to reconnect"
@@ -158,6 +171,13 @@ func messageReceiverFunc(s *subscriptionsSupervisor) eventingchannels.Unbuffered
 		}
 		s.logger.Debug("published", zap.String("channel", channel.String()))
 		return nil
+	}
+}
+
+func traceParentTransformer(span *trace.Span) func(interface{}) (interface{}, error) {
+	return func(_ interface{}) (interface{}, error) {
+		tp, _ := format.SpanContextToHeaders(span.SpanContext())
+		return tp, nil
 	}
 }
 
@@ -320,7 +340,25 @@ func (s *subscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
 		}
 
-		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, nil, destination, reply, deadLetter)
+		event := cloudevents.NewEvent()
+		err = json.Unmarshal(stanMsg.Data, &event)
+		if err != nil {
+			s.logger.Error("could not create a event from stan msg", zap.Error(err))
+			return
+		}
+
+		additionalHeaders := http.Header{}
+		additionalHeaders.Add(traceParentHeader, event.Extensions()[traceParentHeader].(string))
+		s.logger.Debug("<<< propagated traceparent", zap.Any("additional_headers", additionalHeaders))
+
+		spanContext, _ := format.SpanContextFromHeaders(event.Extensions()[traceParentHeader].(string), "")
+		ctx, span := trace.StartSpanWithRemoteParent(context.Background(), "natsschannel-"+channel.Name, spanContext)
+		defer span.End()
+
+		s.logger.Debug("<<< parentSpan TraceID: ", zap.String("TraceID", span.SpanContext().TraceID.String()))
+		s.logger.Debug("<<< parentSpan SpanID: ", zap.String("SpanID", span.SpanContext().SpanID.String()))
+
+		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, additionalHeaders, destination, reply, deadLetter)
 		if err != nil {
 			s.logger.Error("Failed to dispatch message: ", zap.Error(err))
 			return
