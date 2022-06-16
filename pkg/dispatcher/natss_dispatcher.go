@@ -19,7 +19,6 @@ package dispatcher
 import (
 	"context"
 	"fmt"
-	"go.opencensus.io/trace"
 	"net/http"
 	"net/url"
 	"sync"
@@ -40,7 +39,6 @@ import (
 	"knative.dev/eventing/pkg/kncloudevents"
 
 	"knative.dev/eventing-natss/pkg/natsutil"
-	"knative.dev/eventing-natss/pkg/tracing"
 )
 
 const (
@@ -149,9 +147,7 @@ func messageReceiverFunc(s *subscriptionsSupervisor) eventingchannels.Unbuffered
 			s.logger.Error("could not create natss sender", zap.Error(err))
 			return errors.Wrap(err, "could not create natss sender")
 		}
-
-		tpTsTransformers := tracing.SerializeTraceTransformers(trace.FromContext(ctx).SpanContext())
-		if err := sender.Send(ctx, message, tpTsTransformers...); err != nil {
+		if err := sender.Send(ctx, message); err != nil {
 			errMsg := "error during send"
 			if err.Error() == stan.ErrConnectionClosed.Error() {
 				errMsg += " - connection to NATSS has been lost, attempting to reconnect"
@@ -324,13 +320,7 @@ func (s *subscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
 		}
 
-		event := tracing.ConvertNatssMsgToEvent(s.logger, stanMsg)
-		additionalHeaders := tracing.ConvertEventToHttpHeader(event)
-
-		ctx, span := tracing.StartTraceFromMessage(s.logger, ctx, event, "natsschannel-"+channel.Name)
-		defer span.End()
-
-		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, additionalHeaders, destination, reply, deadLetter)
+		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, nil, destination, reply, deadLetter)
 		if err != nil {
 			s.logger.Error("Failed to dispatch message: ", zap.Error(err))
 			return
