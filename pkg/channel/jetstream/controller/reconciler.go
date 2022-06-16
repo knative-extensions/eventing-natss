@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -49,17 +50,18 @@ const (
 	// Name of the corev1.Events emitted from the reconciliation process.
 
 	dispatcherDeploymentCreated     = "DispatcherDeploymentCreated"
-	dispatcherDeploymentUpdated     = "DispatcherDeploymentUpdated"
 	dispatcherDeploymentFailed      = "DispatcherDeploymentFailed"
-	dispatcherServiceCreated        = "DispatcherServiceCreated"
-	dispatcherServiceUpdated        = "DispatcherServiceUpdated"
-	dispatcherServiceFailed         = "DispatcherServiceFailed"
-	dispatcherServiceAccountCreated = "DispatcherServiceAccountCreated"
-	dispatcherServiceAccountFailed  = "DispatcherServiceAccountFailed"
+	dispatcherDeploymentUpdated     = "DispatcherDeploymentUpdated"
+	dispatcherEndpointsNotFound     = "DispatcherEndpointsDoesNotExist"
 	dispatcherRoleBindingCreated    = "DispatcherRoleBindingCreated"
 	dispatcherRoleBindingFailed     = "DispatcherRoleBindingFailed"
-	channelServiceFailed            = "ChannelServiceFailed"
+	dispatcherServiceAccountCreated = "DispatcherServiceAccountCreated"
+	dispatcherServiceAccountFailed  = "DispatcherServiceAccountFailed"
+	dispatcherServiceCreated        = "DispatcherServiceCreated"
+	dispatcherServiceFailed         = "DispatcherServiceFailed"
+	dispatcherServiceUpdated        = "DispatcherServiceUpdated"
 	natsJetStreamChannelReconciled  = "NatsJetStreamChannelReconciled"
+	channelServiceFailed            = "ChannelServiceFailed"
 )
 
 func newReconciledNormal(namespace, name string) reconciler.Event {

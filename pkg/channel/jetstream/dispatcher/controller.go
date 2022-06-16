@@ -40,11 +40,11 @@ import (
 )
 
 const (
-// controllerAgentName is the string used by this controller to identify
-// itself when creating events.
-// controllerAgentName = "jetstream-ch-dispatcher"
+	// controllerAgentName is the string used by this controller to identify
+	// itself when creating events.
+	controllerAgentName = "jetstream-ch-dispatcher"
 
-// finalizerName = controllerAgentName
+	finalizerName = controllerAgentName
 )
 
 func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl {

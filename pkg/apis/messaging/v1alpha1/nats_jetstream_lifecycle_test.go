@@ -242,75 +242,86 @@ func TestChannelIsReady(t *testing.T) {
 		name                    string
 		markServiceReady        bool
 		markChannelServiceReady bool
+		markStreamReady         bool
 		setAddress              bool
 		markEndpointsReady      bool
-		markStreamReady         bool
 		wantReady               bool
 		dispatcherStatus        *appsv1.DeploymentStatus
-	}{{
-		name:                    "all happy",
-		markServiceReady:        true,
-		markChannelServiceReady: true,
-		markEndpointsReady:      true,
-		markStreamReady:         true,
-		dispatcherStatus:        deploymentStatusReady,
-		setAddress:              true,
-		wantReady:               true,
-	}, {
-		name:                    "service not ready",
-		markServiceReady:        false,
-		markChannelServiceReady: false,
-		markEndpointsReady:      true,
-		markStreamReady:         false,
-		dispatcherStatus:        deploymentStatusReady,
-		setAddress:              true,
-		wantReady:               false,
-	}, {
-		name:                    "endpoints not ready",
-		markServiceReady:        true,
-		markChannelServiceReady: false,
-		markEndpointsReady:      false,
-		markStreamReady:         false,
-		dispatcherStatus:        deploymentStatusReady,
-		setAddress:              true,
-		wantReady:               false,
-	}, {
-		name:                    "deployment not ready",
-		markServiceReady:        true,
-		markEndpointsReady:      true,
-		markChannelServiceReady: false,
-		markStreamReady:         false,
-		dispatcherStatus:        deploymentStatusNotReady,
-		setAddress:              true,
-		wantReady:               false,
-	}, {
-		name:                    "address not set",
-		markServiceReady:        true,
-		markChannelServiceReady: false,
-		markEndpointsReady:      true,
-		markStreamReady:         false,
-		dispatcherStatus:        deploymentStatusReady,
-		setAddress:              false,
-		wantReady:               false,
-	}, {
-		name:                    "channel service not ready",
-		markServiceReady:        true,
-		markChannelServiceReady: false,
-		markEndpointsReady:      true,
-		markStreamReady:         false,
-		dispatcherStatus:        deploymentStatusReady,
-		setAddress:              true,
-		wantReady:               false,
-	}, {
-		name:                    "stream not ready",
-		markServiceReady:        true,
-		markChannelServiceReady: true,
-		markEndpointsReady:      true,
-		markStreamReady:         false,
-		dispatcherStatus:        deploymentStatusReady,
-		setAddress:              true,
-		wantReady:               false,
-	}}
+	}{
+		{
+			name:                    "all happy",
+			markServiceReady:        true,
+			markStreamReady:         true,
+			markChannelServiceReady: true,
+			markEndpointsReady:      true,
+			dispatcherStatus:        deploymentStatusReady,
+			setAddress:              true,
+			wantReady:               true,
+		},
+		{
+			name:                    "service not ready",
+			markServiceReady:        false,
+			markChannelServiceReady: false,
+			markStreamReady:         true,
+			markEndpointsReady:      true,
+			dispatcherStatus:        deploymentStatusReady,
+			setAddress:              true,
+			wantReady:               false,
+		}, {
+			name:                    "endpoints not ready",
+			markServiceReady:        true,
+			markChannelServiceReady: false,
+			markStreamReady:         true,
+			markEndpointsReady:      false,
+			dispatcherStatus:        deploymentStatusReady,
+			setAddress:              true,
+			wantReady:               false,
+		}, {
+			name:                    "deployment not ready",
+			markServiceReady:        true,
+			markEndpointsReady:      true,
+			markChannelServiceReady: false,
+			markStreamReady:         true,
+			dispatcherStatus:        deploymentStatusNotReady,
+			setAddress:              true,
+			wantReady:               false,
+		}, {
+			name:                    "address not set",
+			markServiceReady:        true,
+			markChannelServiceReady: false,
+			markStreamReady:         true,
+			markEndpointsReady:      true,
+			dispatcherStatus:        deploymentStatusReady,
+			setAddress:              false,
+			wantReady:               false,
+		}, {
+			name:                    "channel service not ready",
+			markServiceReady:        true,
+			markChannelServiceReady: false,
+			markStreamReady:         true,
+			markEndpointsReady:      true,
+			dispatcherStatus:        deploymentStatusReady,
+			setAddress:              true,
+			wantReady:               false,
+		}, {
+			name:                    "stream not ready",
+			markServiceReady:        true,
+			markStreamReady:         false,
+			markChannelServiceReady: true,
+			markEndpointsReady:      true,
+			dispatcherStatus:        deploymentStatusReady,
+			setAddress:              true,
+			wantReady:               false,
+		}, {
+			name:                    "stream not ready",
+			markServiceReady:        true,
+			markChannelServiceReady: true,
+			markEndpointsReady:      true,
+			markStreamReady:         false,
+			dispatcherStatus:        deploymentStatusReady,
+			setAddress:              true,
+			wantReady:               false,
+		}}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			cs := &NatsJetStreamChannelStatus{}
@@ -324,6 +335,11 @@ func TestChannelIsReady(t *testing.T) {
 				cs.MarkChannelServiceTrue()
 			} else {
 				cs.MarkChannelServiceFailed("NotReadyChannelService", "testing")
+			}
+			if test.markStreamReady {
+				cs.MarkStreamTrue()
+			} else {
+				cs.MarkStreamFailed("NotreadyStream", "testing")
 			}
 			if test.setAddress {
 				cs.SetAddress(&apis.URL{Scheme: "http", Host: "foo.bar"})

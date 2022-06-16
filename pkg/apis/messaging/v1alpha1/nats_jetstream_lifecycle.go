@@ -105,6 +105,10 @@ func (cs *NatsJetStreamChannelStatus) MarkDispatcherUnknown(reason, messageForma
 	conditionSet.Manage(cs).MarkUnknown(NatsJetStreamChannelConditionDispatcherReady, reason, messageFormat, messageA...)
 }
 
+func (cs *NatsJetStreamChannelStatus) MarkDispatcherTrue() {
+	conditionSet.Manage(cs).MarkTrue(NatsJetStreamChannelConditionDispatcherReady)
+}
+
 // TODO: Unify this with the ones from Eventing. Say: Broker, Trigger.
 func (cs *NatsJetStreamChannelStatus) PropagateDispatcherStatus(ds *appsv1.DeploymentStatus) {
 	for _, cond := range ds.Conditions {

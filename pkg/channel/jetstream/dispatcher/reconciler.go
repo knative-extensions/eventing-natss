@@ -220,7 +220,7 @@ func (r *Reconciler) reconcileStream(ctx context.Context, nc *v1alpha1.NatsJetSt
 
 	if isCreating {
 		logger.Infow("jetstream stream created", zap.String("stream_name", info.Config.Name))
-		controller.GetEventRecorder(ctx).Event(nc, corev1.EventTypeNormal, ReasonJetstreamStreamCreated, "Dispatcher deployment created")
+		controller.GetEventRecorder(ctx).Event(nc, corev1.EventTypeNormal, ReasonJetstreamStreamCreated, "JetStream stream created")
 	}
 
 	nc.Status.MarkStreamTrue()

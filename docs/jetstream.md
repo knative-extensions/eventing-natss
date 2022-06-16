@@ -62,7 +62,7 @@ The dispatcher has 3 roles:
    the configuration within the `NatsJetStreamChannel` resource itself.
 2. Ensuring each subscriber for a `NatsJetStreamChannel` (from `.spec.subscribers`) has an associated JetStream Consumer
    consuming messages from the Stream. Each received message is forwarded to the underlying subscriber workload (by the
-   `.spec.subscriber.ref` or `.spec.subsriber.uri` field in the `Subscription`)
+   `.spec.subscriber.ref` or `.spec.subscriber.uri` field in the `Subscription`)
 3. An event receiver, receiving Cloudevents over HTTP, matching the `Host` header to a `NatsJetStreamChannel` (recall
    that events are sent to the channel's address which is an `ExternalName` to the dispatcher, so each channel has a
    unique address). Each received event is then published to the correct JetStream queue.

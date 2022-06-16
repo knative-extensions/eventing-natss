@@ -27,7 +27,7 @@ k3d cluster create knative \
 Deploy Knative eventing to your cluster, following the getting started guide of your choosing from 
 [Installing Knative][install-knative].
 
-> Depending on your OS, you need to ensure `k3d-k0.localhost` resolves to `127.0.0.1`. If your OS does not do this by 
+> Depending on your OS, you need to ensure `k3d-ko.localhost` resolves to `127.0.0.1`. If your OS does not do this by 
 > default, the simplest method is to add a line to `/etc/hosts`:
 > 
 > ```
