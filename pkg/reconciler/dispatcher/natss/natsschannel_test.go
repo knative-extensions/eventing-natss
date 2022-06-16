@@ -19,7 +19,6 @@ package natss
 import (
 	"context"
 	"fmt"
-	configmapinformer "knative.dev/pkg/configmap/informer"
 	"os"
 	"testing"
 
@@ -35,6 +34,7 @@ import (
 	"knative.dev/pkg/apis"
 	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
 	_ "knative.dev/pkg/client/injection/kube/informers/core/v1/service/fake"
+	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/injection"
 	fakedynamicclient "knative.dev/pkg/injection/clients/dynamicclient/fake"
@@ -208,7 +208,7 @@ func TestNewController(t *testing.T) {
 	ctx = injection.WithConfig(ctx, cfg)
 	ctx, _ = injection.Fake.SetupInformers(ctx, cfg)
 
-	NewController(ctx, &configmapinformer.InformedWatcher{})
+	NewController(ctx, configmap.NewStaticWatcher())
 }
 
 func TestFailedNatssSubscription(t *testing.T) {

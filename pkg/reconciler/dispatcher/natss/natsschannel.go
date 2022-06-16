@@ -89,6 +89,7 @@ func NewController(ctx context.Context, watcher configmap.Watcher) *controller.I
 
 	logger := logging.FromContext(ctx)
 
+	logger.Debug(">>> Initializing tracing publishing")
 	// Setup trace publishing.
 	iw := watcher.(*configmapinformer.InformedWatcher)
 	if err := tracing.SetupDynamicPublishing(logger, iw, controllerAgentName, tracingconfig.ConfigName); err != nil {
