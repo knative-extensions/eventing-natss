@@ -19,12 +19,13 @@ package dispatcher
 import (
 	"context"
 	"fmt"
-	"go.opencensus.io/trace"
 	"net/http"
 	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"go.opencensus.io/trace"
 
 	"k8s.io/apimachinery/pkg/types"
 

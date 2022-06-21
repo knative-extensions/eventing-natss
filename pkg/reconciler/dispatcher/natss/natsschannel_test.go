@@ -19,9 +19,10 @@ package natss
 import (
 	"context"
 	"fmt"
-	configmapinformer "knative.dev/pkg/configmap/informer"
 	"os"
 	"testing"
+
+	configmapinformer "knative.dev/pkg/configmap/informer"
 
 	"go.uber.org/zap"
 

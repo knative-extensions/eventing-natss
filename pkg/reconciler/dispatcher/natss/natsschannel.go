@@ -19,10 +19,11 @@ package natss
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	configmapinformer "knative.dev/pkg/configmap/informer"
 	"knative.dev/pkg/tracing"
 	tracingconfig "knative.dev/pkg/tracing/config"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/kelseyhightower/envconfig"

@@ -3,6 +3,8 @@ package tracing
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/binding/transformer"
@@ -11,7 +13,6 @@ import (
 	"go.opencensus.io/plugin/ochttp/propagation/tracecontext"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
-	"net/http"
 )
 
 const (
