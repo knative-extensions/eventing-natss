@@ -14,6 +14,7 @@ require (
 	github.com/nats-io/nats.go v1.11.1-0.20210623165838-4b75fc59ae30
 	github.com/nats-io/stan.go v0.9.0
 	github.com/pkg/errors v0.9.1
+	go.opencensus.io v0.23.0
 	go.uber.org/zap v1.19.1
 	k8s.io/api v0.23.5
 	k8s.io/apimachinery v0.23.5
@@ -86,7 +87,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/testify v1.7.0 // indirect
 	github.com/tsenart/vegeta/v12 v12.8.4 // indirect
-	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/automaxprocs v1.4.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
