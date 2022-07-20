@@ -20,9 +20,9 @@ require (
 	k8s.io/apimachinery v0.23.8
 	k8s.io/client-go v0.23.8
 	knative.dev/eventing v0.32.1-0.20220628020529-eaec7294bc50
-	knative.dev/hack v0.0.0-20220610014127-dc6c287516dc
-	knative.dev/pkg v0.0.0-20220628014530-177751338ddc
-	knative.dev/reconciler-test v0.0.0-20220628015529-24511be23df8
+	knative.dev/hack v0.0.0-20220701014203-65c463ac8c98
+	knative.dev/pkg v0.0.0-20220705130606-e60d250dc637
+	knative.dev/reconciler-test v0.0.0-20220705155206-f05db88effbe
 )
 
 require (
@@ -114,7 +114,6 @@ require (
 	k8s.io/apiextensions-apiserver v0.23.8 // indirect
 	k8s.io/code-generator v0.23.8 // indirect
 	k8s.io/gengo v0.0.0-20220307231824-4627b89bbf1b // indirect
-	k8s.io/klog v1.0.0 // indirect
 	k8s.io/klog/v2 v2.60.1-0.20220317184644-43cc75f9ae89 // indirect
 	k8s.io/kube-openapi v0.0.0-20211115234752-e816edb12b65 // indirect
 	k8s.io/utils v0.0.0-20220210201930-3a6ce19ff2f9 // indirect
@@ -123,4 +122,10 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace github.com/cloudevents/sdk-go/v2 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
+replace (
+	github.com/cloudevents/sdk-go/v2 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
+	// FIXME: remove this pin when knative/eventing#6451 is merged
+	knative.dev/eventing => github.com/cardil/knative-eventing v0.11.1-0.20220718191420-28d8469b82bf
+	// FIXME: remove this pin when knative-sandbox/reconciler-test#294 is merged
+	knative.dev/reconciler-test => github.com/cardil/knative-reconciler-test v0.0.0-20220720101506-5051d7685fba
+)

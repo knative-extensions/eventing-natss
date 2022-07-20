@@ -18,20 +18,29 @@ package direct
 
 import (
 	"context"
+	"embed"
 
 	"knative.dev/reconciler-test/pkg/environment"
 	"knative.dev/reconciler-test/pkg/feature"
 	"knative.dev/reconciler-test/pkg/manifest"
 )
 
-func init() {
-	environment.RegisterPackage(manifest.ImagesLocalYaml()...)
-}
+//go:embed *.yaml
+var yamls embed.FS
 
 func Install() feature.StepFn {
 	return func(ctx context.Context, t feature.T) {
-		if _, err := manifest.InstallLocalYaml(ctx, map[string]interface{}{"producerCount": 5}); err != nil {
+		registerImages(ctx, t)
+		args := map[string]interface{}{"producerCount": 5}
+		if _, err := manifest.InstallYamlFS(ctx, yamls, args); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func registerImages(ctx context.Context, t feature.T) {
+	opt := environment.RegisterPackage(manifest.ImagesFromFS(ctx, yamls)...)
+	if _, err := opt(ctx, nil); err != nil {
+		t.Fatal(err)
 	}
 }
