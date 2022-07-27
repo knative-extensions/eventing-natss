@@ -106,7 +106,8 @@ jobs:
         if: steps.golangci_configuration.outputs.files_exists == 'true'
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.43
+          version: v1.46.2
+          args: --go=1.17
 
       - name: Install Tools
         if: ${{ always() }}
