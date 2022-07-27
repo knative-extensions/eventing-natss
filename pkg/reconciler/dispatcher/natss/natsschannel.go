@@ -21,6 +21,10 @@ import (
 	"fmt"
 	"strings"
 
+	configmapinformer "knative.dev/pkg/configmap/informer"
+	"knative.dev/pkg/tracing"
+	tracingconfig "knative.dev/pkg/tracing/config"
+
 	"github.com/google/uuid"
 	"github.com/kelseyhightower/envconfig"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -82,9 +86,15 @@ type envConfig struct {
 
 // NewController initializes the controller and is called by the generated code.
 // Registers event handlers to enqueue events.
-func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
+func NewController(ctx context.Context, watcher configmap.Watcher) *controller.Impl {
 
 	logger := logging.FromContext(ctx)
+
+	// Setup trace publishing.
+	iw := watcher.(*configmapinformer.InformedWatcher)
+	if err := tracing.SetupDynamicPublishing(logger, iw, controllerAgentName, tracingconfig.ConfigName); err != nil {
+		logger.Panicw("Error setting up trace publishing", zap.Error(err))
+	}
 
 	var env envConfig
 	if err := envconfig.Process("", &env); err != nil {
