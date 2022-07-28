@@ -18,7 +18,9 @@ package natss
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"knative.dev/pkg/configmap"
 	"os"
 	"testing"
 
@@ -195,6 +197,36 @@ func (l *failOnFatalAndErrorLogger) Fatal(msg string, fields ...zap.Field) {
 func TestNewController(t *testing.T) {
 	os.Setenv("POD_NAME", "testpod")
 	os.Setenv("CONTAINER_NAME", "testcontainer")
+
+	logger := failOnFatalAndErrorLogger{
+		Logger: zap.NewNop(),
+		t:      t,
+	}
+	ctx := logging.WithLogger(context.Background(), logger.Sugar())
+	ctx, _ = fakekubeclient.With(ctx)
+	ctx, _ = fakeeventingclient.With(ctx)
+	ctx, _ = fakedynamicclient.With(ctx, runtime.NewScheme())
+	ctx, _ = fakeclientset.With(ctx)
+	cfg := &rest.Config{}
+	ctx = injection.WithConfig(ctx, cfg)
+	ctx, _ = injection.Fake.SetupInformers(ctx, cfg)
+
+	NewController(ctx, &configmapinformer.InformedWatcher{})
+}
+
+func TestNewControllerSetupDynamicPublishingError(t *testing.T) {
+	os.Setenv("POD_NAME", "testpod")
+	os.Setenv("CONTAINER_NAME", "testcontainer")
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("The code did not panic")
+		}
+	}()
+
+	setupDynamicPublishing = func(logger *zap.SugaredLogger, configMapWatcher configmap.Watcher, serviceName, tracingConfigName string) error {
+		return errors.New("empty error")
+	}
 
 	logger := failOnFatalAndErrorLogger{
 		Logger: zap.NewNop(),

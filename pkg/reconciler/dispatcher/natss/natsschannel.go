@@ -65,6 +65,9 @@ const (
 	finalizerName = controllerAgentName
 )
 
+// take func ref, to be able to mock for tests
+var setupDynamicPublishing = tracing.SetupDynamicPublishing
+
 // Reconciler reconciles NATSS Channels.
 type Reconciler struct {
 	natssDispatcher dispatcher.NatsDispatcher
@@ -92,7 +95,7 @@ func NewController(ctx context.Context, watcher configmap.Watcher) *controller.I
 
 	// Setup trace publishing.
 	iw := watcher.(*configmapinformer.InformedWatcher)
-	if err := tracing.SetupDynamicPublishing(logger, iw, controllerAgentName, tracingconfig.ConfigName); err != nil {
+	if err := setupDynamicPublishing(logger, iw, controllerAgentName, tracingconfig.ConfigName); err != nil {
 		logger.Panicw("Error setting up trace publishing", zap.Error(err))
 	}
 
