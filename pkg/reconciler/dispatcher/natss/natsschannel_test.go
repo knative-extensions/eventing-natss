@@ -20,9 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"knative.dev/pkg/configmap"
 	"os"
 	"testing"
+
+	"knative.dev/pkg/configmap"
 
 	configmapinformer "knative.dev/pkg/configmap/informer"
 
