@@ -78,7 +78,7 @@ func ConvertNatssMsgToEvent(logger *zap.Logger, stanMsg *stan.Msg) *event.Event 
 	message := cloudevents.NewEvent()
 	err := json.Unmarshal(stanMsg.Data, &message)
 	if err != nil {
-		logger.Error("could not create a event from stan msg", zap.Error(err))
+		logger.Error("could not create an event from stan msg", zap.Error(err))
 		return nil
 	}
 
