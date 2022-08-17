@@ -18,9 +18,14 @@ package natss
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
+
+	"knative.dev/pkg/configmap"
+
+	configmapinformer "knative.dev/pkg/configmap/informer"
 
 	"go.uber.org/zap"
 
@@ -34,7 +39,6 @@ import (
 	"knative.dev/pkg/apis"
 	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
 	_ "knative.dev/pkg/client/injection/kube/informers/core/v1/service/fake"
-	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/injection"
 	fakedynamicclient "knative.dev/pkg/injection/clients/dynamicclient/fake"
@@ -208,7 +212,37 @@ func TestNewController(t *testing.T) {
 	ctx = injection.WithConfig(ctx, cfg)
 	ctx, _ = injection.Fake.SetupInformers(ctx, cfg)
 
-	NewController(ctx, configmap.NewStaticWatcher())
+	NewController(ctx, &configmapinformer.InformedWatcher{})
+}
+
+func TestNewControllerSetupDynamicPublishingError(t *testing.T) {
+	os.Setenv("POD_NAME", "testpod")
+	os.Setenv("CONTAINER_NAME", "testcontainer")
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("The code did not panic")
+		}
+	}()
+
+	setupDynamicPublishing = func(logger *zap.SugaredLogger, configMapWatcher configmap.Watcher, serviceName, tracingConfigName string) error {
+		return errors.New("empty error")
+	}
+
+	logger := failOnFatalAndErrorLogger{
+		Logger: zap.NewNop(),
+		t:      t,
+	}
+	ctx := logging.WithLogger(context.Background(), logger.Sugar())
+	ctx, _ = fakekubeclient.With(ctx)
+	ctx, _ = fakeeventingclient.With(ctx)
+	ctx, _ = fakedynamicclient.With(ctx, runtime.NewScheme())
+	ctx, _ = fakeclientset.With(ctx)
+	cfg := &rest.Config{}
+	ctx = injection.WithConfig(ctx, cfg)
+	ctx, _ = injection.Fake.SetupInformers(ctx, cfg)
+
+	NewController(ctx, &configmapinformer.InformedWatcher{})
 }
 
 func TestFailedNatssSubscription(t *testing.T) {
