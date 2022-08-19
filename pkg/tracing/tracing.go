@@ -3,8 +3,9 @@ package tracing
 import (
 	"context"
 	"encoding/json"
-	"github.com/nats-io/nats.go"
 	"net/http"
+
+	"github.com/nats-io/nats.go"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"

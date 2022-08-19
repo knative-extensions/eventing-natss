@@ -19,13 +19,14 @@ package dispatcher
 import (
 	"context"
 	"fmt"
-	"go.opencensus.io/trace"
-	"knative.dev/eventing-natss/pkg/tracing"
 	"net/http"
 	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"go.opencensus.io/trace"
+	"knative.dev/eventing-natss/pkg/tracing"
 
 	"k8s.io/apimachinery/pkg/types"
 
