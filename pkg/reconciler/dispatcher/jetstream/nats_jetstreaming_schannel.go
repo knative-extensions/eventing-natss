@@ -19,10 +19,11 @@ package jetstream
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	configmapinformer "knative.dev/pkg/configmap/informer"
 	"knative.dev/pkg/tracing"
 	tracingconfig "knative.dev/pkg/tracing/config"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
