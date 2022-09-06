@@ -1,6 +1,16 @@
 # cloud.google.com/go v0.98.0
 ## explicit; go 1.11
+cloud.google.com/go
 cloud.google.com/go/compute/metadata
+cloud.google.com/go/iam
+cloud.google.com/go/internal
+cloud.google.com/go/internal/optional
+cloud.google.com/go/internal/trace
+cloud.google.com/go/internal/version
+# cloud.google.com/go/storage v1.18.2
+## explicit; go 1.11
+cloud.google.com/go/storage
+cloud.google.com/go/storage/internal/apiv2
 # contrib.go.opencensus.io/exporter/ocagent v0.7.1-0.20200907061046-05415f1de66d
 ## explicit; go 1.13
 contrib.go.opencensus.io/exporter/ocagent
@@ -84,6 +94,17 @@ github.com/cloudevents/sdk-go/v2/protocol
 github.com/cloudevents/sdk-go/v2/protocol/http
 github.com/cloudevents/sdk-go/v2/test
 github.com/cloudevents/sdk-go/v2/types
+# github.com/cncf/udpa/go v0.0.0-20210930031921-04548b0d99d4
+## explicit; go 1.11
+github.com/cncf/udpa/go/udpa/type/v1
+# github.com/cncf/xds/go v0.0.0-20211011173535-cb28da3451f1
+## explicit; go 1.11
+github.com/cncf/xds/go/udpa/annotations
+github.com/cncf/xds/go/udpa/type/v1
+github.com/cncf/xds/go/xds/annotations/v3
+github.com/cncf/xds/go/xds/core/v3
+github.com/cncf/xds/go/xds/data/orca/v3
+github.com/cncf/xds/go/xds/type/v3
 # github.com/davecgh/go-spew v1.1.1
 ## explicit
 github.com/davecgh/go-spew/spew
@@ -91,6 +112,56 @@ github.com/davecgh/go-spew/spew
 ## explicit
 github.com/emicklei/go-restful
 github.com/emicklei/go-restful/log
+# github.com/envoyproxy/go-control-plane v0.9.10-0.20210907150352-cf90f659a021
+## explicit; go 1.11
+github.com/envoyproxy/go-control-plane/envoy/admin/v3
+github.com/envoyproxy/go-control-plane/envoy/annotations
+github.com/envoyproxy/go-control-plane/envoy/api/v2
+github.com/envoyproxy/go-control-plane/envoy/api/v2/auth
+github.com/envoyproxy/go-control-plane/envoy/api/v2/cluster
+github.com/envoyproxy/go-control-plane/envoy/api/v2/core
+github.com/envoyproxy/go-control-plane/envoy/api/v2/endpoint
+github.com/envoyproxy/go-control-plane/envoy/api/v2/listener
+github.com/envoyproxy/go-control-plane/envoy/api/v2/route
+github.com/envoyproxy/go-control-plane/envoy/config/accesslog/v3
+github.com/envoyproxy/go-control-plane/envoy/config/bootstrap/v3
+github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3
+github.com/envoyproxy/go-control-plane/envoy/config/common/matcher/v3
+github.com/envoyproxy/go-control-plane/envoy/config/core/v3
+github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3
+github.com/envoyproxy/go-control-plane/envoy/config/filter/accesslog/v2
+github.com/envoyproxy/go-control-plane/envoy/config/listener/v2
+github.com/envoyproxy/go-control-plane/envoy/config/listener/v3
+github.com/envoyproxy/go-control-plane/envoy/config/metrics/v3
+github.com/envoyproxy/go-control-plane/envoy/config/overload/v3
+github.com/envoyproxy/go-control-plane/envoy/config/rbac/v3
+github.com/envoyproxy/go-control-plane/envoy/config/route/v3
+github.com/envoyproxy/go-control-plane/envoy/config/tap/v3
+github.com/envoyproxy/go-control-plane/envoy/config/trace/v3
+github.com/envoyproxy/go-control-plane/envoy/extensions/clusters/aggregate/v3
+github.com/envoyproxy/go-control-plane/envoy/extensions/filters/common/fault/v3
+github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/fault/v3
+github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/rbac/v3
+github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3
+github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3
+github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3
+github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2
+github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3
+github.com/envoyproxy/go-control-plane/envoy/service/load_stats/v2
+github.com/envoyproxy/go-control-plane/envoy/service/load_stats/v3
+github.com/envoyproxy/go-control-plane/envoy/service/status/v3
+github.com/envoyproxy/go-control-plane/envoy/type
+github.com/envoyproxy/go-control-plane/envoy/type/http/v3
+github.com/envoyproxy/go-control-plane/envoy/type/matcher
+github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3
+github.com/envoyproxy/go-control-plane/envoy/type/metadata/v2
+github.com/envoyproxy/go-control-plane/envoy/type/metadata/v3
+github.com/envoyproxy/go-control-plane/envoy/type/tracing/v2
+github.com/envoyproxy/go-control-plane/envoy/type/tracing/v3
+github.com/envoyproxy/go-control-plane/envoy/type/v3
+# github.com/envoyproxy/protoc-gen-validate v0.1.0
+## explicit
+github.com/envoyproxy/protoc-gen-validate/validate
 # github.com/evanphx/json-patch v4.12.0+incompatible
 ## explicit
 github.com/evanphx/json-patch
@@ -140,6 +211,7 @@ github.com/golang/protobuf/protoc-gen-go/descriptor
 github.com/golang/protobuf/ptypes
 github.com/golang/protobuf/ptypes/any
 github.com/golang/protobuf/ptypes/duration
+github.com/golang/protobuf/ptypes/struct
 github.com/golang/protobuf/ptypes/timestamp
 github.com/golang/protobuf/ptypes/wrappers
 # github.com/google/go-cmp v0.5.6
@@ -173,6 +245,11 @@ github.com/google/mako/spec/proto/mako_go_proto
 # github.com/google/uuid v1.3.0
 ## explicit
 github.com/google/uuid
+# github.com/googleapis/gax-go/v2 v2.1.1
+## explicit; go 1.11
+github.com/googleapis/gax-go/v2
+github.com/googleapis/gax-go/v2/apierror
+github.com/googleapis/gax-go/v2/apierror/internal/proto
 # github.com/googleapis/gnostic v0.5.5
 ## explicit; go 1.12
 github.com/googleapis/gnostic/compiler
@@ -390,6 +467,12 @@ golang.org/x/sys/windows
 golang.org/x/term
 # golang.org/x/text v0.3.7
 ## explicit; go 1.17
+golang.org/x/text/cases
+golang.org/x/text/internal
+golang.org/x/text/internal/language
+golang.org/x/text/internal/language/compact
+golang.org/x/text/internal/tag
+golang.org/x/text/language
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
@@ -426,7 +509,24 @@ golang.org/x/xerrors/internal
 gomodules.xyz/jsonpatch/v2
 # google.golang.org/api v0.61.0
 ## explicit; go 1.11
+google.golang.org/api/googleapi
+google.golang.org/api/googleapi/transport
+google.golang.org/api/iamcredentials/v1
+google.golang.org/api/internal
+google.golang.org/api/internal/gensupport
+google.golang.org/api/internal/impersonate
+google.golang.org/api/internal/third_party/uritemplates
+google.golang.org/api/iterator
+google.golang.org/api/option
+google.golang.org/api/option/internaloption
+google.golang.org/api/storage/v1
 google.golang.org/api/support/bundler
+google.golang.org/api/transport
+google.golang.org/api/transport/cert
+google.golang.org/api/transport/grpc
+google.golang.org/api/transport/http
+google.golang.org/api/transport/http/internal/propagation
+google.golang.org/api/transport/internal/dca
 # google.golang.org/appengine v1.6.7
 ## explicit; go 1.11
 google.golang.org/appengine
@@ -437,12 +537,22 @@ google.golang.org/appengine/internal/datastore
 google.golang.org/appengine/internal/log
 google.golang.org/appengine/internal/modules
 google.golang.org/appengine/internal/remote_api
+google.golang.org/appengine/internal/socket
 google.golang.org/appengine/internal/urlfetch
+google.golang.org/appengine/socket
 google.golang.org/appengine/urlfetch
 # google.golang.org/genproto v0.0.0-20211129164237-f09f9a12af12
 ## explicit; go 1.11
+google.golang.org/genproto/googleapis/api/annotations
+google.golang.org/genproto/googleapis/api/expr/v1alpha1
 google.golang.org/genproto/googleapis/api/httpbody
+google.golang.org/genproto/googleapis/iam/v1
+google.golang.org/genproto/googleapis/rpc/code
+google.golang.org/genproto/googleapis/rpc/errdetails
 google.golang.org/genproto/googleapis/rpc/status
+google.golang.org/genproto/googleapis/storage/v2
+google.golang.org/genproto/googleapis/type/date
+google.golang.org/genproto/googleapis/type/expr
 google.golang.org/genproto/protobuf/field_mask
 # google.golang.org/grpc v1.42.0
 ## explicit; go 1.14
@@ -451,28 +561,49 @@ google.golang.org/grpc/attributes
 google.golang.org/grpc/backoff
 google.golang.org/grpc/balancer
 google.golang.org/grpc/balancer/base
+google.golang.org/grpc/balancer/grpclb
+google.golang.org/grpc/balancer/grpclb/grpc_lb_v1
 google.golang.org/grpc/balancer/grpclb/state
 google.golang.org/grpc/balancer/roundrobin
+google.golang.org/grpc/balancer/weightedroundrobin
 google.golang.org/grpc/binarylog/grpc_binarylog_v1
 google.golang.org/grpc/codes
 google.golang.org/grpc/connectivity
 google.golang.org/grpc/credentials
+google.golang.org/grpc/credentials/alts
+google.golang.org/grpc/credentials/alts/internal
+google.golang.org/grpc/credentials/alts/internal/authinfo
+google.golang.org/grpc/credentials/alts/internal/conn
+google.golang.org/grpc/credentials/alts/internal/handshaker
+google.golang.org/grpc/credentials/alts/internal/handshaker/service
+google.golang.org/grpc/credentials/alts/internal/proto/grpc_gcp
+google.golang.org/grpc/credentials/google
+google.golang.org/grpc/credentials/insecure
+google.golang.org/grpc/credentials/oauth
+google.golang.org/grpc/credentials/tls/certprovider
+google.golang.org/grpc/credentials/tls/certprovider/pemfile
 google.golang.org/grpc/encoding
 google.golang.org/grpc/encoding/proto
 google.golang.org/grpc/grpclog
 google.golang.org/grpc/internal
+google.golang.org/grpc/internal/admin
 google.golang.org/grpc/internal/backoff
 google.golang.org/grpc/internal/balancerload
 google.golang.org/grpc/internal/binarylog
 google.golang.org/grpc/internal/buffer
+google.golang.org/grpc/internal/cache
 google.golang.org/grpc/internal/channelz
 google.golang.org/grpc/internal/credentials
+google.golang.org/grpc/internal/credentials/xds
 google.golang.org/grpc/internal/envconfig
+google.golang.org/grpc/internal/googlecloud
 google.golang.org/grpc/internal/grpclog
 google.golang.org/grpc/internal/grpcrand
 google.golang.org/grpc/internal/grpcsync
 google.golang.org/grpc/internal/grpcutil
+google.golang.org/grpc/internal/hierarchy
 google.golang.org/grpc/internal/metadata
+google.golang.org/grpc/internal/pretty
 google.golang.org/grpc/internal/resolver
 google.golang.org/grpc/internal/resolver/dns
 google.golang.org/grpc/internal/resolver/passthrough
@@ -482,7 +613,10 @@ google.golang.org/grpc/internal/status
 google.golang.org/grpc/internal/syscall
 google.golang.org/grpc/internal/transport
 google.golang.org/grpc/internal/transport/networktype
+google.golang.org/grpc/internal/wrr
 google.golang.org/grpc/internal/xds/env
+google.golang.org/grpc/internal/xds/matcher
+google.golang.org/grpc/internal/xds/rbac
 google.golang.org/grpc/keepalive
 google.golang.org/grpc/metadata
 google.golang.org/grpc/peer
@@ -491,6 +625,33 @@ google.golang.org/grpc/serviceconfig
 google.golang.org/grpc/stats
 google.golang.org/grpc/status
 google.golang.org/grpc/tap
+google.golang.org/grpc/xds
+google.golang.org/grpc/xds/csds
+google.golang.org/grpc/xds/googledirectpath
+google.golang.org/grpc/xds/internal
+google.golang.org/grpc/xds/internal/balancer
+google.golang.org/grpc/xds/internal/balancer/balancergroup
+google.golang.org/grpc/xds/internal/balancer/cdsbalancer
+google.golang.org/grpc/xds/internal/balancer/clusterimpl
+google.golang.org/grpc/xds/internal/balancer/clustermanager
+google.golang.org/grpc/xds/internal/balancer/clusterresolver
+google.golang.org/grpc/xds/internal/balancer/loadstore
+google.golang.org/grpc/xds/internal/balancer/priority
+google.golang.org/grpc/xds/internal/balancer/ringhash
+google.golang.org/grpc/xds/internal/balancer/weightedtarget
+google.golang.org/grpc/xds/internal/balancer/weightedtarget/weightedaggregator
+google.golang.org/grpc/xds/internal/httpfilter
+google.golang.org/grpc/xds/internal/httpfilter/fault
+google.golang.org/grpc/xds/internal/httpfilter/rbac
+google.golang.org/grpc/xds/internal/httpfilter/router
+google.golang.org/grpc/xds/internal/resolver
+google.golang.org/grpc/xds/internal/server
+google.golang.org/grpc/xds/internal/version
+google.golang.org/grpc/xds/internal/xdsclient
+google.golang.org/grpc/xds/internal/xdsclient/bootstrap
+google.golang.org/grpc/xds/internal/xdsclient/load
+google.golang.org/grpc/xds/internal/xdsclient/v2
+google.golang.org/grpc/xds/internal/xdsclient/v3
 # google.golang.org/protobuf v1.27.1
 ## explicit; go 1.9
 google.golang.org/protobuf/encoding/protojson
@@ -524,7 +685,9 @@ google.golang.org/protobuf/runtime/protoimpl
 google.golang.org/protobuf/types/descriptorpb
 google.golang.org/protobuf/types/known/anypb
 google.golang.org/protobuf/types/known/durationpb
+google.golang.org/protobuf/types/known/emptypb
 google.golang.org/protobuf/types/known/fieldmaskpb
+google.golang.org/protobuf/types/known/structpb
 google.golang.org/protobuf/types/known/timestamppb
 google.golang.org/protobuf/types/known/wrapperspb
 # gopkg.in/inf.v0 v0.9.1
@@ -536,7 +699,7 @@ gopkg.in/yaml.v2
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
-# k8s.io/api v0.23.8
+# k8s.io/api v0.23.9
 ## explicit; go 1.16
 k8s.io/api/admission/v1
 k8s.io/api/admissionregistration/v1
@@ -584,11 +747,11 @@ k8s.io/api/scheduling/v1beta1
 k8s.io/api/storage/v1
 k8s.io/api/storage/v1alpha1
 k8s.io/api/storage/v1beta1
-# k8s.io/apiextensions-apiserver v0.23.8
+# k8s.io/apiextensions-apiserver v0.23.9
 ## explicit; go 1.16
 k8s.io/apiextensions-apiserver/pkg/apis/apiextensions
 k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1
-# k8s.io/apimachinery v0.23.8
+# k8s.io/apimachinery v0.23.9
 ## explicit; go 1.16
 k8s.io/apimachinery/pkg/api/equality
 k8s.io/apimachinery/pkg/api/errors
@@ -637,7 +800,7 @@ k8s.io/apimachinery/pkg/version
 k8s.io/apimachinery/pkg/watch
 k8s.io/apimachinery/third_party/forked/golang/json
 k8s.io/apimachinery/third_party/forked/golang/reflect
-# k8s.io/client-go v0.23.8
+# k8s.io/client-go v0.23.9
 ## explicit; go 1.16
 k8s.io/client-go/applyconfigurations/admissionregistration/v1
 k8s.io/client-go/applyconfigurations/admissionregistration/v1beta1
@@ -916,7 +1079,7 @@ k8s.io/client-go/util/jsonpath
 k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/retry
 k8s.io/client-go/util/workqueue
-# k8s.io/code-generator v0.23.8
+# k8s.io/code-generator v0.23.9
 ## explicit; go 1.16
 k8s.io/code-generator
 k8s.io/code-generator/cmd/client-gen
@@ -951,7 +1114,7 @@ k8s.io/code-generator/cmd/set-gen
 k8s.io/code-generator/pkg/namer
 k8s.io/code-generator/pkg/util
 k8s.io/code-generator/third_party/forked/golang/reflect
-# k8s.io/gengo v0.0.0-20220307231824-4627b89bbf1b
+# k8s.io/gengo v0.0.0-20220613173612-397b4ae3bce7
 ## explicit; go 1.13
 k8s.io/gengo/args
 k8s.io/gengo/examples/deepcopy-gen/generators
@@ -963,10 +1126,12 @@ k8s.io/gengo/generator
 k8s.io/gengo/namer
 k8s.io/gengo/parser
 k8s.io/gengo/types
-# k8s.io/klog/v2 v2.60.1-0.20220317184644-43cc75f9ae89
+# k8s.io/klog/v2 v2.70.2-0.20220707122935-0990e81f1a8f
 ## explicit; go 1.13
 k8s.io/klog/v2
 k8s.io/klog/v2/internal/buffer
+k8s.io/klog/v2/internal/clock
+k8s.io/klog/v2/internal/dbg
 k8s.io/klog/v2/internal/serialize
 k8s.io/klog/v2/internal/severity
 # k8s.io/kube-openapi v0.0.0-20211115234752-e816edb12b65
@@ -989,8 +1154,8 @@ k8s.io/utils/internal/third_party/forked/golang/net
 k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/trace
-# knative.dev/eventing v0.33.1-0.20220722122720-c8435ed74ba8
-## explicit; go 1.17
+# knative.dev/eventing v0.34.1-0.20220906111743-7f1f49f5b4e0
+## explicit; go 1.18
 knative.dev/eventing/pkg/apis/config
 knative.dev/eventing/pkg/apis/duck
 knative.dev/eventing/pkg/apis/duck/v1
@@ -1042,11 +1207,11 @@ knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/heartbeats
 knative.dev/eventing/test/test_images/performance
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20220701014203-65c463ac8c98
-## explicit; go 1.14
+# knative.dev/hack v0.0.0-20220906140443-f9dc7220d362
+## explicit; go 1.18
 knative.dev/hack
-# knative.dev/pkg v0.0.0-20220705130606-e60d250dc637
-## explicit; go 1.17
+# knative.dev/pkg v0.0.0-20220826162920-93b66e6a8700
+## explicit; go 1.18
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
 knative.dev/pkg/apis/duck/ducktypes
@@ -1102,6 +1267,7 @@ knative.dev/pkg/system
 knative.dev/pkg/system/testing
 knative.dev/pkg/test
 knative.dev/pkg/test/environment
+knative.dev/pkg/test/gcs
 knative.dev/pkg/test/ghutil
 knative.dev/pkg/test/helpers
 knative.dev/pkg/test/ingress
@@ -1112,6 +1278,7 @@ knative.dev/pkg/test/mako/alerter/github
 knative.dev/pkg/test/mako/alerter/slack
 knative.dev/pkg/test/mako/config
 knative.dev/pkg/test/monitoring
+knative.dev/pkg/test/prow
 knative.dev/pkg/test/slackutil
 knative.dev/pkg/test/spoof
 knative.dev/pkg/test/zipkin
@@ -1128,8 +1295,8 @@ knative.dev/pkg/webhook/json
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20220722111920-0cfde63b455a
-## explicit; go 1.17
+# knative.dev/reconciler-test v0.0.0-20220905144823-18e7400195c1
+## explicit; go 1.18
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
 knative.dev/reconciler-test/pkg/eventshub
