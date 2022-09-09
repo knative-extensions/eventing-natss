@@ -76,7 +76,7 @@ type Reconciler struct {
 }
 
 // take func ref, to be able to mock for tests
-var setupDynamicPublishing = tracing.SetupDynamicPublishing
+var setupDynamicPublishing = tracing.SetupPublishingWithDynamicConfig
 
 // Check that our Reconciler implements controller.Reconciler.
 var _ jetstreamchannelreconciler.Interface = (*Reconciler)(nil)
@@ -95,7 +95,8 @@ func NewController(ctx context.Context, watcher configmap.Watcher) *controller.I
 
 	// Setup trace publishing.
 	iw := watcher.(*configmapinformer.InformedWatcher)
-	if err := setupDynamicPublishing(logger, iw, controllerAgentName, tracingconfig.ConfigName); err != nil {
+	tracer, err := setupDynamicPublishing(logger, iw, controllerAgentName, tracingconfig.ConfigName)
+	if err != nil {
 		logger.Panicw("Error setting up trace publishing", zap.Error(err))
 	}
 
@@ -141,6 +142,7 @@ func NewController(ctx context.Context, watcher configmap.Watcher) *controller.I
 		if err := jetstreamDispatcher.Start(ctx); err != nil {
 			logger.Errorw("Cannot start dispatcher", zap.Error(err))
 		}
+		tracer.Shutdown(context.Background())
 	}()
 	return r.impl
 }
