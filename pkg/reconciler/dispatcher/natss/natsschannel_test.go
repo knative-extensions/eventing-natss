@@ -19,11 +19,12 @@ package natss
 import (
 	"context"
 	"fmt"
-	"knative.dev/pkg/configmap"
-	"knative.dev/pkg/tracing"
 	"os"
 	"sync"
 	"testing"
+
+	"knative.dev/pkg/configmap"
+	"knative.dev/pkg/tracing"
 
 	configmapinformer "knative.dev/pkg/configmap/informer"
 
