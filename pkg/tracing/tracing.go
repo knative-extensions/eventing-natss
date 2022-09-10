@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/nats-io/nats.go"
+
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/binding/transformer"
@@ -79,6 +81,17 @@ func ConvertNatssMsgToEvent(logger *zap.Logger, stanMsg *stan.Msg) *event.Event 
 	err := json.Unmarshal(stanMsg.Data, &message)
 	if err != nil {
 		logger.Error("could not create a event from stan msg", zap.Error(err))
+		return nil
+	}
+
+	return &message
+}
+
+func ConvertNatsMsgToEvent(logger *zap.Logger, stanMsg *nats.Msg) *event.Event {
+	message := cloudevents.NewEvent()
+	err := json.Unmarshal(stanMsg.Data, &message)
+	if err != nil {
+		logger.Error("could not create an event from nats msg", zap.Error(err))
 		return nil
 	}
 

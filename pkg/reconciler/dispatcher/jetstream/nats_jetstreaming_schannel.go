@@ -21,6 +21,10 @@ import (
 	"fmt"
 	"strings"
 
+	configmapinformer "knative.dev/pkg/configmap/informer"
+	"knative.dev/pkg/tracing"
+	tracingconfig "knative.dev/pkg/tracing/config"
+
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -54,11 +58,11 @@ import (
 )
 
 const (
-// controllerAgentName is the string used by this controller to identify
-// itself when creating events.
-//controllerAgentName = "jetstream-ch-dispatcher"
+	// controllerAgentName is the string used by this controller to identify
+	// itself when creating events.
+	controllerAgentName = "jetstream-ch-dispatcher"
 
-//finalizerName = controllerAgentName
+	//finalizerName = controllerAgentName
 )
 
 // Reconciler reconciles NATS JetStream Channels.
@@ -71,6 +75,9 @@ type Reconciler struct {
 	impl                   *controller.Impl
 }
 
+// take func ref, to be able to mock for tests
+var setupDynamicPublishing = tracing.SetupDynamicPublishing
+
 // Check that our Reconciler implements controller.Reconciler.
 var _ jetstreamchannelreconciler.Interface = (*Reconciler)(nil)
 var _ jetstreamchannelreconciler.Finalizer = (*Reconciler)(nil)
@@ -82,9 +89,15 @@ type envConfig struct {
 
 // NewController initializes the controller and is called by the generated code.
 // Registers event handlers to enqueue events.
-func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
+func NewController(ctx context.Context, watcher configmap.Watcher) *controller.Impl {
 
 	logger := logging.FromContext(ctx)
+
+	// Setup trace publishing.
+	iw := watcher.(*configmapinformer.InformedWatcher)
+	if err := setupDynamicPublishing(logger, iw, controllerAgentName, tracingconfig.ConfigName); err != nil {
+		logger.Panicw("Error setting up trace publishing", zap.Error(err))
+	}
 
 	var env envConfig
 	if err := envconfig.Process("", &env); err != nil {
