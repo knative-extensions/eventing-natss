@@ -19,7 +19,10 @@ package natss
 import (
 	"context"
 	"fmt"
+	"knative.dev/pkg/configmap"
+	"knative.dev/pkg/tracing"
 	"os"
+	"sync"
 	"testing"
 
 	configmapinformer "knative.dev/pkg/configmap/informer"
@@ -192,6 +195,15 @@ func (l *failOnFatalAndErrorLogger) Fatal(msg string, fields ...zap.Field) {
 	l.t.Fatalf("Fatal() called - msg: %s - fields: %v", msg, fields)
 }
 
+type mockTracer struct {
+	wg sync.WaitGroup
+}
+
+func (t *mockTracer) Shutdown(ctx context.Context) error {
+	t.wg.Done()
+	return nil
+}
+
 func TestNewController(t *testing.T) {
 	os.Setenv("POD_NAME", "testpod")
 	os.Setenv("CONTAINER_NAME", "testcontainer")
@@ -210,6 +222,38 @@ func TestNewController(t *testing.T) {
 	ctx, _ = injection.Fake.SetupInformers(ctx, cfg)
 
 	NewController(ctx, &configmapinformer.InformedWatcher{})
+}
+
+func TestNewControllerTracingShutDown(t *testing.T) {
+	os.Setenv("POD_NAME", "testpod")
+	os.Setenv("CONTAINER_NAME", "testcontainer")
+
+	logger := failOnFatalAndErrorLogger{
+		Logger: zap.NewNop(),
+		t:      t,
+	}
+
+	dNewNatssDispatcher = func(args dispatcher.Args) (dispatcher.NatsDispatcher, error) {
+		return dispatchertesting.NewDispatcherDoNothing(), nil
+	}
+
+	mock := &mockTracer{}
+	tSetupPublishingWithDynamicConfig = func(logger *zap.SugaredLogger, configMapWatcher configmap.Watcher, serviceName, tracingConfigName string) (tracing.Tracer, error) {
+		mock.wg.Add(1)
+		return mock, nil
+	}
+
+	ctx := logging.WithLogger(context.Background(), logger.Sugar())
+	ctx, _ = fakekubeclient.With(ctx)
+	ctx, _ = fakeeventingclient.With(ctx)
+	ctx, _ = fakedynamicclient.With(ctx, runtime.NewScheme())
+	ctx, _ = fakeclientset.With(ctx)
+	cfg := &rest.Config{}
+	ctx = injection.WithConfig(ctx, cfg)
+	ctx, _ = injection.Fake.SetupInformers(ctx, cfg)
+
+	NewController(ctx, &configmapinformer.InformedWatcher{})
+	mock.wg.Wait()
 }
 
 func TestFailedNatssSubscription(t *testing.T) {

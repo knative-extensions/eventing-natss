@@ -84,6 +84,9 @@ type envConfig struct {
 	ContainerName string `envconfig:"CONTAINER_NAME" required:"true"`
 }
 
+var dNewNatssDispatcher = dispatcher.NewNatssDispatcher
+var tSetupPublishingWithDynamicConfig = tracing.SetupPublishingWithDynamicConfig
+
 // NewController initializes the controller and is called by the generated code.
 // Registers event handlers to enqueue events.
 func NewController(ctx context.Context, watcher configmap.Watcher) *controller.Impl {
@@ -92,7 +95,7 @@ func NewController(ctx context.Context, watcher configmap.Watcher) *controller.I
 
 	// Setup trace publishing.
 	iw := watcher.(*configmapinformer.InformedWatcher)
-	tracer, err := tracing.SetupPublishingWithDynamicConfig(logger, iw, controllerAgentName, tracingconfig.ConfigName)
+	tracer, err := tSetupPublishingWithDynamicConfig(logger, iw, controllerAgentName, tracingconfig.ConfigName)
 	if err != nil {
 		logger.Panicw("Error setting up trace publishing", zap.Error(err))
 	}
@@ -117,7 +120,7 @@ func NewController(ctx context.Context, watcher configmap.Watcher) *controller.I
 		Logger:   logger.Desugar(),
 		Reporter: reporter,
 	}
-	natssDispatcher, err := dispatcher.NewNatssDispatcher(dispatcherArgs)
+	natssDispatcher, err := dNewNatssDispatcher(dispatcherArgs)
 	if err != nil {
 		logger.Fatal("Unable to create natss dispatcher", zap.Error(err))
 	}
