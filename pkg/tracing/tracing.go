@@ -65,22 +65,25 @@ func parseSpanContext(message *event.Event) (sc trace.SpanContext, ok bool) {
 
 func ConvertEventToHttpHeader(message *event.Event) http.Header {
 	additionalHeaders := http.Header{}
-	if message == nil {
-		return additionalHeaders
+	tp, ok := message.Extensions()[traceParentHeader].(string)
+	if ok {
+		additionalHeaders.Add(traceParentHeader, tp)
 	}
-	tp := message.Extensions()[traceParentHeader].(string)
-	ts := message.Extensions()[traceStateHeader].(string)
-	additionalHeaders.Add(traceParentHeader, tp)
-	additionalHeaders.Add(traceStateHeader, ts)
-
+	ts, ok := message.Extensions()[traceStateHeader].(string)
+	if ok {
+		additionalHeaders.Add(traceStateHeader, ts)
+	}
 	return additionalHeaders
 }
 
 func ConvertNatssMsgToEvent(logger *zap.Logger, msg *stan.Msg) *event.Event {
 	message := cloudevents.NewEvent()
+	if msg == nil {
+		return &message
+	}
 	if err := json.Unmarshal(msg.Data, &message); err != nil {
 		logger.Error("could not create an event from stan msg", zap.Error(err))
-		return nil
+		return &message
 	}
 
 	return &message
@@ -88,10 +91,13 @@ func ConvertNatssMsgToEvent(logger *zap.Logger, msg *stan.Msg) *event.Event {
 
 func ConvertNatsMsgToEvent(logger *zap.Logger, msg *nats.Msg) *event.Event {
 	message := cloudevents.NewEvent()
+	if msg == nil {
+		return &message
+	}
 	err := json.Unmarshal(msg.Data, &message)
 	if err != nil {
 		logger.Error("could not create an event from nats msg", zap.Error(err))
-		return nil
+		return &message
 	}
 
 	return &message
