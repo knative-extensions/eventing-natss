@@ -96,7 +96,7 @@ func NewController(ctx context.Context, watcher configmap.Watcher) *controller.I
 	// Setup trace publishing.
 	iw := watcher.(*configmapinformer.InformedWatcher)
 	if err := setupDynamicPublishing(logger, iw, controllerAgentName, tracingconfig.ConfigName); err != nil {
-		logger.Panicw("Error setting up trace publishing", zap.Error(err))
+		logger.Fatalw("Error setting up trace publishing", zap.Error(err))
 	}
 
 	var env envConfig

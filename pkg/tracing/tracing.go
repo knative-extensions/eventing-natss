@@ -76,10 +76,9 @@ func ConvertEventToHttpHeader(message *event.Event) http.Header {
 	return additionalHeaders
 }
 
-func ConvertNatssMsgToEvent(logger *zap.Logger, stanMsg *stan.Msg) *event.Event {
+func ConvertNatssMsgToEvent(logger *zap.Logger, msg *stan.Msg) *event.Event {
 	message := cloudevents.NewEvent()
-	err := json.Unmarshal(stanMsg.Data, &message)
-	if err != nil {
+	if err := json.Unmarshal(msg.Data, &message); err != nil {
 		logger.Error("could not create an event from stan msg", zap.Error(err))
 		return nil
 	}
@@ -87,9 +86,9 @@ func ConvertNatssMsgToEvent(logger *zap.Logger, stanMsg *stan.Msg) *event.Event 
 	return &message
 }
 
-func ConvertNatsMsgToEvent(logger *zap.Logger, stanMsg *nats.Msg) *event.Event {
+func ConvertNatsMsgToEvent(logger *zap.Logger, msg *nats.Msg) *event.Event {
 	message := cloudevents.NewEvent()
-	err := json.Unmarshal(stanMsg.Data, &message)
+	err := json.Unmarshal(msg.Data, &message)
 	if err != nil {
 		logger.Error("could not create an event from nats msg", zap.Error(err))
 		return nil
