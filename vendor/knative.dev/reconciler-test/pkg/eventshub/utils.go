@@ -59,19 +59,32 @@ func ParseDurationStr(durationStr string, defaultDuration int) time.Duration {
 }
 
 // ConfigureTracing can be used in test-images to configure tracing
-func ConfigureTracing(logger *zap.SugaredLogger, serviceName string) error {
+func ConfigureTracing(logger *zap.SugaredLogger, serviceName string) (tracing.Tracer, error) {
 	tracingEnv := os.Getenv(ConfigTracingEnv)
 
+	var (
+		tracer tracing.Tracer
+		err    error
+	)
+
 	if tracingEnv == "" {
-		return tracing.SetupStaticPublishing(logger, serviceName, config.NoopConfig())
+		tracer, err = tracing.SetupPublishingWithStaticConfig(logger, serviceName, config.NoopConfig())
+		if err != nil {
+			return tracer, err
+		}
 	}
 
 	conf, err := config.JSONToTracingConfig(tracingEnv)
 	if err != nil {
-		return err
+		return tracer, err
 	}
 
-	return tracing.SetupStaticPublishing(logger, serviceName, conf)
+	tracer, err = tracing.SetupPublishingWithStaticConfig(logger, serviceName, conf)
+	if err != nil {
+		return tracer, err
+	}
+
+	return tracer, nil
 }
 
 // ConfigureTracing can be used in test-images to configure tracing
@@ -86,10 +99,19 @@ func ConfigureLogging(ctx context.Context, name string) context.Context {
 	return logging.WithLogger(ctx, l)
 }
 
-// WithTracing wraps the provided handler in a tracing handler
-func WithTracing(handler http.Handler) http.Handler {
+// WithServerTracing wraps the provided handler in a tracing handler
+func WithServerTracing(handler http.Handler) http.Handler {
 	return &ochttp.Handler{
 		Propagation: tracecontextb3.TraceContextEgress,
 		Handler:     handler,
 	}
+}
+
+// WithClientTracing enables exporting traces by the client's transport.
+func WithClientTracing(client *http.Client) error {
+	client.Transport = &ochttp.Transport{
+		Base:        http.DefaultTransport,
+		Propagation: tracecontextb3.TraceContextEgress,
+	}
+	return nil
 }
