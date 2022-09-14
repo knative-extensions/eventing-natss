@@ -31,11 +31,11 @@ func TestConvertEventToHttpHeader(t *testing.T) {
 func TestConvertEventToHttpHeaderEmptyEvent(t *testing.T) {
 	event := cloudevents.NewEvent()
 	headers := ConvertEventToHttpHeader(&event)
-	if headers[traceParentHeader] != nil {
-		t.Fatalf("%s header must be nil", traceParentHeader)
+	if headers.Get(traceParentHeader) != "" {
+		t.Fatalf("%s header must be empty", traceParentHeader)
 	}
-	if headers[traceStateHeader] != nil {
-		t.Fatalf("%s header must be nil", traceStateHeader)
+	if headers.Get(traceStateHeader) != "" {
+		t.Fatalf("%s header must be empty", traceStateHeader)
 	}
 }
 
