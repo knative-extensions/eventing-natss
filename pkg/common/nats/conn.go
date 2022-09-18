@@ -19,19 +19,26 @@ package nats
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+
 	v1 "k8s.io/api/core/v1"
-	corev1listers "k8s.io/client-go/listers/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clientsetcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/system"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
-	secretinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/secret"
-
 	commonconfig "knative.dev/eventing-natss/pkg/common/config"
 	"knative.dev/eventing-natss/pkg/common/constants"
+)
+
+var (
+	ErrBadCredentialFileOption = errors.New("bad auth.credentialFile option")
+	ErrBadMTLSOption           = errors.New("bad auth.tls option")
+	ErrBadTLSOption            = errors.New("bad tls option")
 )
 
 func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*nats.Conn, error) {
@@ -40,11 +47,17 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 		url = constants.DefaultNatsURL
 	}
 
-	ns := getNamespace(ctx)
+	coreV1Client, err := clientsetcorev1.NewForConfig(injection.GetConfig(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	secrets := coreV1Client.Secrets(getNamespace(ctx))
+
 	var opts []nats.Option
 
 	if config.Auth != nil {
-		o, err := buildAuthOption(ctx, ns, *config.Auth)
+		o, err := buildAuthOption(ctx, *config.Auth, secrets)
 		if err != nil {
 			return nil, err
 		}
@@ -53,7 +66,7 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 	}
 
 	if config.RootCA != nil {
-		o, err := buildRootCAOption(ctx, ns, *config.RootCA)
+		o, err := buildRootCAOption(ctx, *config.RootCA, secrets)
 		if err != nil {
 			return nil, err
 		}
@@ -64,21 +77,21 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 	return nats.Connect(url, opts...)
 }
 
-func buildAuthOption(ctx context.Context, ns string, config commonconfig.ENConfigAuth) ([]nats.Option, error) {
+func buildAuthOption(ctx context.Context, config commonconfig.ENConfigAuth, secrets clientsetcorev1.SecretInterface) ([]nats.Option, error) {
 	opts := make([]nats.Option, 0, 2)
 	if config.CredentialFile != nil {
-		o, err := buildCredentialFileOption(ctx, ns, *config.CredentialFile)
+		o, err := buildCredentialFileOption(ctx, *config.CredentialFile, secrets)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %s", ErrBadCredentialFileOption, err.Error())
 		}
 
 		opts = append(opts, o)
 	}
 
 	if config.TLS != nil {
-		o, err := buildClientTLSOption(ctx, ns, *config.TLS)
+		o, err := buildClientTLSOption(ctx, *config.TLS, secrets)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %s", ErrBadMTLSOption, err.Error())
 		}
 
 		opts = append(opts, o)
@@ -87,13 +100,17 @@ func buildAuthOption(ctx context.Context, ns string, config commonconfig.ENConfi
 	return opts, nil
 }
 
-func buildCredentialFileOption(ctx context.Context, ns string, config commonconfig.ENConfigAuthCredentialFile) (nats.Option, error) {
+func buildCredentialFileOption(ctx context.Context, config commonconfig.ENConfigAuthCredentialFile, secrets clientsetcorev1.SecretInterface) (nats.Option, error) {
 	if config.Secret == nil {
 		return nil, nil
 	}
 
-	secrets := secretinformer.Get(ctx).Lister().Secrets(ns)
-	contents, err := loadSecret(*config.Secret, secrets)
+	secret, err := secrets.Get(ctx, config.Secret.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	contents, err := loadCredentialFileSecret(*config.Secret, secret)
 	if err != nil {
 		return nil, err
 	}
@@ -101,12 +118,12 @@ func buildCredentialFileOption(ctx context.Context, ns string, config commonconf
 	return credentialFileOption(contents), nil
 }
 
-func buildClientTLSOption(ctx context.Context, ns string, config commonconfig.ENConfigAuthTLS) (nats.Option, error) {
+func buildClientTLSOption(ctx context.Context, config commonconfig.ENConfigAuthTLS, secrets clientsetcorev1.SecretInterface) (nats.Option, error) {
 	if config.Secret == nil {
 		return nil, nil
 	}
 
-	secret, err := secretinformer.Get(ctx).Lister().Secrets(ns).Get(config.Secret.Name)
+	secret, err := secrets.Get(ctx, config.Secret.Name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -114,18 +131,19 @@ func buildClientTLSOption(ctx context.Context, ns string, config commonconfig.EN
 	return ClientCert(secret), nil
 }
 
-func buildRootCAOption(ctx context.Context, ns string, config commonconfig.ENConfigRootCA) (nats.Option, error) {
+func buildRootCAOption(ctx context.Context, config commonconfig.ENConfigRootCA, secrets clientsetcorev1.SecretInterface) (nats.Option, error) {
 	var (
 		decoded []byte
 		err     error
 	)
+
 	if config.CABundle != "" {
 		decoded, err = base64.StdEncoding.DecodeString(config.CABundle)
 		if err != nil {
 			return nil, err
 		}
 	} else if config.Secret != nil {
-		secret, err := secretinformer.Get(ctx).Lister().Secrets(ns).Get(config.Secret.Name)
+		secret, err := secrets.Get(ctx, config.Secret.Name, metav1.GetOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -139,29 +157,18 @@ func buildRootCAOption(ctx context.Context, ns string, config commonconfig.ENCon
 	return RootCA(decoded), nil
 }
 
-func loadSecret(config v1.SecretKeySelector, secrets corev1listers.SecretNamespaceLister) ([]byte, error) {
-	secret, err := secrets.Get(config.Name)
-	if err != nil {
-		return nil, err
-	}
-
+func loadCredentialFileSecret(config v1.SecretKeySelector, secret *v1.Secret) ([]byte, error) {
 	key := constants.DefaultCredentialFileSecretKey
 	if config.Key != "" {
 		key = config.Key
 	}
 
-	encoded, ok := secret.Data[key]
+	contents, ok := secret.Data[key]
 	if !ok {
 		return nil, fmt.Errorf("failed to load secret, key does not exist: %s", key)
 	}
 
-	decoded := make([]byte, base64.StdEncoding.DecodedLen(len(encoded)))
-	n, err := base64.StdEncoding.Decode(decoded, encoded)
-	if err != nil {
-		return nil, err
-	}
-
-	return decoded[:n], nil
+	return contents, nil
 }
 
 // credentialFileOption processes the raw credential file contents and returns the nats.Option. This logic has been

@@ -20,14 +20,14 @@ k3d cluster create knative \
     --port 80:80@loadbalancer \
     --port 443:443@loadbalancer \
     --k3s-arg '--no-deploy=traefik@server:*' \
-    --registry-create k3d-ko.localhost:12345 \
+    --registry-create k3d-ko.local:12345 \
     --wait --verbose
 ```
 
 Deploy Knative eventing to your cluster, following the getting started guide of your choosing from 
 [Installing Knative][install-knative].
 
-> Depending on your OS, you need to ensure `k3d-ko.localhost` resolves to `127.0.0.1`. If your OS does not do this by 
+> Depending on your OS, you need to ensure `k3d-ko.local` resolves to `127.0.0.1`. If your OS does not do this by 
 > default, the simplest method is to add a line to `/etc/hosts`:
 > 
 > ```
@@ -37,6 +37,7 @@ Deploy Knative eventing to your cluster, following the getting started guide of 
 Deploy eventing-natss to your cluster (ensuring your `kubectl` context is configured to your local cluster):
 
 ```sh
+export KO_DOCKER_REPO=k3d-ko.local:12345
 ko apply -f config/webhook
 ko apply -f config/jetstream
 ```

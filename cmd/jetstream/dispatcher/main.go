@@ -41,7 +41,7 @@ func main() {
 		ctx = injection.WithNamespaceScope(ctx, ns)
 	}
 
-	// nats-config is volume mounted so initialise the fsloader
+	// nats-config is volume mounted so initialize the fsloader
 	ctx = fsloader.WithLoader(ctx, configmap.Load)
 
 	sharedmain.MainWithContext(ctx, component, dispatcher.NewController)

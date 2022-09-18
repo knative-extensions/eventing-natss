@@ -59,7 +59,6 @@ spec:
         kind: Service
         name: dead-letter-display
 ---
----
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:

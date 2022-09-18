@@ -299,12 +299,6 @@ type ConsumerConfigTemplate struct {
 	// limit is reached message delivery will be suspended.
 	// +optional
 	MaxAckPending int `json:"maxAckPending,omitempty"`
-
-	// TODO: we're using queue subscribers which aren't supported when using IdleHeartbeat or FlowControl
-	// // IdleHeartbeat if set, will trigger the server to send a status message to the client whenever this duration has
-	// // elapsed and no messages have been delivered.
-	// // +optional
-	// IdleHeartbeat metav1.Duration `json:"idleHeartbeat,omitempty"`
 }
 
 // NatsJetStreamChannelStatus represents the current state of a NatssChannel.

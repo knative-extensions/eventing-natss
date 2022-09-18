@@ -23,13 +23,17 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"knative.dev/eventing-natss/pkg/channel/jetstream"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/controller/resources"
-	"knative.dev/eventing-natss/pkg/common/constants"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/utils/pointer"
 	"knative.dev/eventing/pkg/apis/eventing"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/network"
+
+	"knative.dev/eventing-natss/pkg/channel/jetstream"
+	"knative.dev/eventing-natss/pkg/channel/jetstream/controller/resources"
+	jetstreamv1alpha1listers "knative.dev/eventing-natss/pkg/client/listers/messaging/v1alpha1"
+	"knative.dev/eventing-natss/pkg/common/constants"
 
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/reconciler"
@@ -61,7 +65,6 @@ const (
 	dispatcherServiceFailed         = "DispatcherServiceFailed"
 	dispatcherServiceUpdated        = "DispatcherServiceUpdated"
 	natsJetStreamChannelReconciled  = "NatsJetStreamChannelReconciled"
-	channelServiceFailed            = "ChannelServiceFailed"
 )
 
 func newReconciledNormal(namespace, name string) reconciler.Event {
@@ -102,6 +105,7 @@ type Reconciler struct {
 	endpointsLister      corev1listers.EndpointsLister
 	serviceAccountLister corev1listers.ServiceAccountLister
 	roleBindingLister    rbacv1listers.RoleBindingLister
+	jsmChannelLister     jetstreamv1alpha1listers.NatsJetStreamChannelLister
 
 	controllerRef metav1.OwnerReference
 }
@@ -170,6 +174,30 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatsJetStre
 		Scheme: "http",
 		Host:   network.GetServiceHostname(svc.Name, svc.Namespace),
 	})
+
+	return nil
+}
+
+// FinalizeKind checks whether there are still resources requiring a dispatcher to exist. This handles both
+// namespace-scoped and cluster-scoped resources
+func (r *Reconciler) FinalizeKind(ctx context.Context, nc *v1alpha1.NatsJetStreamChannel) (err reconciler.Event) {
+	logger := logging.FromContext(ctx)
+	scope, ok := nc.Annotations[eventing.ScopeAnnotationKey]
+	if !ok {
+		scope = eventing.ScopeCluster
+	}
+
+	// we don't support running multiple dispatchers in a namespace, so if a namespace-scoped channel exists in the
+	// system namespace it will be shared with other cluster-scoped channels.
+	if scope == eventing.ScopeCluster || nc.Namespace == r.systemNamespace {
+		return r.finalizeClusterScopedKind(ctx, nc)
+	}
+
+	if scope == eventing.ScopeNamespace {
+		return r.finalizeNamespaceScopedKind(ctx, nc)
+	}
+
+	logger.Errorw("unknown scope for NatsJetStreamChannel, skipping finalization")
 
 	return nil
 }
@@ -369,4 +397,107 @@ func (r *Reconciler) reconcileChannelService(ctx context.Context, dispatcherName
 		return nil, fmt.Errorf("jetstreamchannel: %s/%s does not own Service: %q", nc.Namespace, nc.Name, svc.Name)
 	}
 	return svc, nil
+}
+
+// finalizeClusterScopedKind finds all other cluster-scoped NatsJetStreamChannels and if none are cluster-scoped nor
+// ones which exist in the system namespace (these can have any scope) then the dispatcher in the system namespace is
+// deleted.
+func (r *Reconciler) finalizeClusterScopedKind(ctx context.Context, nc *v1alpha1.NatsJetStreamChannel) reconciler.Event {
+	logger := logging.FromContext(ctx)
+
+	allChannels, err := r.jsmChannelLister.List(labels.Everything())
+	if err != nil {
+		logger.Errorw("failed to list NatsJetStreamChannels", zap.Error(err))
+		// TODO: is this ok? should we be returning an actual event within FinalizeKind?
+		return err
+	}
+
+	var stillRequireDispatcher bool
+	for _, channel := range allChannels {
+		// ignore the channel being finalized.
+		if channel.UID == nc.UID {
+			continue
+		}
+
+		if channel.Namespace == r.systemNamespace {
+			stillRequireDispatcher = true
+			break
+		}
+
+		if channel.Annotations[eventing.ScopeAnnotationKey] != eventing.ScopeNamespace {
+			stillRequireDispatcher = true
+			break
+		}
+	}
+
+	if stillRequireDispatcher {
+		logger.Debugw("cluster-scoped dispatcher still required, nothing more to do")
+		return nil
+	}
+
+	logger.Info("cluster-scoped dispatcher no longer required, cleaning up deployment resources")
+
+	return r.cleanDispatcherResources(ctx, r.systemNamespace)
+}
+
+func (r *Reconciler) finalizeNamespaceScopedKind(ctx context.Context, nc *v1alpha1.NatsJetStreamChannel) reconciler.Event {
+	logger := logging.FromContext(ctx)
+
+	allChannels, err := r.jsmChannelLister.NatsJetStreamChannels(nc.Namespace).List(labels.Everything())
+	if err != nil {
+		logger.Errorw("failed to list NatsJetStreamChannels", zap.Error(err))
+		// TODO: is this ok? should we be returning an actual event within FinalizeKind?
+		return err
+	}
+
+	var stillRequireDispatcher bool
+	for _, channel := range allChannels {
+		// ignore the channel being finalized.
+		if channel.UID == nc.UID {
+			continue
+		}
+
+		if channel.Annotations[eventing.ScopeAnnotationKey] == eventing.ScopeNamespace {
+			stillRequireDispatcher = true
+			break
+		}
+	}
+
+	if stillRequireDispatcher {
+		logger.Debugw("namespace-scoped dispatcher still required, nothing more to do")
+		return nil
+	}
+
+	logger.Info("namespace-scoped dispatcher no longer required, cleaning up deployment resources")
+
+	return r.cleanDispatcherResources(ctx, nc.Namespace)
+}
+
+// cleanDispatcherResources cleans up all the dispatcher-related resources after they're no longer required by any
+// NatsJetStreamChannels. For now this just sets the Deployment to have 0 replicas, if we determine this is an ideal
+// approach then this could be optimized by implementing a patch rather than a read-update-delete loop.
+func (r *Reconciler) cleanDispatcherResources(ctx context.Context, namespace string) error {
+	logger := logging.FromContext(ctx)
+
+	deployment, err := r.deploymentLister.Deployments(namespace).Get(jetstream.DispatcherName)
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			logger.Warnw("dispatcher not wanted but does not exist when it is expected")
+			return nil
+		}
+
+		logger.Errorw("failed to Get dispatcher Deployment", zap.Error(err))
+		return err
+	}
+
+	toUpdate := deployment.DeepCopy()
+	toUpdate.Spec.Replicas = pointer.Int32(0)
+
+	_, err = r.kubeClientSet.AppsV1().Deployments(namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})
+	if err != nil {
+		logger.Errorw("failed to update dispatcher Deployment to zero-replicas", zap.Error(err))
+		return err
+	}
+
+	return nil
 }

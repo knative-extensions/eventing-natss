@@ -19,11 +19,13 @@ package controller
 import (
 	"context"
 	"fmt"
-	"knative.dev/eventing-natss/pkg/channel/jetstream"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/controller/resources"
+	"time"
+
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/reconciler"
-	"time"
+
+	"knative.dev/eventing-natss/pkg/channel/jetstream"
+	"knative.dev/eventing-natss/pkg/channel/jetstream/controller/resources"
 
 	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
@@ -75,6 +77,7 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	serviceAccountInformer := serviceaccountinformer.Get(ctx)
 	roleBindingInformer := rolebindinginformer.Get(ctx)
 	podInformer := podinformer.Get(ctx)
+	jsmChannelInformer := natsjetstreamchannel.Get(ctx)
 
 	kubeClient := kubeclient.Get(ctx)
 
@@ -88,6 +91,7 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		endpointsLister:          endpointsInformer.Lister(),
 		serviceAccountLister:     serviceAccountInformer.Lister(),
 		roleBindingLister:        roleBindingInformer.Lister(),
+		jsmChannelLister:         jsmChannelInformer.Lister(),
 		controllerRef:            *ownerRef,
 	}
 

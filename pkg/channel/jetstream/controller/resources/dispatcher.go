@@ -20,8 +20,9 @@ import (
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"knative.dev/eventing-natss/pkg/channel/jetstream"
 	"knative.dev/pkg/system"
+
+	"knative.dev/eventing-natss/pkg/channel/jetstream"
 
 	commonconfig "knative.dev/eventing-natss/pkg/common/config"
 	"knative.dev/eventing-natss/pkg/common/constants"
@@ -32,7 +33,7 @@ const (
 )
 
 var (
-	dispatcherLabels = map[string]string{
+	DispatcherLabels = map[string]string{
 		ChannelLabelKey: ChannelLabelValue,
 		RoleLabelKey:    DispatcherRoleLabelValue,
 	}
@@ -131,11 +132,11 @@ func dispatcherTemplate() *v1.Deployment {
 		},
 		Spec: v1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
-				MatchLabels: dispatcherLabels,
+				MatchLabels: DispatcherLabels,
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: dispatcherLabels,
+					Labels: DispatcherLabels,
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{

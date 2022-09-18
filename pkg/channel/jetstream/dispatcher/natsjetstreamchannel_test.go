@@ -27,14 +27,15 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgotesting "k8s.io/client-go/testing"
+	"knative.dev/pkg/controller"
+	"knative.dev/pkg/logging"
+	. "knative.dev/pkg/reconciler/testing"
+
 	dispatchertesting "knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/testing"
 	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/client/injection/client"
 	natsjschannelreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsjetstreamchannel"
 	reconciletesting "knative.dev/eventing-natss/pkg/reconciler/testing"
-	"knative.dev/pkg/controller"
-	"knative.dev/pkg/logging"
-	. "knative.dev/pkg/reconciler/testing"
 )
 
 type failOnFatalAndErrorLogger struct {
@@ -51,9 +52,8 @@ func (l *failOnFatalAndErrorLogger) Fatal(msg string, fields ...zap.Field) {
 }
 
 const (
-	testNS                = "test-namespace"
-	ncName                = "test-nc"
-	channelServiceAddress = "test-nc-kn-jsm-channel.test-namespace.svc.cluster.local"
+	testNS = "test-namespace"
+	ncName = "test-nc"
 )
 
 var (

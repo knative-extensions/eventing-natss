@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+
 	"knative.dev/eventing-natss/pkg/channel/jetstream"
 
 	commonconfig "knative.dev/eventing-natss/pkg/common/config"
@@ -72,10 +73,10 @@ func dispatcherServiceTemplate() *corev1.Service {
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   jetstream.DispatcherName,
-			Labels: dispatcherLabels,
+			Labels: DispatcherLabels,
 		},
 		Spec: corev1.ServiceSpec{
-			Selector: dispatcherLabels,
+			Selector: DispatcherLabels,
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "http-dispatcher",

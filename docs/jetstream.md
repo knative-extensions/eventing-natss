@@ -26,6 +26,10 @@ two main benefits:
 
 #### Controller Dispatcher Configuration
 
+> This section is not planned for the initial implementation and serves as only a design on how such a feature may be
+> implemented. For now dispatcher configuration must exist in the `config-nats` ConfigMap and cannot be customized
+> per-namespace.
+
 The controller dispatcher configuration tells the controller how dispatchers should be managed. It is not configuration
 for the dispatcher itself. This is implemented as a `ConfigMap` which is volume-mounted into the controller pod and must
 contain a file `jetstream-dispatcher-config`.
@@ -84,21 +88,42 @@ metadata:
 data:
     eventing-nats: |
         url: ""                         # the URL to the JetStream-enabled NATS server
-        auth:                           # only one of the following keys may be set (see "Future Functionality" below)
+        auth:
             credentialFile:             # details of the NATS credential file to use for authentication, initially only
                                         # 'secret' will be supported, but other options may be implemented in the future.
                 secret:
                     key: ""             # the key of the secret containing the credentials, defaults to "nats.creds"
-                    secretName: ""      # the secret containing a NATS credentials file.
-        tls:
-            secretName: ""              # a secret containing the same keys as the "kubernetes.io/tls" type, if only a 
-                                        # `ca.crt` is present then we skip client verification but still ensure the 
-                                        # connection is encrypted with server verification.
+                    name: ""      # the secret containing a NATS credentials file.
+            tls:                        # enable mTLS authentication
+                secret:
+                    name: ""            # a secret matching the shape as the type "kubernetes.io/tls" to be used for 
+                                        # mTLS connections.
+        tls:                            # this object should only be defined when mTLS is not required (configured via 
+                                        # `.auth.tls`) but server verification is. N.B. this is also only required if
+                                        # the server isn't using a certificate chain which already exists in the 
+                                        # truststore.
+            caBundle: ""                # caBundle is a base64 PEM encoded CA certificate chain
+            secret:
+                name: ""                # a secret containing a `ca.crt` entry.
 ```
 
 ## JetStream integration
 
 This section outlines the features of NATS/JetStream which should be supported by this channel implementation.
+
+### Security
+
+The dispatcher will support the following security features, these are configurable following the documentation above
+for [Dispatcher Configuration](#Dispatcher configuration):
+
+- Unsecured NATS clusters (i.e. for usage within private networks)
+- Secured NATS clusters with a Credentials File (https://docs.nats.io/developing-with-nats/security/creds)
+- TLS-enabled clusters (https://docs.nats.io/developing-with-nats/security/tls)
+
+All `NatsJetStreamChannel` resources managed by a dispatcher will inherit the same security configuration. If you wish
+for different channels use separate credentials then they must exist in different namespaces and scoped to that
+namespace (see [Scoping](#Scoping) above).
+
 
 ### Stream/Consumer configuration
 
@@ -117,21 +142,6 @@ Consumers will be created with the default configuration:
 - Ack Policy is Explicit - this is the only allowed option for pull-based consumers
 
 Other configuration elements use the JetStream defaults, and can be overridden in the CRD.
-
-### Security
-
-The dispatcher will support the following security features:
-
-- Unsecured NATS clusters (i.e. for usage within private networks)
-- Secured NATS clusters with a Credentials File (https://docs.nats.io/developing-with-nats/security/creds)
-  - It is the responsibility of the user to ensure a ConfigMap named `config-nats` exists in the namespace to which a 
-    dispatcher is being deployed in.
-- TLS-enabled clusters (https://docs.nats.io/developing-with-nats/security/tls)
-    - CA should be defined in a ConfigMap/Secret in the `knative-eventing` namespace.
-
-All `NatsJetStreamChannel` resources managed by a dispatcher will inherit the same security configuration. If you wish
-for different channels use separate credentials then they must exist in different namespaces and scoped to that
-namespace (see [Scoping](#Scoping) above).
 
 ## `NatsJetStreamChannel` CRD
 
@@ -185,7 +195,6 @@ spec:
                                     # both 30 and 30% as valid values
         maxAckPending: 0            # number of outstanding messages awaiting ack before suspending delivery, 0 denotes 
                                     # no maximum
-        idleHeartbeat: ""           # if set, a time.Duration for the idle heartbeat the server sends to the client
 ```
 
 ### Future functionality

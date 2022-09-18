@@ -25,6 +25,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	clientgotesting "k8s.io/client-go/testing"
 	kubeclient "knative.dev/pkg/client/injection/kube/client"
 	"knative.dev/pkg/kmeta"
@@ -58,6 +59,14 @@ const (
 	dispatcherServiceName    = "jetstream-ch-dispatcher"
 	dispatcherServiceAccount = "test-service-account"
 	channelServiceAddress    = "test-nc-kn-jsm-channel.test-namespace.svc.cluster.local"
+)
+
+var (
+	finalizerUpdatedEvent = Eventf(
+		v1.EventTypeNormal,
+		"FinalizerUpdate",
+		fmt.Sprintf(`Updated %q finalizers`, ncName),
+	)
 )
 
 func TestAllCases(t *testing.T) {
@@ -97,7 +106,13 @@ func TestAllCases(t *testing.T) {
 				makeDispatcherDeployment(),
 				makeDispatcherService(),
 			},
+			WantPatches: []clientgotesting.PatchActionImpl{{
+				Name:      ncName,
+				Patch:     []byte(`{"metadata":{"finalizers":["natsjetstreamchannels.messaging.knative.dev"],"resourceVersion":""}}`),
+				PatchType: types.MergePatchType,
+			}},
 			WantEvents: []string{
+				finalizerUpdatedEvent,
 				Eventf(v1.EventTypeNormal, dispatcherDeploymentCreated, "Dispatcher deployment created"),
 				Eventf(v1.EventTypeNormal, dispatcherServiceCreated, "Dispatcher service created"),
 			},
@@ -119,7 +134,13 @@ func TestAllCases(t *testing.T) {
 			WantCreates: []runtime.Object{
 				makeDispatcherService(),
 			},
+			WantPatches: []clientgotesting.PatchActionImpl{{
+				Name:      ncName,
+				Patch:     []byte(`{"metadata":{"finalizers":["natsjetstreamchannels.messaging.knative.dev"],"resourceVersion":""}}`),
+				PatchType: types.MergePatchType,
+			}},
 			WantEvents: []string{
+				finalizerUpdatedEvent,
 				Eventf(v1.EventTypeNormal, dispatcherServiceCreated, "Dispatcher service created"),
 			},
 		}, {
@@ -138,6 +159,14 @@ func TestAllCases(t *testing.T) {
 					reconciletesting.WithNatsJetStreamChannelServiceReady(),
 				),
 			}},
+			WantPatches: []clientgotesting.PatchActionImpl{{
+				Name:      ncName,
+				Patch:     []byte(`{"metadata":{"finalizers":["natsjetstreamchannels.messaging.knative.dev"],"resourceVersion":""}}`),
+				PatchType: types.MergePatchType,
+			}},
+			WantEvents: []string{
+				finalizerUpdatedEvent,
+			},
 		}, {
 			Name: "Works, creates a new channel",
 			Key:  ncKey,
@@ -161,6 +190,14 @@ func TestAllCases(t *testing.T) {
 			WantCreates: []runtime.Object{
 				makeChannelService(reconciletesting.NewNatsJetStreamChannel(ncName, testNS)),
 			},
+			WantPatches: []clientgotesting.PatchActionImpl{{
+				Name:      ncName,
+				Patch:     []byte(`{"metadata":{"finalizers":["natsjetstreamchannels.messaging.knative.dev"],"resourceVersion":""}}`),
+				PatchType: types.MergePatchType,
+			}},
+			WantEvents: []string{
+				finalizerUpdatedEvent,
+			},
 		}, {
 			Name: "Works, channel exists",
 			Key:  ncKey,
@@ -182,6 +219,14 @@ func TestAllCases(t *testing.T) {
 					reconciletesting.WithNatsJetStreamChannelChannelServiceReady(),
 				),
 			}},
+			WantPatches: []clientgotesting.PatchActionImpl{{
+				Name:      ncName,
+				Patch:     []byte(`{"metadata":{"finalizers":["natsjetstreamchannels.messaging.knative.dev"],"resourceVersion":""}}`),
+				PatchType: types.MergePatchType,
+			}},
+			WantEvents: []string{
+				finalizerUpdatedEvent,
+			},
 		},
 	}
 
@@ -196,7 +241,8 @@ func TestAllCases(t *testing.T) {
 			endpointsLister:          listers.GetEndpointsLister(),
 			serviceAccountLister:     listers.GetServiceAccountLister(),
 			roleBindingLister:        listers.GetRoleBindingLister(),
-			//TODO: Figure out controllerRef
+			jsmChannelLister:         listers.GetNatsJetstreamChannelLister(),
+			// TODO: Figure out controllerRef
 			// controllerRef:            v1.OwnerReference{},
 		}
 		return natsjetstreamchannel.NewReconciler(ctx, logging.FromContext(ctx),
@@ -213,7 +259,7 @@ func makeDispatcherDeployment() *appsv1.Deployment {
 		Image:               dispatcherImage,
 		Replicas:            1,
 		ServiceAccount:      dispatcherServiceAccount,
-		OwnerRef:            metav1.OwnerReference{}, //TODO: Make this work
+		OwnerRef:            metav1.OwnerReference{}, // TODO: Make this work
 	}).Build()
 }
 
