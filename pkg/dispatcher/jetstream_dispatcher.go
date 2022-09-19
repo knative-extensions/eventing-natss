@@ -321,11 +321,16 @@ func (s *jetSubscriptionsSupervisor) subscribe(ctx context.Context, channel even
 			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
 		}
 
-		event := tracing.ConvertNatsMsgToEvent(s.logger, stanMsg)
-		additionalHeaders := tracing.ConvertEventToHttpHeader(event)
-
-		ctx, span := tracing.StartTraceFromMessage(s.logger, ctx, event, "jsmchannel-"+channel.Name)
-		defer span.End()
+		var additionalHeaders http.Header = nil
+		if stanMsg != nil && stanMsg.Data != nil {
+			event := tracing.ConvertNatsMsgToEvent(s.logger, stanMsg)
+			additionalHeaders = tracing.ConvertEventToHttpHeader(event)
+			var span *trace.Span = nil
+			ctx, span = tracing.StartTraceFromMessage(s.logger, ctx, event, "jsmchannel-"+channel.Name)
+			defer span.End()
+		} else {
+			s.logger.Warn("Nats msg or msg.data is nil, ignore tracing propagating")
+		}
 
 		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, additionalHeaders, destination, reply, deadLetter)
 		if err != nil {
