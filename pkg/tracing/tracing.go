@@ -58,7 +58,7 @@ func parseSpanContext(message *event.Event) (sc trace.SpanContext, ok bool) {
 	if !ok {
 		return trace.SpanContext{}, false
 	}
-	ts := message.Extensions()[traceStateHeader].(string)
+	ts, _ := message.Extensions()[traceStateHeader].(string)
 
 	return format.SpanContextFromHeaders(tp, ts)
 }
