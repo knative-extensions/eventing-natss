@@ -329,7 +329,7 @@ func (s *subscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 		if stanMsg != nil && stanMsg.Data != nil {
 			event := tracing.ConvertNatssMsgToEvent(s.logger, stanMsg)
 			additionalHeaders = tracing.ConvertEventToHttpHeader(event)
-			var span *trace.Span = nil
+			var span *trace.Span
 			ctx, span = tracing.StartTraceFromMessage(s.logger, ctx, event, "natsschannel-"+channel.Name)
 			defer span.End()
 		} else {

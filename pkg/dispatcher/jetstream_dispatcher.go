@@ -325,7 +325,7 @@ func (s *jetSubscriptionsSupervisor) subscribe(ctx context.Context, channel even
 		if stanMsg != nil && stanMsg.Data != nil {
 			event := tracing.ConvertNatsMsgToEvent(s.logger, stanMsg)
 			additionalHeaders = tracing.ConvertEventToHttpHeader(event)
-			var span *trace.Span = nil
+			var span *trace.Span
 			ctx, span = tracing.StartTraceFromMessage(s.logger, ctx, event, "jsmchannel-"+channel.Name)
 			defer span.End()
 		} else {
