@@ -372,7 +372,7 @@ github.com/rogpeppe/fastuuid
 # github.com/spf13/pflag v1.0.5
 ## explicit; go 1.12
 github.com/spf13/pflag
-# github.com/stretchr/testify v1.7.0
+# github.com/stretchr/testify v1.8.0
 ## explicit; go 1.13
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/require
@@ -1168,7 +1168,7 @@ k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.34.1-0.20220912074833-e46f4d509d74
+# knative.dev/eventing v0.34.1-0.20220915121905-b8cb60cf89b8
 ## explicit; go 1.18
 knative.dev/eventing/pkg/apis/config
 knative.dev/eventing/pkg/apis/duck
@@ -1221,10 +1221,10 @@ knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/heartbeats
 knative.dev/eventing/test/test_images/performance
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20220914125608-df804190ec5f
+# knative.dev/hack v0.0.0-20220914183605-d1317b08c0c3
 ## explicit; go 1.18
 knative.dev/hack
-# knative.dev/pkg v0.0.0-20220914071948-717747b6ba7f
+# knative.dev/pkg v0.0.0-20220914154704-5f66ecf267fe
 ## explicit; go 1.18
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
@@ -1309,7 +1309,7 @@ knative.dev/pkg/webhook/json
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20220909115625-069c951deacf
+# knative.dev/reconciler-test v0.0.0-20220915105405-0a8f69fc0c95
 ## explicit; go 1.18
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
