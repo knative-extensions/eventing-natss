@@ -19,10 +19,10 @@ require (
 	k8s.io/api v0.24.4
 	k8s.io/apimachinery v0.24.4
 	k8s.io/client-go v0.24.4
-	knative.dev/eventing v0.34.1-0.20220912074833-e46f4d509d74
-	knative.dev/hack v0.0.0-20220914125608-df804190ec5f
-	knative.dev/pkg v0.0.0-20220914071948-717747b6ba7f
-	knative.dev/reconciler-test v0.0.0-20220909115625-069c951deacf
+	knative.dev/eventing v0.34.1-0.20220915121905-b8cb60cf89b8
+	knative.dev/hack v0.0.0-20220914183605-d1317b08c0c3
+	knative.dev/pkg v0.0.0-20220914154704-5f66ecf267fe
+	knative.dev/reconciler-test v0.0.0-20220915105405-0a8f69fc0c95
 )
 
 require (
@@ -93,7 +93,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rogpeppe/fastuuid v1.2.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/testify v1.7.0 // indirect
+	github.com/stretchr/testify v1.8.0 // indirect
 	github.com/tsenart/vegeta/v12 v12.8.4 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
