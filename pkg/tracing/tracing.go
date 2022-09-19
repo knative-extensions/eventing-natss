@@ -78,7 +78,7 @@ func ConvertEventToHttpHeader(message *event.Event) http.Header {
 
 func ConvertNatssMsgToEvent(logger *zap.Logger, msg *stan.Msg) *event.Event {
 	message := cloudevents.NewEvent()
-	if msg == nil {
+	if msg == nil || msg.Data == nil {
 		return &message
 	}
 	if err := json.Unmarshal(msg.Data, &message); err != nil {
@@ -91,7 +91,7 @@ func ConvertNatssMsgToEvent(logger *zap.Logger, msg *stan.Msg) *event.Event {
 
 func ConvertNatsMsgToEvent(logger *zap.Logger, msg *nats.Msg) *event.Event {
 	message := cloudevents.NewEvent()
-	if msg == nil {
+	if msg == nil || msg.Data == nil {
 		return &message
 	}
 	err := json.Unmarshal(msg.Data, &message)
