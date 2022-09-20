@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/nats-io/nats.go"
+
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/binding/transformer"
@@ -56,30 +58,46 @@ func parseSpanContext(message *event.Event) (sc trace.SpanContext, ok bool) {
 	if !ok {
 		return trace.SpanContext{}, false
 	}
-	ts := message.Extensions()[traceStateHeader].(string)
+	ts, _ := message.Extensions()[traceStateHeader].(string)
 
 	return format.SpanContextFromHeaders(tp, ts)
 }
 
 func ConvertEventToHttpHeader(message *event.Event) http.Header {
 	additionalHeaders := http.Header{}
-	if message == nil {
-		return additionalHeaders
+	tp, ok := message.Extensions()[traceParentHeader].(string)
+	if ok {
+		additionalHeaders.Add(traceParentHeader, tp)
 	}
-	tp := message.Extensions()[traceParentHeader].(string)
-	ts := message.Extensions()[traceStateHeader].(string)
-	additionalHeaders.Add(traceParentHeader, tp)
-	additionalHeaders.Add(traceStateHeader, ts)
-
+	ts, ok := message.Extensions()[traceStateHeader].(string)
+	if ok {
+		additionalHeaders.Add(traceStateHeader, ts)
+	}
 	return additionalHeaders
 }
 
-func ConvertNatssMsgToEvent(logger *zap.Logger, stanMsg *stan.Msg) *event.Event {
+func ConvertNatssMsgToEvent(logger *zap.Logger, msg *stan.Msg) *event.Event {
 	message := cloudevents.NewEvent()
-	err := json.Unmarshal(stanMsg.Data, &message)
+	if msg == nil || msg.Data == nil {
+		return &message
+	}
+	if err := json.Unmarshal(msg.Data, &message); err != nil {
+		logger.Error("could not create an event from stan msg", zap.Error(err))
+		return &message
+	}
+
+	return &message
+}
+
+func ConvertNatsMsgToEvent(logger *zap.Logger, msg *nats.Msg) *event.Event {
+	message := cloudevents.NewEvent()
+	if msg == nil || msg.Data == nil {
+		return &message
+	}
+	err := json.Unmarshal(msg.Data, &message)
 	if err != nil {
-		logger.Error("could not create a event from stan msg", zap.Error(err))
-		return nil
+		logger.Error("could not create an event from nats msg", zap.Error(err))
+		return &message
 	}
 
 	return &message
