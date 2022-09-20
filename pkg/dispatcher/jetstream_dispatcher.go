@@ -46,6 +46,7 @@ import (
 const (
 	// maxJetElements defines a maximum number of outstanding re-connect requests
 	maxJetElements = 10
+	jsmChannel     = "jsm-channel"
 )
 
 var (
@@ -321,16 +322,18 @@ func (s *jetSubscriptionsSupervisor) subscribe(ctx context.Context, channel even
 			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
 		}
 
-		var additionalHeaders http.Header = nil
-		if stanMsg != nil && stanMsg.Data != nil {
-			event := tracing.ConvertNatsMsgToEvent(s.logger, stanMsg)
-			additionalHeaders = tracing.ConvertEventToHttpHeader(event)
-			var span *trace.Span
-			ctx, span = tracing.StartTraceFromMessage(s.logger, ctx, event, "jsmchannel-"+channel.Name)
-			defer span.End()
+		event := tracing.ConvertNatsMsgToEvent(s.logger, stanMsg)
+		additionalHeaders := tracing.ConvertEventToHttpHeader(event)
+
+		sc, ok := tracing.ParseSpanContext(event)
+		var span *trace.Span
+		if !ok {
+			s.logger.Warn("Cannot parse the spancontext, creating a new span")
+			ctx, span = trace.StartSpan(ctx, jsmChannel+"-"+channel.Name)
 		} else {
-			s.logger.Warn("Nats msg or msg.data is nil, ignore tracing propagating")
+			ctx, span = trace.StartSpanWithRemoteParent(ctx, jsmChannel+"-"+channel.Name, sc)
 		}
+		defer span.End()
 
 		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, additionalHeaders, destination, reply, deadLetter)
 		if err != nil {
