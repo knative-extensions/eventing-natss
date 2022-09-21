@@ -46,7 +46,8 @@ import (
 
 const (
 	// maxElements defines a maximum number of outstanding re-connect requests
-	maxElements = 10
+	maxElements  = 10
+	natssChannel = "natss-channel"
 )
 
 var (
@@ -328,7 +329,14 @@ func (s *subscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 		event := tracing.ConvertNatssMsgToEvent(s.logger, stanMsg)
 		additionalHeaders := tracing.ConvertEventToHttpHeader(event)
 
-		ctx, span := tracing.StartTraceFromMessage(s.logger, ctx, event, "natsschannel-"+channel.Name)
+		sc, ok := tracing.ParseSpanContext(event)
+		var span *trace.Span
+		if !ok {
+			s.logger.Warn("Cannot parse the spancontext, creating a new span")
+			ctx, span = trace.StartSpan(ctx, natssChannel+"-"+channel.Name)
+		} else {
+			ctx, span = trace.StartSpanWithRemoteParent(ctx, natssChannel+"-"+channel.Name, sc)
+		}
 		defer span.End()
 
 		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, additionalHeaders, destination, reply, deadLetter)
