@@ -175,7 +175,7 @@ github.com/matttproud/golang_protobuf_extensions/pbutil
 github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.1
 github.com/modern-go/reflect2
-# github.com/nats-io/nats.go v1.11.1-0.20210623165838-4b75fc59ae30
+# github.com/nats-io/nats.go v1.16.0
 ## explicit
 github.com/nats-io/nats.go
 github.com/nats-io/nats.go/encoders/builtin
@@ -184,7 +184,7 @@ github.com/nats-io/nats.go/util
 github.com/nats-io/nkeys
 # github.com/nats-io/nuid v1.0.1
 github.com/nats-io/nuid
-# github.com/nats-io/stan.go v0.9.0
+# github.com/nats-io/stan.go v0.10.3
 ## explicit
 github.com/nats-io/stan.go
 github.com/nats-io/stan.go/pb
@@ -271,7 +271,7 @@ go.uber.org/zap/internal/exit
 go.uber.org/zap/internal/ztest
 go.uber.org/zap/zapcore
 go.uber.org/zap/zaptest
-# golang.org/x/crypto v0.0.0-20220214200702-86341886e292
+# golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa
 golang.org/x/crypto/cast5
 golang.org/x/crypto/ed25519
 golang.org/x/crypto/openpgp
