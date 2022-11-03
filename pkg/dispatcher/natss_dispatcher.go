@@ -25,6 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opencensus.io/trace"
+
 	"k8s.io/apimachinery/pkg/types"
 
 	natsscloudevents "github.com/cloudevents/sdk-go/protocol/stan/v2"
@@ -39,11 +41,13 @@ import (
 	"knative.dev/eventing/pkg/kncloudevents"
 
 	"knative.dev/eventing-natss/pkg/natsutil"
+	"knative.dev/eventing-natss/pkg/tracing"
 )
 
 const (
 	// maxElements defines a maximum number of outstanding re-connect requests
-	maxElements = 10
+	maxElements  = 10
+	natssChannel = "natss-channel"
 )
 
 var (
@@ -147,7 +151,9 @@ func messageReceiverFunc(s *subscriptionsSupervisor) eventingchannels.Unbuffered
 			s.logger.Error("could not create natss sender", zap.Error(err))
 			return errors.Wrap(err, "could not create natss sender")
 		}
-		if err := sender.Send(ctx, message); err != nil {
+
+		tpTsTransformers := tracing.SerializeTraceTransformers(trace.FromContext(ctx).SpanContext())
+		if err := sender.Send(ctx, message, tpTsTransformers...); err != nil {
 			errMsg := "error during send"
 			if err.Error() == stan.ErrConnectionClosed.Error() {
 				errMsg += " - connection to NATSS has been lost, attempting to reconnect"
@@ -315,12 +321,40 @@ func (s *subscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 		}
 
 		var deadLetter *url.URL
-		if subscription.Delivery != nil && subscription.Delivery.DeadLetterSink != nil && !subscription.Delivery.DeadLetterSink.URI.IsEmpty() {
-			deadLetter = subscription.Delivery.DeadLetterSink.URI.URL()
-			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
+		retryConfig := kncloudevents.NoRetries()
+
+		if subscription.Delivery != nil {
+			// Extract The DeadLetterSink From The Subscriber.Delivery
+			if subscription.Delivery != nil && subscription.Delivery.DeadLetterSink != nil && !subscription.Delivery.DeadLetterSink.URI.IsEmpty() {
+				deadLetter = subscription.Delivery.DeadLetterSink.URI.URL()
+				s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
+			}
+
+			// Extract The RetryConfig From The Subscriber.Delivery
+			var err error
+			retryConfig, err = kncloudevents.RetryConfigFromDeliverySpec(*subscription.Delivery)
+			if err != nil {
+				s.logger.Error("Failed To Parse RetryConfig From DeliverySpec - No Retries Will Occur", zap.Error(err))
+			} else {
+				s.logger.Info("Successfully Parsed RetryConfig From DeliverySpec", zap.Int("RetryMax", retryConfig.RetryMax))
+				retryConfig.CheckRetry = kncloudevents.SelectiveRetry // Specify Custom CheckRetry Function
+			}
 		}
 
-		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, nil, destination, reply, deadLetter)
+		event := tracing.ConvertNatssMsgToEvent(s.logger, stanMsg)
+		additionalHeaders := tracing.ConvertEventToHttpHeader(event)
+
+		sc, ok := tracing.ParseSpanContext(event)
+		var span *trace.Span
+		if !ok {
+			s.logger.Warn("Cannot parse the spancontext, creating a new span")
+			ctx, span = trace.StartSpan(ctx, natssChannel+"-"+channel.Name)
+		} else {
+			ctx, span = trace.StartSpanWithRemoteParent(ctx, natssChannel+"-"+channel.Name, sc)
+		}
+		defer span.End()
+
+		executionInfo, err := s.dispatcher.DispatchMessageWithRetries(ctx, message, additionalHeaders, destination, reply, deadLetter, &retryConfig)
 		if err != nil {
 			s.logger.Error("Failed to dispatch message: ", zap.Error(err))
 			return
