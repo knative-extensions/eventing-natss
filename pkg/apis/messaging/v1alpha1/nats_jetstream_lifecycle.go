@@ -24,37 +24,42 @@ import (
 )
 
 var conditionSet = apis.NewLivingConditionSet(
-	NatssChannelConditionDispatcherReady,
-	NatssChannelConditionServiceReady,
-	NatssChannelConditionEndpointsReady,
-	NatssChannelConditionAddressable,
-	NatssChannelConditionChannelServiceReady)
+	NatsJetStreamChannelConditionDispatcherReady,
+	NatsJetStreamChannelConditionServiceReady,
+	NatsJetStreamChannelConditionEndpointsReady,
+	NatsJetStreamChannelConditionAddressable,
+	NatsJetStreamChannelConditionChannelServiceReady,
+	NatsJetStreamChannelConditionStreamReady,
+)
 
 const (
-	// NatssChannelConditionReady has status True when all subconditions below have been set to True.
-	NatssChannelConditionReady = apis.ConditionReady
+	// NatsJetStreamChannelConditionReady has status True when all subconditions below have been set to True.
+	NatsJetStreamChannelConditionReady = apis.ConditionReady
 
-	// NatssChannelConditionDispatcherReady has status True when a Dispatcher deployment is ready
+	// NatsJetStreamChannelConditionDispatcherReady has status True when a Dispatcher deployment is ready
 	// Keyed off appsv1.DeploymentAvailable, which means minimum available replicas required are up
 	// and running for at least minReadySeconds.
-	NatssChannelConditionDispatcherReady apis.ConditionType = "DispatcherReady"
+	NatsJetStreamChannelConditionDispatcherReady apis.ConditionType = "DispatcherReady"
 
-	// NatssChannelConditionServiceReady has status True when a k8s Service is ready. This
+	// NatsJetStreamChannelConditionServiceReady has status True when a k8s Service is ready. This
 	// basically just means it exists because there's no meaningful status in Service. See Endpoints
 	// below.
-	NatssChannelConditionServiceReady apis.ConditionType = "ServiceReady"
+	NatsJetStreamChannelConditionServiceReady apis.ConditionType = "ServiceReady"
 
-	// NatssChannelConditionEndpointsReady has status True when a k8s Service Endpoints are backed
+	// NatsJetStreamChannelConditionEndpointsReady has status True when a k8s Service Endpoints are backed
 	// by at least one endpoint.
-	NatssChannelConditionEndpointsReady apis.ConditionType = "EndpointsReady"
+	NatsJetStreamChannelConditionEndpointsReady apis.ConditionType = "EndpointsReady"
 
-	// NatssChannelConditionAddressable has status true when this NatssChannel meets
+	// NatsJetStreamChannelConditionAddressable has status true when this NatsJetStreamChannel meets
 	// the Addressable contract and has a non-empty hostname.
-	NatssChannelConditionAddressable apis.ConditionType = "Addressable"
+	NatsJetStreamChannelConditionAddressable apis.ConditionType = "Addressable"
 
-	// NatssChannelConditionChannelServiceReady has status True when a k8s Service representing the channel is ready.
+	// NatsJetStreamChannelConditionChannelServiceReady has status True when a k8s Service representing the channel is ready.
 	// Because this uses ExternalName, there are no endpoints to check.
-	NatssChannelConditionChannelServiceReady apis.ConditionType = "ChannelServiceReady"
+	NatsJetStreamChannelConditionChannelServiceReady apis.ConditionType = "ChannelServiceReady"
+
+	// NatsJetStreamChannelConditionStreamReady has status True when the JetStream stream has been created.
+	NatsJetStreamChannelConditionStreamReady apis.ConditionType = "StreamReady"
 )
 
 // GetConditionSet retrieves the condition set for this resource. Implements the KRShaped interface.
@@ -86,14 +91,22 @@ func (cs *NatsJetStreamChannelStatus) InitializeConditions() {
 func (cs *NatsJetStreamChannelStatus) SetAddress(url *apis.URL) {
 	cs.Address = &v1.Addressable{URL: url}
 	if url != nil {
-		conditionSet.Manage(cs).MarkTrue(NatssChannelConditionAddressable)
+		conditionSet.Manage(cs).MarkTrue(NatsJetStreamChannelConditionAddressable)
 	} else {
-		conditionSet.Manage(cs).MarkFalse(NatssChannelConditionAddressable, "emptyHostname", "hostname is the empty string")
+		conditionSet.Manage(cs).MarkFalse(NatsJetStreamChannelConditionAddressable, "emptyHostname", "hostname is the empty string")
 	}
 }
 
 func (cs *NatsJetStreamChannelStatus) MarkDispatcherFailed(reason, messageFormat string, messageA ...interface{}) {
-	conditionSet.Manage(cs).MarkFalse(NatssChannelConditionDispatcherReady, reason, messageFormat, messageA...)
+	conditionSet.Manage(cs).MarkFalse(NatsJetStreamChannelConditionDispatcherReady, reason, messageFormat, messageA...)
+}
+
+func (cs *NatsJetStreamChannelStatus) MarkDispatcherUnknown(reason, messageFormat string, messageA ...interface{}) {
+	conditionSet.Manage(cs).MarkUnknown(NatsJetStreamChannelConditionDispatcherReady, reason, messageFormat, messageA...)
+}
+
+func (cs *NatsJetStreamChannelStatus) MarkDispatcherTrue() {
+	conditionSet.Manage(cs).MarkTrue(NatsJetStreamChannelConditionDispatcherReady)
 }
 
 // TODO: Unify this with the ones from Eventing. Say: Broker, Trigger.
@@ -103,32 +116,44 @@ func (cs *NatsJetStreamChannelStatus) PropagateDispatcherStatus(ds *appsv1.Deplo
 			if cond.Status != corev1.ConditionTrue {
 				cs.MarkDispatcherFailed("DispatcherNotReady", "Dispatcher Deployment is not ready: %s : %s", cond.Reason, cond.Message)
 			} else {
-				conditionSet.Manage(cs).MarkTrue(NatssChannelConditionDispatcherReady)
+				conditionSet.Manage(cs).MarkTrue(NatsJetStreamChannelConditionDispatcherReady)
 			}
 		}
 	}
 }
 
 func (cs *NatsJetStreamChannelStatus) MarkServiceFailed(reason, messageFormat string, messageA ...interface{}) {
-	conditionSet.Manage(cs).MarkFalse(NatssChannelConditionServiceReady, reason, messageFormat, messageA...)
+	conditionSet.Manage(cs).MarkFalse(NatsJetStreamChannelConditionServiceReady, reason, messageFormat, messageA...)
+}
+
+func (cs *NatsJetStreamChannelStatus) MarkServiceUnknown(reason, messageFormat string, messageA ...interface{}) {
+	conditionSet.Manage(cs).MarkUnknown(NatsJetStreamChannelConditionServiceReady, reason, messageFormat, messageA...)
 }
 
 func (cs *NatsJetStreamChannelStatus) MarkServiceTrue() {
-	conditionSet.Manage(cs).MarkTrue(NatssChannelConditionServiceReady)
+	conditionSet.Manage(cs).MarkTrue(NatsJetStreamChannelConditionServiceReady)
 }
 
 func (cs *NatsJetStreamChannelStatus) MarkChannelServiceFailed(reason, messageFormat string, messageA ...interface{}) {
-	conditionSet.Manage(cs).MarkFalse(NatssChannelConditionChannelServiceReady, reason, messageFormat, messageA...)
+	conditionSet.Manage(cs).MarkFalse(NatsJetStreamChannelConditionChannelServiceReady, reason, messageFormat, messageA...)
 }
 
 func (cs *NatsJetStreamChannelStatus) MarkChannelServiceTrue() {
-	conditionSet.Manage(cs).MarkTrue(NatssChannelConditionChannelServiceReady)
+	conditionSet.Manage(cs).MarkTrue(NatsJetStreamChannelConditionChannelServiceReady)
 }
 
 func (cs *NatsJetStreamChannelStatus) MarkEndpointsFailed(reason, messageFormat string, messageA ...interface{}) {
-	conditionSet.Manage(cs).MarkFalse(NatssChannelConditionEndpointsReady, reason, messageFormat, messageA...)
+	conditionSet.Manage(cs).MarkFalse(NatsJetStreamChannelConditionEndpointsReady, reason, messageFormat, messageA...)
 }
 
 func (cs *NatsJetStreamChannelStatus) MarkEndpointsTrue() {
-	conditionSet.Manage(cs).MarkTrue(NatssChannelConditionEndpointsReady)
+	conditionSet.Manage(cs).MarkTrue(NatsJetStreamChannelConditionEndpointsReady)
+}
+
+func (cs *NatsJetStreamChannelStatus) MarkStreamFailed(reason, messageFormat string, messageA ...interface{}) {
+	conditionSet.Manage(cs).MarkFalse(NatsJetStreamChannelConditionStreamReady, reason, messageFormat, messageA...)
+}
+
+func (cs *NatsJetStreamChannelStatus) MarkStreamTrue() {
+	conditionSet.Manage(cs).MarkTrue(NatsJetStreamChannelConditionStreamReady)
 }

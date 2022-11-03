@@ -13,14 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const data = `{
-	"specversion":"1.0",
-	"type":"type",
-	"source":"source",
-	"id":"1234-1234-1234",
-	"traceparent": "00-8abe1a4854a9864ffa63046ef07b5dbe-8829876d85d5a76d-01",
-	"tracestate": "rojo=00f067aa0ba902b7",
-	"data":{"firstName":"John"} }`
+const data = `{"specversion":"1.0","type":"type","source":"source","id":"1234-1234-1234","data":{"firstName":"John"}}`
 const traceId = "8abe1a4854a9864ffa63046ef07b5dbe"
 const tp = "00-" + traceId + "-8829876d85d5a76d-01"
 const ts = "rojo=00f067aa0ba902b7"
@@ -101,10 +94,10 @@ func TestConvertNatssMsgToEventIsNotNullableData(t *testing.T) {
 }
 
 func TestStartTraceFromMessage(t *testing.T) {
-	natMsg := nats.Msg{}
-	natMsg.Data = []byte(data)
-	msg := ConvertNatsMsgToEvent(zap.NewNop(), &natMsg)
-	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), msg, "span-name")
+	msg := cloudevents.NewEvent()
+	msg.SetExtension(traceParentHeader, tp)
+	msg.SetExtension(traceStateHeader, ts)
+	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), &msg, "span-name")
 	tc := trace.FromContext(ctx)
 	if traceId != tc.SpanContext().TraceID.String() {
 		t.Fatalf("TraceId is incorrect, expected: %v, actual: %v", traceId, tc.SpanContext().TraceID)

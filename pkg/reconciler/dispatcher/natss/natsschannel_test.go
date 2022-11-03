@@ -225,7 +225,7 @@ func TestNewControllerSetupDynamicPublishingError(t *testing.T) {
 		}
 	}()
 
-	setupDynamicPublishing = func(logger *zap.SugaredLogger, configMapWatcher configmap.Watcher, serviceName, tracingConfigName string) error {
+	tSetupPublishingWithDynamicConfig = func(logger *zap.SugaredLogger, configMapWatcher configmap.Watcher, serviceName, tracingConfigName string) error {
 		return errors.New("empty error")
 	}
 
@@ -233,6 +233,11 @@ func TestNewControllerSetupDynamicPublishingError(t *testing.T) {
 		Logger: zap.NewNop(),
 		t:      t,
 	}
+
+	dNewNatssDispatcher = func(args dispatcher.Args) (dispatcher.NatsDispatcher, error) {
+		return dispatchertesting.NewDispatcherDoNothing(), nil
+	}
+
 	ctx := logging.WithLogger(context.Background(), logger.Sugar())
 	ctx, _ = fakekubeclient.With(ctx)
 	ctx, _ = fakeeventingclient.With(ctx)
