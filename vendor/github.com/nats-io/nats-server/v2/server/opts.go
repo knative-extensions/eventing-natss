@@ -1,4 +1,4 @@
-// Copyright 2012-2021 The NATS Authors
+// Copyright 2012-2022 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -142,6 +143,13 @@ type LeafNodeOpts struct {
 	// For solicited connections to other clusters/superclusters.
 	Remotes []*RemoteLeafOpts `json:"remotes,omitempty"`
 
+	// This is the minimum version that is accepted for remote connections.
+	// Note that since the server version in the CONNECT protocol was added
+	// only starting at v2.8.0, any version below that will be rejected
+	// (since empty version string in CONNECT would fail the "version at
+	// least" test).
+	MinVersion string
+
 	// Not exported, for tests.
 	resolver    netResolver
 	dialTimeout time.Duration
@@ -176,6 +184,13 @@ type RemoteLeafOpts struct {
 	tlsConfigOpts *TLSConfigOpts
 }
 
+type JSLimitOpts struct {
+	MaxRequestBatch int
+	MaxAckPending   int
+	MaxHAAssets     int
+	Duplicates      time.Duration
+}
+
 // Options block for nats-server.
 // NOTE: This structure is no longer used for monitoring endpoints
 // and json tags are deprecated and may be removed in the future.
@@ -196,13 +211,13 @@ type Options struct {
 	Logtime               bool          `json:"-"`
 	MaxConn               int           `json:"max_connections"`
 	MaxSubs               int           `json:"max_subscriptions,omitempty"`
+	MaxSubTokens          uint8         `json:"-"`
 	Nkeys                 []*NkeyUser   `json:"-"`
 	Users                 []*User       `json:"-"`
 	Accounts              []*Account    `json:"-"`
 	NoAuthUser            string        `json:"-"`
 	SystemAccount         string        `json:"-"`
 	NoSystemAccount       bool          `json:"-"`
-	AllowNewAccounts      bool          `json:"-"`
 	Username              string        `json:"-"`
 	Password              string        `json:"-"`
 	Authorization         string        `json:"-"`
@@ -223,33 +238,38 @@ type Options struct {
 	JetStreamMaxMemory    int64         `json:"-"`
 	JetStreamMaxStore     int64         `json:"-"`
 	JetStreamDomain       string        `json:"-"`
+	JetStreamExtHint      string        `json:"-"`
 	JetStreamKey          string        `json:"-"`
-	StoreDir              string        `json:"-"`
-	Websocket             WebsocketOpts `json:"-"`
-	MQTT                  MQTTOpts      `json:"-"`
-	ProfPort              int           `json:"-"`
-	PidFile               string        `json:"-"`
-	PortsFileDir          string        `json:"-"`
-	LogFile               string        `json:"-"`
-	LogSizeLimit          int64         `json:"-"`
-	Syslog                bool          `json:"-"`
-	RemoteSyslog          string        `json:"-"`
-	Routes                []*url.URL    `json:"-"`
-	RoutesStr             string        `json:"-"`
-	TLSTimeout            float64       `json:"tls_timeout"`
-	TLS                   bool          `json:"-"`
-	TLSVerify             bool          `json:"-"`
-	TLSMap                bool          `json:"-"`
-	TLSCert               string        `json:"-"`
-	TLSKey                string        `json:"-"`
-	TLSCaCert             string        `json:"-"`
-	TLSConfig             *tls.Config   `json:"-"`
-	TLSPinnedCerts        PinnedCertSet `json:"-"`
-	AllowNonTLS           bool          `json:"-"`
-	WriteDeadline         time.Duration `json:"-"`
-	MaxClosedClients      int           `json:"-"`
-	LameDuckDuration      time.Duration `json:"-"`
-	LameDuckGracePeriod   time.Duration `json:"-"`
+	JetStreamUniqueTag    string
+	JetStreamLimits       JSLimitOpts
+	StoreDir              string            `json:"-"`
+	JsAccDefaultDomain    map[string]string `json:"-"` // account to domain name mapping
+	Websocket             WebsocketOpts     `json:"-"`
+	MQTT                  MQTTOpts          `json:"-"`
+	ProfPort              int               `json:"-"`
+	PidFile               string            `json:"-"`
+	PortsFileDir          string            `json:"-"`
+	LogFile               string            `json:"-"`
+	LogSizeLimit          int64             `json:"-"`
+	Syslog                bool              `json:"-"`
+	RemoteSyslog          string            `json:"-"`
+	Routes                []*url.URL        `json:"-"`
+	RoutesStr             string            `json:"-"`
+	TLSTimeout            float64           `json:"tls_timeout"`
+	TLS                   bool              `json:"-"`
+	TLSVerify             bool              `json:"-"`
+	TLSMap                bool              `json:"-"`
+	TLSCert               string            `json:"-"`
+	TLSKey                string            `json:"-"`
+	TLSCaCert             string            `json:"-"`
+	TLSConfig             *tls.Config       `json:"-"`
+	TLSPinnedCerts        PinnedCertSet     `json:"-"`
+	TLSRateLimit          int64             `json:"-"`
+	AllowNonTLS           bool              `json:"-"`
+	WriteDeadline         time.Duration     `json:"-"`
+	MaxClosedClients      int               `json:"-"`
+	LameDuckDuration      time.Duration     `json:"-"`
+	LameDuckGracePeriod   time.Duration     `json:"-"`
 
 	// MaxTracedMsgLen is the maximum printable length for traced messages.
 	MaxTracedMsgLen int `json:"-"`
@@ -259,6 +279,11 @@ type Options struct {
 	TrustedOperators         []*jwt.OperatorClaims `json:"-"`
 	AccountResolver          AccountResolver       `json:"-"`
 	AccountResolverTLSConfig *tls.Config           `json:"-"`
+
+	// AlwaysEnableNonce will always present a nonce to new connections
+	// typically used by custom Authentication implementations who embeds
+	// the server and so not presented as a configuration option
+	AlwaysEnableNonce bool
 
 	CustomClientAuthentication Authentication `json:"-"`
 	CustomRouterAuthentication Authentication `json:"-"`
@@ -277,7 +302,7 @@ type Options struct {
 	ReconnectErrorReports int
 
 	// Tags describing the server. They will be included in varz
-	// and used as a filter criteria for some system requests
+	// and used as a filter criteria for some system requests.
 	Tags jwt.TagList `json:"-"`
 
 	// OCSPConfig enables OCSP Stapling in the server.
@@ -290,12 +315,17 @@ type Options struct {
 	inCmdLine map[string]bool
 
 	// private fields for operator mode
-	operatorJWT      []string
-	resolverPreloads map[string]string
+	operatorJWT            []string
+	resolverPreloads       map[string]string
+	resolverPinnedAccounts map[string]struct{}
 
 	// private fields, used for testing
 	gatewaysSolicitDelay time.Duration
 	routeProto           int
+
+	// JetStream
+	maxMemSet   bool
+	maxStoreSet bool
 }
 
 // WebsocketOpts are options for websocket
@@ -377,6 +407,29 @@ type MQTTOpts struct {
 	Username string
 	Password string
 	Token    string
+
+	// JetStream domain mqtt is supposed to pick up
+	JsDomain string
+
+	// Number of replicas for MQTT streams.
+	// Negative or 0 value means that the server(s) will pick a replica
+	// number based on the known size of the cluster (but capped at 3).
+	// Note that if an account was already connected, the stream's replica
+	// count is not modified. Use the NATS CLI to update the count if desired.
+	StreamReplicas int
+
+	// Number of replicas for MQTT consumers.
+	// Negative or 0 value means that there is no override and the consumer
+	// will have the same replica factor that the stream it belongs to.
+	// If a value is specified, it will require to be lower than the stream
+	// replicas count (lower than StreamReplicas if specified, but also lower
+	// than the automatic value determined by cluster size).
+	// Note that existing consumers are not modified.
+	ConsumerReplicas int
+
+	// Indicate if the consumers should be created with memory storage.
+	// Note that existing consumers are not modified.
+	ConsumerMemoryStorage bool
 
 	// Timeout for the authentication process.
 	AuthTimeout float64
@@ -496,6 +549,7 @@ type TLSConfigOpts struct {
 	Map               bool
 	TLSCheckKnownURLs bool
 	Timeout           float64
+	RateLimit         int64
 	Ciphers           []uint16
 	CurvePreferences  []tls.CurveID
 	PinnedCerts       PinnedCertSet
@@ -644,7 +698,7 @@ func configureSystemAccount(o *Options, m map[string]interface{}) (retErr error)
 // or was present but set to false.
 func (o *Options) ProcessConfigFile(configFile string) error {
 	o.ConfigFile = configFile
-	if configFile == "" {
+	if configFile == _EMPTY_ {
 		return nil
 	}
 	m, err := conf.ParseFileWithChecks(configFile)
@@ -737,30 +791,55 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 		o.Username = auth.user
 		o.Password = auth.pass
 		o.Authorization = auth.token
-		if (auth.user != "" || auth.pass != "") && auth.token != "" {
+		o.AuthTimeout = auth.timeout
+		if (auth.user != _EMPTY_ || auth.pass != _EMPTY_) && auth.token != _EMPTY_ {
 			err := &configErr{tk, "Cannot have a user/pass and token"}
 			*errors = append(*errors, err)
 			return
 		}
-		o.AuthTimeout = auth.timeout
-		// Check for multiple users defined
-		if auth.users != nil {
-			if auth.user != "" {
+		// In case parseAccounts() was done first, we need to check for duplicates.
+		unames := setupUsersAndNKeysDuplicateCheckMap(o)
+		// Check for multiple users defined.
+		// Note: auth.users will be != nil as long as `users: []` is present
+		// in the authorization block, even if empty, and will also account for
+		// nkey users. We also check for users/nkeys that may have been already
+		// added in parseAccounts() (which means they will be in unames)
+		if auth.users != nil || len(unames) > 0 {
+			if auth.user != _EMPTY_ {
 				err := &configErr{tk, "Can not have a single user/pass and a users array"}
 				*errors = append(*errors, err)
 				return
 			}
-			if auth.token != "" {
+			if auth.token != _EMPTY_ {
 				err := &configErr{tk, "Can not have a token and a users array"}
 				*errors = append(*errors, err)
 				return
 			}
-			// Users may have been added from Accounts parsing, so do an append here
-			o.Users = append(o.Users, auth.users...)
+			// Now check that if we have users, there is no duplicate, including
+			// users that may have been configured in parseAccounts().
+			if len(auth.users) > 0 {
+				for _, u := range auth.users {
+					if _, ok := unames[u.Username]; ok {
+						err := &configErr{tk, fmt.Sprintf("Duplicate user %q detected", u.Username)}
+						*errors = append(*errors, err)
+						return
+					}
+					unames[u.Username] = struct{}{}
+				}
+				// Users may have been added from Accounts parsing, so do an append here
+				o.Users = append(o.Users, auth.users...)
+			}
 		}
-
 		// Check for nkeys
-		if auth.nkeys != nil {
+		if len(auth.nkeys) > 0 {
+			for _, u := range auth.nkeys {
+				if _, ok := unames[u.Nkey]; ok {
+					err := &configErr{tk, fmt.Sprintf("Duplicate nkey %q detected", u.Nkey)}
+					*errors = append(*errors, err)
+					return
+				}
+				unames[u.Nkey] = struct{}{}
+			}
 			// NKeys may have been added from Accounts parsing, so do an append here
 			o.Nkeys = append(o.Nkeys, auth.nkeys...)
 		}
@@ -855,6 +934,18 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 		o.MaxTracedMsgLen = int(v.(int64))
 	case "max_subscriptions", "max_subs":
 		o.MaxSubs = int(v.(int64))
+	case "max_sub_tokens", "max_subscription_tokens":
+		if n := v.(int64); n > math.MaxUint8 {
+			err := &configErr{tk, fmt.Sprintf("%s value is too big", k)}
+			*errors = append(*errors, err)
+			return
+		} else if n <= 0 {
+			err := &configErr{tk, fmt.Sprintf("%s value can not be negative", k)}
+			*errors = append(*errors, err)
+			return
+		} else {
+			o.MaxSubTokens = uint8(n)
+		}
 	case "ping_interval":
 		o.PingInterval = parseDuration("ping_interval", tk, v, errors, warnings)
 	case "ping_max":
@@ -873,6 +964,7 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 		o.TLSTimeout = tc.Timeout
 		o.TLSMap = tc.Map
 		o.TLSPinnedCerts = tc.PinnedCerts
+		o.TLSRateLimit = tc.RateLimit
 
 		// Need to keep track of path of the original TLS config
 		// and certs path for OCSP Stapling monitoring.
@@ -986,7 +1078,7 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 				}
 			}
 			// In case "system_account" is defined as well, it takes precedence
-			if o.SystemAccount == "" {
+			if o.SystemAccount == _EMPTY_ {
 				o.SystemAccount = o.TrustedOperators[0].SystemAccount
 			}
 		}
@@ -1104,11 +1196,16 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 			*errors = append(*errors, err)
 			return
 		}
-		if o.AccountResolverTLSConfig, err = GenTLSConfig(tc); err != nil {
+		tlsConfig, err := GenTLSConfig(tc)
+		if err != nil {
 			err := &configErr{tk, err.Error()}
 			*errors = append(*errors, err)
 			return
 		}
+		o.AccountResolverTLSConfig = tlsConfig
+		// GenTLSConfig loads the CA file into ClientCAs, but since this will
+		// be used as a client connection, we need to set RootCAs.
+		o.AccountResolverTLSConfig.RootCAs = tlsConfig.ClientCAs
 	case "resolver_preload":
 		mp, ok := v.(map[string]interface{})
 		if !ok {
@@ -1120,8 +1217,7 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 		for key, val := range mp {
 			tk, val = unwrapValue(val, &lt)
 			if jwtstr, ok := val.(string); !ok {
-				err := &configErr{tk, "preload map value should be a string JWT"}
-				*errors = append(*errors, err)
+				*errors = append(*errors, &configErr{tk, "preload map value should be a string JWT"})
 				continue
 			} else {
 				// Make sure this is a valid account JWT, that is a config error.
@@ -1133,6 +1229,33 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 				}
 				o.resolverPreloads[key] = jwtstr
 			}
+		}
+	case "resolver_pinned_accounts":
+		switch v := v.(type) {
+		case string:
+			o.resolverPinnedAccounts = map[string]struct{}{v: {}}
+		case []string:
+			o.resolverPinnedAccounts = make(map[string]struct{})
+			for _, mv := range v {
+				o.resolverPinnedAccounts[mv] = struct{}{}
+			}
+		case []interface{}:
+			o.resolverPinnedAccounts = make(map[string]struct{})
+			for _, mv := range v {
+				tk, mv = unwrapValue(mv, &lt)
+				if key, ok := mv.(string); ok {
+					o.resolverPinnedAccounts[key] = struct{}{}
+				} else {
+					err := &configErr{tk,
+						fmt.Sprintf("error parsing resolver_pinned_accounts: unsupported type in array %T", mv)}
+					*errors = append(*errors, err)
+					continue
+				}
+			}
+		default:
+			err := &configErr{tk, fmt.Sprintf("error parsing resolver_pinned_accounts: unsupported type %T", v)}
+			*errors = append(*errors, err)
+			return
 		}
 	case "no_auth_user":
 		o.NoAuthUser = v.(string)
@@ -1197,12 +1320,12 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 			o.Tags.Add(v...)
 		case []interface{}:
 			for _, t := range v {
-				if t, ok := t.(token); ok {
-					if t, ok := t.Value().(string); ok {
-						o.Tags.Add(t)
+				if token, ok := t.(token); ok {
+					if ts, ok := token.Value().(string); ok {
+						o.Tags.Add(ts)
 						continue
 					} else {
-						err = &configErr{tk, fmt.Sprintf("error parsing tags: unsupported type %T where string is expected", t)}
+						err = &configErr{tk, fmt.Sprintf("error parsing tags: unsupported type %T where string is expected", token)}
 					}
 				} else {
 					err = &configErr{tk, fmt.Sprintf("error parsing tags: unsupported type %T", t)}
@@ -1216,6 +1339,18 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 			*errors = append(*errors, err)
 			return
 		}
+	case "default_js_domain":
+		vv, ok := v.(map[string]interface{})
+		if !ok {
+			*errors = append(*errors, &configErr{tk, fmt.Sprintf("error default_js_domain config: unsupported type %T", v)})
+			return
+		}
+		m := make(map[string]string)
+		for kk, kv := range vv {
+			_, v = unwrapValue(kv, &tk)
+			m[kk] = v.(string)
+		}
+		o.JsAccDefaultDomain = m
 	default:
 		if au := atomic.LoadInt32(&allowUnknownTopLevelField); au == 0 && !tk.IsUsedVariable() {
 			err := &unknownConfigFieldErr{
@@ -1227,6 +1362,17 @@ func (o *Options) processConfigFileLine(k string, v interface{}, errors *[]error
 			*errors = append(*errors, err)
 		}
 	}
+}
+
+func setupUsersAndNKeysDuplicateCheckMap(o *Options) map[string]struct{} {
+	unames := make(map[string]struct{}, len(o.Users)+len(o.Nkeys))
+	for _, u := range o.Users {
+		unames[u.Username] = struct{}{}
+	}
+	for _, u := range o.Nkeys {
+		unames[u.Nkey] = struct{}{}
+	}
+	return unames
 }
 
 func parseDuration(field string, tk token, v interface{}, errors *[]error, warnings *[]error) time.Duration {
@@ -1332,6 +1478,11 @@ func parseCluster(v interface{}, opts *Options, errors *[]error, warnings *[]err
 				*errors = append(*errors, err)
 				continue
 			}
+			if auth.token != _EMPTY_ {
+				err := &configErr{tk, "Cluster authorization does not support tokens"}
+				*errors = append(*errors, err)
+				continue
+			}
 			opts.Cluster.Username = auth.user
 			opts.Cluster.Password = auth.pass
 			opts.Cluster.AuthTimeout = auth.timeout
@@ -1353,7 +1504,7 @@ func parseCluster(v interface{}, opts *Options, errors *[]error, warnings *[]err
 			}
 		case "routes":
 			ra := mv.([]interface{})
-			routes, errs := parseURLs(ra, "route")
+			routes, errs := parseURLs(ra, "route", warnings)
 			if errs != nil {
 				*errors = append(*errors, errs...)
 				continue
@@ -1408,14 +1559,28 @@ func parseCluster(v interface{}, opts *Options, errors *[]error, warnings *[]err
 	return nil
 }
 
-func parseURLs(a []interface{}, typ string) (urls []*url.URL, errors []error) {
+func parseURLs(a []interface{}, typ string, warnings *[]error) (urls []*url.URL, errors []error) {
 	urls = make([]*url.URL, 0, len(a))
 	var lt token
 	defer convertPanicToErrorList(&lt, &errors)
 
+	dd := make(map[string]bool)
+
 	for _, u := range a {
 		tk, u := unwrapValue(u, &lt)
 		sURL := u.(string)
+		if dd[sURL] {
+			err := &configWarningErr{
+				field: sURL,
+				configErr: configErr{
+					token:  tk,
+					reason: fmt.Sprintf("Duplicate %s entry detected", typ),
+				},
+			}
+			*warnings = append(*warnings, err)
+			continue
+		}
+		dd[sURL] = true
 		url, err := parseURL(sURL, typ)
 		if err != nil {
 			err := &configErr{tk, err.Error()}
@@ -1431,6 +1596,8 @@ func parseURL(u string, typ string) (*url.URL, error) {
 	urlStr := strings.TrimSpace(u)
 	url, err := url.Parse(urlStr)
 	if err != nil {
+		// Security note: if it's not well-formed but still reached us, then we're going to log as-is which might include password information here.
+		// If the URL parses, we don't log the credentials ever, but if it doesn't even parse we don't have a sane way to redact.
 		return nil, fmt.Errorf("error parsing %s url [%q]", typ, urlStr)
 	}
 	return url, nil
@@ -1472,6 +1639,11 @@ func parseGateway(v interface{}, o *Options, errors *[]error, warnings *[]error)
 			}
 			if auth.users != nil {
 				*errors = append(*errors, &configErr{tk, "Gateway authorization does not allow multiple users"})
+				continue
+			}
+			if auth.token != _EMPTY_ {
+				err := &configErr{tk, "Gateway authorization does not support tokens"}
+				*errors = append(*errors, err)
 				continue
 			}
 			o.Gateway.Username = auth.user
@@ -1517,7 +1689,8 @@ func parseGateway(v interface{}, o *Options, errors *[]error, warnings *[]error)
 	return nil
 }
 
-var dynamicJSAccountLimits = &JetStreamAccountLimits{-1, -1, -1, -1}
+var dynamicJSAccountLimits = JetStreamAccountLimits{-1, -1, -1, -1, -1, -1, -1, false}
+var defaultJSAccountTiers = map[string]JetStreamAccountLimits{_EMPTY_: dynamicJSAccountLimits}
 
 // Parses jetstream account limits for an account. Simple setup with boolen is allowed, and we will
 // use dynamic account limits.
@@ -1530,19 +1703,19 @@ func parseJetStreamForAccount(v interface{}, acc *Account, errors *[]error, warn
 	switch vv := v.(type) {
 	case bool:
 		if vv {
-			acc.jsLimits = dynamicJSAccountLimits
+			acc.jsLimits = defaultJSAccountTiers
 		}
 	case string:
 		switch strings.ToLower(vv) {
 		case "enabled", "enable":
-			acc.jsLimits = dynamicJSAccountLimits
+			acc.jsLimits = defaultJSAccountTiers
 		case "disabled", "disable":
 			acc.jsLimits = nil
 		default:
 			return &configErr{tk, fmt.Sprintf("Expected 'enabled' or 'disabled' for string value, got '%s'", vv)}
 		}
 	case map[string]interface{}:
-		jsLimits := &JetStreamAccountLimits{-1, -1, -1, -1}
+		jsLimits := JetStreamAccountLimits{-1, -1, -1, -1, -1, -1, -1, false}
 		for mk, mv := range vv {
 			tk, mv = unwrapValue(mv, &lt)
 			switch strings.ToLower(mk) {
@@ -1551,13 +1724,13 @@ func parseJetStreamForAccount(v interface{}, acc *Account, errors *[]error, warn
 				if !ok {
 					return &configErr{tk, fmt.Sprintf("Expected a parseable size for %q, got %v", mk, mv)}
 				}
-				jsLimits.MaxMemory = int64(vv)
+				jsLimits.MaxMemory = vv
 			case "max_store", "max_file", "max_disk", "store", "disk":
 				vv, ok := mv.(int64)
 				if !ok {
 					return &configErr{tk, fmt.Sprintf("Expected a parseable size for %q, got %v", mk, mv)}
 				}
-				jsLimits.MaxStore = int64(vv)
+				jsLimits.MaxStore = vv
 			case "max_streams", "streams":
 				vv, ok := mv.(int64)
 				if !ok {
@@ -1570,6 +1743,30 @@ func parseJetStreamForAccount(v interface{}, acc *Account, errors *[]error, warn
 					return &configErr{tk, fmt.Sprintf("Expected a parseable size for %q, got %v", mk, mv)}
 				}
 				jsLimits.MaxConsumers = int(vv)
+			case "max_bytes_required", "max_stream_bytes", "max_bytes":
+				vv, ok := mv.(bool)
+				if !ok {
+					return &configErr{tk, fmt.Sprintf("Expected a parseable bool for %q, got %v", mk, mv)}
+				}
+				jsLimits.MaxBytesRequired = vv
+			case "mem_max_stream_bytes", "memory_max_stream_bytes":
+				vv, ok := mv.(int64)
+				if !ok {
+					return &configErr{tk, fmt.Sprintf("Expected a parseable size for %q, got %v", mk, mv)}
+				}
+				jsLimits.MemoryMaxStreamBytes = vv
+			case "disk_max_stream_bytes", "store_max_stream_bytes":
+				vv, ok := mv.(int64)
+				if !ok {
+					return &configErr{tk, fmt.Sprintf("Expected a parseable size for %q, got %v", mk, mv)}
+				}
+				jsLimits.StoreMaxStreamBytes = vv
+			case "max_ack_pending":
+				vv, ok := mv.(int64)
+				if !ok {
+					return &configErr{tk, fmt.Sprintf("Expected a parseable size for %q, got %v", mk, mv)}
+				}
+				jsLimits.MaxAckPending = int(vv)
 			default:
 				if !tk.IsUsedVariable() {
 					err := &unknownConfigFieldErr{
@@ -1583,10 +1780,87 @@ func parseJetStreamForAccount(v interface{}, acc *Account, errors *[]error, warn
 				}
 			}
 		}
-		acc.jsLimits = jsLimits
+		acc.jsLimits = map[string]JetStreamAccountLimits{_EMPTY_: jsLimits}
 	default:
 		return &configErr{tk, fmt.Sprintf("Expected map, bool or string to define JetStream, got %T", v)}
 	}
+	return nil
+}
+
+// takes in a storage size as either an int or a string and returns an int64 value based on the input.
+func getStorageSize(v interface{}) (int64, error) {
+	_, ok := v.(int64)
+	if ok {
+		return v.(int64), nil
+	}
+
+	s, ok := v.(string)
+	if !ok {
+		return 0, fmt.Errorf("must be int64 or string")
+	}
+
+	if s == "" {
+		return 0, nil
+	}
+
+	suffix := s[len(s)-1:]
+	prefix := s[:len(s)-1]
+	num, err := strconv.ParseInt(prefix, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	suffixMap := map[string]int64{"K": 10, "M": 20, "G": 30, "T": 40}
+
+	mult, ok := suffixMap[suffix]
+	if !ok {
+		return 0, fmt.Errorf("sizes defined as strings must end in K, M, G, T")
+	}
+	num *= 1 << mult
+
+	return num, nil
+}
+
+// Parse enablement of jetstream for a server.
+func parseJetStreamLimits(v interface{}, opts *Options, errors *[]error, warnings *[]error) error {
+	var lt token
+	tk, v := unwrapValue(v, &lt)
+
+	lim := JSLimitOpts{}
+
+	vv, ok := v.(map[string]interface{})
+	if !ok {
+		return &configErr{tk, fmt.Sprintf("Expected a map to define JetStreamLimits, got %T", v)}
+	}
+	for mk, mv := range vv {
+		tk, mv = unwrapValue(mv, &lt)
+		switch strings.ToLower(mk) {
+		case "max_ack_pending":
+			lim.MaxAckPending = int(mv.(int64))
+		case "max_ha_assets":
+			lim.MaxHAAssets = int(mv.(int64))
+		case "max_request_batch":
+			lim.MaxRequestBatch = int(mv.(int64))
+		case "duplicate_window":
+			var err error
+			lim.Duplicates, err = time.ParseDuration(mv.(string))
+			if err != nil {
+				*errors = append(*errors, err)
+			}
+		default:
+			if !tk.IsUsedVariable() {
+				err := &unknownConfigFieldErr{
+					field: mk,
+					configErr: configErr{
+						token: tk,
+					},
+				}
+				*errors = append(*errors, err)
+				continue
+			}
+		}
+	}
+	opts.JetStreamLimits = lim
 	return nil
 }
 
@@ -1616,20 +1890,38 @@ func parseJetStream(v interface{}, opts *Options, errors *[]error, warnings *[]e
 			switch strings.ToLower(mk) {
 			case "store", "store_dir", "storedir":
 				// StoreDir can be set at the top level as well so have to prevent ambiguous declarations.
-				if opts.StoreDir != "" {
+				if opts.StoreDir != _EMPTY_ {
 					return &configErr{tk, "Duplicate 'store_dir' configuration"}
 				}
 				opts.StoreDir = mv.(string)
 			case "max_memory_store", "max_mem_store", "max_mem":
-				opts.JetStreamMaxMemory = mv.(int64)
+				s, err := getStorageSize(mv)
+				if err != nil {
+					return &configErr{tk, fmt.Sprintf("max_mem_store %s", err)}
+				}
+				opts.JetStreamMaxMemory = s
+				opts.maxMemSet = true
 			case "max_file_store", "max_file":
-				opts.JetStreamMaxStore = mv.(int64)
+				s, err := getStorageSize(mv)
+				if err != nil {
+					return &configErr{tk, fmt.Sprintf("max_file_store %s", err)}
+				}
+				opts.JetStreamMaxStore = s
+				opts.maxStoreSet = true
 			case "domain":
 				opts.JetStreamDomain = mv.(string)
 			case "enable", "enabled":
 				doEnable = mv.(bool)
 			case "key", "ek", "encryption_key":
 				opts.JetStreamKey = mv.(string)
+			case "extension_hint":
+				opts.JetStreamExtHint = mv.(string)
+			case "limits":
+				if err := parseJetStreamLimits(tk, opts, errors, warnings); err != nil {
+					return err
+				}
+			case "unique_tag":
+				opts.JetStreamUniqueTag = strings.ToLower(strings.TrimSpace(mv.(string)))
 			default:
 				if !tk.IsUsedVariable() {
 					err := &unknownConfigFieldErr{
@@ -1725,6 +2017,14 @@ func parseLeafNodes(v interface{}, opts *Options, errors *[]error, warnings *[]e
 		case "no_advertise":
 			opts.LeafNode.NoAdvertise = mv.(bool)
 			trackExplicitVal(opts, &opts.inConfig, "LeafNode.NoAdvertise", opts.LeafNode.NoAdvertise)
+		case "min_version", "minimum_version":
+			version := mv.(string)
+			if err := checkLeafMinVersionConfig(version); err != nil {
+				err = &configErr{tk, err.Error()}
+				*errors = append(*errors, err)
+				continue
+			}
+			opts.LeafNode.MinVersion = version
 		default:
 			if !tk.IsUsedVariable() {
 				err := &unknownConfigFieldErr{
@@ -1881,7 +2181,7 @@ func parseRemoteLeafNodes(v interface{}, errors *[]error, warnings *[]error) ([]
 			case "url", "urls":
 				switch v := v.(type) {
 				case []interface{}, []string:
-					urls, errs := parseURLs(v.([]interface{}), "leafnode")
+					urls, errs := parseURLs(v.([]interface{}), "leafnode", warnings)
 					if errs != nil {
 						*errors = append(*errors, errs...)
 						continue
@@ -1924,7 +2224,7 @@ func parseRemoteLeafNodes(v interface{}, errors *[]error, warnings *[]error) ([]
 				if tc.Timeout > 0 {
 					remote.TLSTimeout = tc.Timeout
 				} else {
-					remote.TLSTimeout = float64(DEFAULT_LEAF_TLS_TIMEOUT)
+					remote.TLSTimeout = float64(DEFAULT_LEAF_TLS_TIMEOUT) / float64(time.Second)
 				}
 				remote.tlsConfigOpts = tc
 			case "hub":
@@ -2027,7 +2327,7 @@ func parseGateways(v interface{}, errors *[]error, warnings *[]error) ([]*Remote
 				}
 				gateway.URLs = append(gateway.URLs, url)
 			case "urls":
-				urls, errs := parseURLs(v.([]interface{}), "gateway")
+				urls, errs := parseURLs(v.([]interface{}), "gateway", warnings)
 				if errs != nil {
 					*errors = append(*errors, errs...)
 					continue
@@ -2184,7 +2484,7 @@ func parseAccountMappings(v interface{}, acc *Account, errors *[]error, warnings
 		switch vv := v.(type) {
 		case string:
 			if err := acc.AddMapping(subj, v.(string)); err != nil {
-				err := &configErr{tk, fmt.Sprintf("Error adding mapping for %q: %v", subj, err)}
+				err := &configErr{tk, fmt.Sprintf("Error adding mapping for %q to %q : %v", subj, v.(string), err)}
 				*errors = append(*errors, err)
 				continue
 			}
@@ -2201,7 +2501,7 @@ func parseAccountMappings(v interface{}, acc *Account, errors *[]error, warnings
 
 			// Now add them in..
 			if err := acc.AddWeightedMappings(subj, mappings...); err != nil {
-				err := &configErr{tk, fmt.Sprintf("Error adding mapping for %q: %v", subj, err)}
+				err := &configErr{tk, fmt.Sprintf("Error adding mapping for %q to %q : %v", subj, v.(string), err)}
 				*errors = append(*errors, err)
 				continue
 			}
@@ -2213,7 +2513,7 @@ func parseAccountMappings(v interface{}, acc *Account, errors *[]error, warnings
 			}
 			// Now add it in..
 			if err := acc.AddWeightedMappings(subj, mdest); err != nil {
-				err := &configErr{tk, fmt.Sprintf("Error adding mapping for %q: %v", subj, err)}
+				err := &configErr{tk, fmt.Sprintf("Error adding mapping for %q to %q : %v", subj, v.(string), err)}
 				*errors = append(*errors, err)
 				continue
 			}
@@ -2221,6 +2521,39 @@ func parseAccountMappings(v interface{}, acc *Account, errors *[]error, warnings
 			err := &configErr{tk, fmt.Sprintf("Unknown type %T for mapping destination", vv)}
 			*errors = append(*errors, err)
 			continue
+		}
+	}
+
+	return nil
+}
+
+// parseAccountLimits is called to parse account limits in a server config.
+func parseAccountLimits(mv interface{}, acc *Account, errors *[]error, warnings *[]error) error {
+	var lt token
+	defer convertPanicToErrorList(&lt, errors)
+
+	tk, v := unwrapValue(mv, &lt)
+	am, ok := v.(map[string]interface{})
+	if !ok {
+		return &configErr{tk, fmt.Sprintf("Expected account limits to be a map/struct, got %+v", v)}
+	}
+
+	for k, v := range am {
+		tk, mv = unwrapValue(v, &lt)
+		switch strings.ToLower(k) {
+		case "max_connections", "max_conn":
+			acc.mconns = int32(mv.(int64))
+		case "max_subscriptions", "max_subs":
+			acc.msubs = int32(mv.(int64))
+		case "max_payload", "max_pay":
+			acc.mpay = int32(mv.(int64))
+		case "max_leafnodes", "max_leafs":
+			acc.mleafs = int32(mv.(int64))
+		default:
+			if !tk.IsUsedVariable() {
+				err := &configErr{tk, fmt.Sprintf("Unknown field %q parsing account limits", k)}
+				*errors = append(*errors, err)
+			}
 		}
 	}
 
@@ -2264,7 +2597,10 @@ func parseAccounts(v interface{}, opts *Options, errors *[]error, warnings *[]er
 	case map[string]interface{}:
 		// Track users across accounts, must be unique across
 		// accounts and nkeys vs users.
-		uorn := make(map[string]struct{})
+		// We also want to check for users that may have been added in
+		// parseAuthorization{} if that happened first.
+		uorn := setupUsersAndNKeysDuplicateCheckMap(opts)
+
 		for aname, mv := range vv {
 			tk, amv := unwrapValue(mv, &lt)
 
@@ -2347,6 +2683,12 @@ func parseAccounts(v interface{}, opts *Options, errors *[]error, warnings *[]er
 						*errors = append(*errors, err)
 						continue
 					}
+				case "limits":
+					err := parseAccountLimits(tk, acc, errors, warnings)
+					if err != nil {
+						*errors = append(*errors, err)
+						continue
+					}
 				default:
 					if !tk.IsUsedVariable() {
 						err := &unknownConfigFieldErr{
@@ -2357,6 +2699,20 @@ func parseAccounts(v interface{}, opts *Options, errors *[]error, warnings *[]er
 						}
 						*errors = append(*errors, err)
 					}
+				}
+			}
+			// Report error if there is an authorization{} block
+			// with u/p or token and any user defined in accounts{}
+			if len(nkeyUsr) > 0 || len(users) > 0 {
+				if opts.Username != _EMPTY_ {
+					err := &configErr{usersTk, "Can not have a single user/pass and accounts"}
+					*errors = append(*errors, err)
+					continue
+				}
+				if opts.Authorization != _EMPTY_ {
+					err := &configErr{usersTk, "Can not have a token and accounts"}
+					*errors = append(*errors, err)
+					continue
 				}
 			}
 			applyDefaultPermissions(users, nkeyUsr, acc.defaultPerms)
@@ -2486,7 +2842,7 @@ func parseAccounts(v interface{}, opts *Options, errors *[]error, warnings *[]er
 			*errors = append(*errors, &configErr{tk, msg})
 			continue
 		}
-		if service.to == "" {
+		if service.to == _EMPTY_ {
 			service.to = service.sub
 		}
 		if err := service.acc.AddServiceImport(ta, service.to, service.sub); err != nil {
@@ -3552,8 +3908,25 @@ func parseTLS(v interface{}, isClientCtx bool) (t *TLSConfigOpts, retErr error) 
 				at = float64(mv)
 			case float64:
 				at = mv
+			case string:
+				d, err := time.ParseDuration(mv)
+				if err != nil {
+					return nil, &configErr{tk, fmt.Sprintf("error parsing tls config, 'timeout' %s", err)}
+				}
+				at = d.Seconds()
+			default:
+				return nil, &configErr{tk, "error parsing tls config, 'timeout' wrong type"}
 			}
 			tc.Timeout = at
+		case "connection_rate_limit":
+			at := int64(0)
+			switch mv := mv.(type) {
+			case int64:
+				at = mv
+			default:
+				return nil, &configErr{tk, "error parsing tls config, 'connection_rate_limit' wrong type"}
+			}
+			tc.RateLimit = at
 		case "pinned_certs":
 			ra, ok := mv.([]interface{})
 			if !ok {
@@ -3810,6 +4183,14 @@ func parseMQTT(v interface{}, o *Options, errors *[]error, warnings *[]error) er
 			} else {
 				o.MQTT.MaxAckPending = uint16(tmp)
 			}
+		case "js_domain":
+			o.MQTT.JsDomain = mv.(string)
+		case "stream_replicas":
+			o.MQTT.StreamReplicas = int(mv.(int64))
+		case "consumer_replicas":
+			o.MQTT.ConsumerReplicas = int(mv.(int64))
+		case "consumer_memory_storage":
+			o.MQTT.ConsumerMemoryStorage = mv.(bool)
 		default:
 			if !tk.IsUsedVariable() {
 				err := &unknownConfigFieldErr{
@@ -3949,6 +4330,9 @@ func MergeOptions(fileOpts, flagOpts *Options) *Options {
 	}
 	if flagOpts.RoutesStr != "" {
 		mergeRoutes(&opts, flagOpts)
+	}
+	if flagOpts.JetStream {
+		fileOpts.JetStream = flagOpts.JetStream
 	}
 	return &opts
 }
@@ -4178,10 +4562,10 @@ func setBaselineOptions(opts *Options) {
 		}
 	}
 	// JetStream
-	if opts.JetStreamMaxMemory == 0 {
+	if opts.JetStreamMaxMemory == 0 && !opts.maxMemSet {
 		opts.JetStreamMaxMemory = -1
 	}
-	if opts.JetStreamMaxStore == 0 {
+	if opts.JetStreamMaxStore == 0 && !opts.maxStoreSet {
 		opts.JetStreamMaxStore = -1
 	}
 }

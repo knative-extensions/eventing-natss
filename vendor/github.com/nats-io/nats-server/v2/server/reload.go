@@ -648,6 +648,33 @@ func (o *mqttMaxAckPendingReload) Apply(s *Server) {
 	s.Noticef("Reloaded: MQTT max_ack_pending = %v", o.newValue)
 }
 
+type mqttStreamReplicasReload struct {
+	noopOption
+	newValue int
+}
+
+func (o *mqttStreamReplicasReload) Apply(s *Server) {
+	s.Noticef("Reloaded: MQTT stream_replicas = %v", o.newValue)
+}
+
+type mqttConsumerReplicasReload struct {
+	noopOption
+	newValue int
+}
+
+func (o *mqttConsumerReplicasReload) Apply(s *Server) {
+	s.Noticef("Reloaded: MQTT consumer_replicas = %v", o.newValue)
+}
+
+type mqttConsumerMemoryStorageReload struct {
+	noopOption
+	newValue bool
+}
+
+func (o *mqttConsumerMemoryStorageReload) Apply(s *Server) {
+	s.Noticef("Reloaded: MQTT consumer_memory_storage = %v", o.newValue)
+}
+
 // Compares options and disconnects clients that are no longer listed in pinned certs. Lock must not be held.
 func (s *Server) recheckPinnedCerts(curOpts *Options, newOpts *Options) {
 	s.mu.Lock()
@@ -701,10 +728,29 @@ func (s *Server) recheckPinnedCerts(curOpts *Options, newOpts *Options) {
 	}
 }
 
-// Reload reads the current configuration file and applies any supported
-// changes. This returns an error if the server was not started with a config
-// file or an option which doesn't support hot-swapping was changed.
+// Reload reads the current configuration file and calls out to ReloadOptions
+// to apply the changes. This returns an error if the server was not started
+// with a config file or an option which doesn't support hot-swapping was changed.
 func (s *Server) Reload() error {
+	s.mu.Lock()
+	configFile := s.configFile
+	s.mu.Unlock()
+	if configFile == "" {
+		return errors.New("can only reload config when a file is provided using -c or --config")
+	}
+
+	newOpts, err := ProcessConfigFile(configFile)
+	if err != nil {
+		// TODO: Dump previous good config to a .bak file?
+		return err
+	}
+	return s.ReloadOptions(newOpts)
+}
+
+// ReloadOptions applies any supported options from the provided Option
+// type. This returns an error if an option which doesn't support
+// hot-swapping was changed.
+func (s *Server) ReloadOptions(newOpts *Options) error {
 	s.mu.Lock()
 
 	s.reloading = true
@@ -713,18 +759,6 @@ func (s *Server) Reload() error {
 		s.reloading = false
 		s.mu.Unlock()
 	}()
-
-	if s.configFile == "" {
-		s.mu.Unlock()
-		return errors.New("can only reload config when a file is provided using -c or --config")
-	}
-
-	newOpts, err := ProcessConfigFile(s.configFile)
-	if err != nil {
-		s.mu.Unlock()
-		// TODO: Dump previous good config to a .bak file?
-		return err
-	}
 
 	curOpts := s.getOpts()
 
@@ -787,7 +821,6 @@ func (s *Server) Reload() error {
 	s.mu.Unlock()
 	return nil
 }
-
 func applyBoolFlags(newOpts, flagOpts *Options) {
 	// Reset fields that may have been set to `true` in
 	// MergeOptions() when some of the flags default to `true`
@@ -877,9 +910,9 @@ func imposeOrder(value interface{}) error {
 		})
 	case WebsocketOpts:
 		sort.Strings(value.AllowedOrigins)
-	case string, bool, int, int32, int64, time.Duration, float64, nil, LeafNodeOpts, ClusterOpts, *tls.Config, PinnedCertSet,
+	case string, bool, uint8, int, int32, int64, time.Duration, float64, nil, LeafNodeOpts, ClusterOpts, *tls.Config, PinnedCertSet,
 		*URLAccResolver, *MemAccResolver, *DirAccResolver, *CacheDirAccResolver, Authentication, MQTTOpts, jwt.TagList,
-		*OCSPConfig:
+		*OCSPConfig, map[string]string, JSLimitOpts:
 		// explicitly skipped types
 	default:
 		// this will fail during unit tests
@@ -1172,12 +1205,15 @@ func (s *Server) diffOptions(newOpts *Options) ([]option, error) {
 		case "mqtt":
 			diffOpts = append(diffOpts, &mqttAckWaitReload{newValue: newValue.(MQTTOpts).AckWait})
 			diffOpts = append(diffOpts, &mqttMaxAckPendingReload{newValue: newValue.(MQTTOpts).MaxAckPending})
+			diffOpts = append(diffOpts, &mqttStreamReplicasReload{newValue: newValue.(MQTTOpts).StreamReplicas})
+			diffOpts = append(diffOpts, &mqttConsumerReplicasReload{newValue: newValue.(MQTTOpts).ConsumerReplicas})
+			diffOpts = append(diffOpts, &mqttConsumerMemoryStorageReload{newValue: newValue.(MQTTOpts).ConsumerMemoryStorage})
 			// Nil out/set to 0 the options that we allow to be reloaded so that
 			// we only fail reload if some that we don't support are changed.
 			tmpOld := oldValue.(MQTTOpts)
 			tmpNew := newValue.(MQTTOpts)
-			tmpOld.TLSConfig, tmpOld.AckWait, tmpOld.MaxAckPending = nil, 0, 0
-			tmpNew.TLSConfig, tmpNew.AckWait, tmpNew.MaxAckPending = nil, 0, 0
+			tmpOld.TLSConfig, tmpOld.AckWait, tmpOld.MaxAckPending, tmpOld.StreamReplicas, tmpOld.ConsumerReplicas, tmpOld.ConsumerMemoryStorage = nil, 0, 0, 0, 0, false
+			tmpNew.TLSConfig, tmpNew.AckWait, tmpNew.MaxAckPending, tmpNew.StreamReplicas, tmpNew.ConsumerReplicas, tmpNew.ConsumerMemoryStorage = nil, 0, 0, 0, 0, false
 			if !reflect.DeepEqual(tmpOld, tmpNew) {
 				// See TODO(ik) note below about printing old/new values.
 				return nil, fmt.Errorf("config reload not supported for %s: old=%v, new=%v",
@@ -1185,6 +1221,9 @@ func (s *Server) diffOptions(newOpts *Options) ([]option, error) {
 			}
 			tmpNew.AckWait = newValue.(MQTTOpts).AckWait
 			tmpNew.MaxAckPending = newValue.(MQTTOpts).MaxAckPending
+			tmpNew.StreamReplicas = newValue.(MQTTOpts).StreamReplicas
+			tmpNew.ConsumerReplicas = newValue.(MQTTOpts).ConsumerReplicas
+			tmpNew.ConsumerMemoryStorage = newValue.(MQTTOpts).ConsumerMemoryStorage
 		case "connecterrorreports":
 			diffOpts = append(diffOpts, &connectErrorReports{newValue: newValue.(int)})
 		case "reconnecterrorreports":
@@ -1339,6 +1378,9 @@ func (s *Server) applyOptions(ctx *reloadContext, opts []option) {
 				s.Warnf("Can't start JetStream: %v", err)
 			}
 		}
+		// Make sure to reset the internal loop's version of JS.
+		s.resetInternalLoopInfo()
+		s.sendStatszUpdate()
 	}
 
 	// For remote gateways and leafnodes, make sure that their TLS configuration
@@ -1360,6 +1402,21 @@ func (s *Server) applyOptions(ctx *reloadContext, opts []option) {
 	}
 
 	s.Noticef("Reloaded server configuration")
+}
+
+// This will send a reset to the internal send loop.
+func (s *Server) resetInternalLoopInfo() {
+	var resetCh chan struct{}
+	s.mu.Lock()
+	if s.sys != nil {
+		// can't hold the lock as go routine reading it may be waiting for lock as well
+		resetCh = s.sys.resetCh
+	}
+	s.mu.Unlock()
+
+	if resetCh != nil {
+		resetCh <- struct{}{}
+	}
 }
 
 // Update all cached debug and trace settings for every client
@@ -1431,9 +1488,12 @@ func (s *Server) reloadAuthorization() {
 		oldAccounts := make(map[string]*Account)
 		s.accounts.Range(func(k, v interface{}) bool {
 			acc := v.(*Account)
-			acc.mu.RLock()
+			acc.mu.Lock()
 			oldAccounts[acc.Name] = acc
-			acc.mu.RUnlock()
+			// Need to clear out eventing timers since they close over this account and not the new one.
+			clearTimer(&acc.etmr)
+			clearTimer(&acc.ctmr)
+			acc.mu.Unlock()
 			s.accounts.Delete(k)
 			return true
 		})
@@ -1455,11 +1515,23 @@ func (s *Server) reloadAuthorization() {
 						newAcc.clients[c] = struct{}{}
 					}
 				}
+				// Same for leafnodes
+				newAcc.lleafs = append([]*client(nil), acc.lleafs...)
 
 				newAcc.sl = acc.sl
 				newAcc.rm = acc.rm
+				// Transfer internal client state. The configureAccounts call from above may have set up a new one.
+				// We need to use the old one, and the isid to not confuse internal subs.
+				newAcc.ic, newAcc.isid = acc.ic, acc.isid
+				// Transfer any JetStream state.
 				newAcc.js = acc.js
-
+				// Also transfer any internal accounting on different client types. We copy over all clients
+				// so need to copy this as well for proper accounting going forward.
+				newAcc.nrclients = acc.nrclients
+				newAcc.sysclients = acc.sysclients
+				newAcc.nleafs = acc.nleafs
+				newAcc.nrleafs = acc.nrleafs
+				// Process any reverse map entries.
 				if len(acc.imports.rrMap) > 0 {
 					newAcc.imports.rrMap = make(map[string][]*serviceRespEntry)
 					for k, v := range acc.imports.rrMap {
@@ -1522,8 +1594,6 @@ func (s *Server) reloadAuthorization() {
 		}
 	}
 
-	// Gather clients that changed accounts. We will close them and they
-	// will reconnect, doing the right thing.
 	var (
 		cclientsa [64]*client
 		cclients  = cclientsa[:0]
@@ -1532,6 +1602,9 @@ func (s *Server) reloadAuthorization() {
 		routesa   [64]*client
 		routes    = routesa[:0]
 	)
+
+	// Gather clients that changed accounts. We will close them and they
+	// will reconnect, doing the right thing.
 	for _, client := range s.clients {
 		if s.clientHasMovedToDifferentAccount(client) {
 			cclients = append(cclients, client)
@@ -1542,6 +1615,26 @@ func (s *Server) reloadAuthorization() {
 	for _, route := range s.routes {
 		routes = append(routes, route)
 	}
+	// Check here for any system/internal clients which will not be in the servers map of normal clients.
+	if s.sys != nil && s.sys.account != nil && !s.opts.NoSystemAccount {
+		s.accounts.Store(s.sys.account.Name, s.sys.account)
+	}
+
+	s.accounts.Range(func(k, v interface{}) bool {
+		acc := v.(*Account)
+		acc.mu.RLock()
+		// Check for sysclients accounting, ignore the system account.
+		if acc.sysclients > 0 && (s.sys == nil || s.sys.account != acc) {
+			for c := range acc.clients {
+				if c.kind != CLIENT && c.kind != LEAF {
+					clients = append(clients, c)
+				}
+			}
+		}
+		acc.mu.RUnlock()
+		return true
+	})
+
 	var resetCh chan struct{}
 	if s.sys != nil {
 		// can't hold the lock as go routine reading it may be waiting for lock as well
@@ -1561,16 +1654,17 @@ func (s *Server) reloadAuthorization() {
 		client.closeConnection(ClientClosed)
 	}
 
-	for _, client := range clients {
+	for _, c := range clients {
 		// Disconnect any unauthorized clients.
-		if !s.isClientAuthorized(client) {
-			client.authViolation()
+		// Ignore internal clients.
+		if (c.kind == CLIENT || c.kind == LEAF) && !s.isClientAuthorized(c) {
+			c.authViolation()
 			continue
 		}
 		// Check to make sure account is correct.
-		client.swapAccountAfterReload()
+		c.swapAccountAfterReload()
 		// Remove any unauthorized subscriptions and check for account imports.
-		client.processSubsOnConfigReload(awcsti)
+		c.processSubsOnConfigReload(awcsti)
 	}
 
 	for _, route := range routes {
@@ -1590,7 +1684,6 @@ func (s *Server) reloadAuthorization() {
 
 	// We will double check all JetStream configs on a reload.
 	if checkJetStream {
-		s.getJetStream().clearResources()
 		if err := s.enableJetStreamAccounts(); err != nil {
 			s.Errorf(err.Error())
 		}
@@ -1698,7 +1791,7 @@ func (s *Server) reloadClusterPermissions(oldPerms *RoutePermissions) {
 		deleteRoutedSubs []*subscription
 	)
 	// FIXME(dlc) - Change for accounts.
-	gacc.sl.localSubs(&localSubs)
+	gacc.sl.localSubs(&localSubs, false)
 
 	// Go through all local subscriptions
 	for _, sub := range localSubs {

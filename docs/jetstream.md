@@ -50,8 +50,8 @@ data:
         configName: config-nats
     namespaceDefaults:
         my-namespace:
-            configName: custom-jetstream-config     # for dispatchers in the namespace, "my-namespace", use the 
-                                                    # ConfigMap "custom-jetstream-config". Only applicable when 
+            configName: custom-jetstream-config     # for dispatchers in the namespace, "my-namespace", use the
+                                                    # ConfigMap "custom-jetstream-config". Only applicable when
                                                     # namespace-scoping is enabled.
 ```
 
@@ -96,11 +96,11 @@ data:
                 name: ""      # the secret containing a NATS credentials file.
         tls:                        # enable mTLS authentication
             secret:
-                name: ""            # a secret matching the shape as the type "kubernetes.io/tls" to be used for 
+                name: ""            # a secret matching the shape as the type "kubernetes.io/tls" to be used for
                                     # mTLS connections.
-    tls:                            # this object should only be defined when mTLS is not required (configured via 
+    tls:                            # this object should only be defined when mTLS is not required (configured via
                                     # `.auth.tls`) but server verification is. N.B. this is also only required if
-                                    # the server isn't using a certificate chain which already exists in the 
+                                    # the server isn't using a certificate chain which already exists in the
                                     # truststore.
         caBundle: ""                # caBundle is a base64 PEM encoded CA certificate chain
         secret:
@@ -153,11 +153,11 @@ spec:
   subscribers: [ ]                 # SubscribableSpec
   delivery: { }                    # DeliverySpec
   stream:
-    overrideName: ""            # stream name defaults to be based on the namespace/name of the channel, use this 
+    overrideName: ""            # stream name defaults to be based on the namespace/name of the channel, use this
     # to override it
     config:
-      additionalSubjects: [ ]  # we create a unique subject per channel, but users may have existing components 
-        # publishing to existing subjects which users may want to adopt into Knative 
+      additionalSubjects: [ ]  # we create a unique subject per channel, but users may have existing components
+        # publishing to existing subjects which users may want to adopt into Knative
       # subscriptions
       retention: ""           # one of: Limits, Interest, Work - defaults to "Limits"
       maxConsumers: 0         # default 0 denoting no maximum
@@ -167,9 +167,9 @@ spec:
       maxAge: ""              # time.Duration, defaults to no max age
       maxMsgSize: 0           # default 0 denoting no maximum
       storage: ""             # one of: File, Memory - defaults to "File"
-      replicas: 0             # applicable when the JetStream instance is clustered; the number of replicas of 
+      replicas: 0             # applicable when the JetStream instance is clustered; the number of replicas of
       # the data to create
-      noAck: false            # defaults to false (i.e. ack enabled), not sure if we should allow users to 
+      noAck: false            # defaults to false (i.e. ack enabled), not sure if we should allow users to
       # configure this?
       duplicateWindow: ""     # time.Duration for duplication tracking
       placement:
@@ -190,9 +190,9 @@ spec:
     filterSubject: ""           # defaults to no filter
     replayPolicy: ""            # one of: Instant, Original - defaults to "Instant"
     rateLimitBps: 0             # bits-per-second
-    sampleFrequency: ""         # percentage of events to sample in the range 0-100, this is a string and allows 
+    sampleFrequency: ""         # percentage of events to sample in the range 0-100, this is a string and allows
     # both 30 and 30% as valid values
-    maxAckPending: 0            # number of outstanding messages awaiting ack before suspending delivery, 0 denotes 
+    maxAckPending: 0            # number of outstanding messages awaiting ack before suspending delivery, 0 denotes
     # no maximum
 ```
 
@@ -214,7 +214,7 @@ spec:
           secret:
               key: ""             # the key of the secret containing the token, defaults to "token"
               secretName: ""      # the secret containing a token.
-      nKey:                       # NKey authentication requires some client-side 
+      nKey:                       # NKey authentication requires some client-side
           secret:
               key: ""             # the key of the secret containing the credentials, defaults to "nats.creds"
               secretName: ""      # the secret containing a NATS credentials file.

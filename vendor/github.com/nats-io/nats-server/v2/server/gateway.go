@@ -164,6 +164,11 @@ type srvGateway struct {
 	// These are used for routing of mapped replies.
 	sIDHash        []byte   // Server ID hash (6 bytes)
 	routesIDByHash sync.Map // Route's server ID is hashed (6 bytes) and stored in this map.
+
+	// If a server has its own configuration in the "Gateways" remotes configuration
+	// we will keep track of the URLs that are defined in the config so they can
+	// be reported in monitoring.
+	ownCfgURLs []string
 }
 
 // Subject interest tally. Also indicates if the key in the map is a
@@ -371,6 +376,7 @@ func (s *Server) newGateway(opts *Options) error {
 	for _, rgo := range opts.Gateway.Gateways {
 		// Ignore if there is a remote gateway with our name.
 		if rgo.Name == gateway.name {
+			gateway.ownCfgURLs = getURLsAsString(rgo.URLs)
 			continue
 		}
 		cfg := &gatewayCfg{
@@ -781,6 +787,8 @@ func (s *Server) createGateway(cfg *gatewayCfg, url *url.URL, conn net.Conn) {
 		c.Noticef("Processing inbound gateway connection")
 		// Check if TLS is required for inbound GW connections.
 		tlsRequired = opts.Gateway.TLSConfig != nil
+		// We expect a CONNECT from the accepted connection.
+		c.setAuthTimer(secondsToDuration(opts.Gateway.AuthTimeout))
 	}
 
 	// Check for TLS
@@ -847,9 +855,6 @@ func (s *Server) createGateway(cfg *gatewayCfg, url *url.URL, conn net.Conn) {
 		cs := c.nc.(*tls.Conn).ConnectionState()
 		c.Debugf("TLS version %s, cipher suite %s", tlsVersion(cs.Version), tlsCipher(cs.CipherSuite))
 	}
-
-	// Set the Ping timer after sending connect and info.
-	s.setFirstPingTimer(c)
 
 	c.mu.Unlock()
 
@@ -923,14 +928,11 @@ func (c *client) processGatewayConnect(arg []byte) error {
 		return ErrWrongGateway
 	}
 
-	// For a gateway connection, c.gw is guaranteed not to be nil here
-	// (created in createGateway() and never set to nil).
-	// For inbound connections, it is important to know in the parser
-	// if the CONNECT was received first, so we use this boolean (as
-	// opposed to client.flags that require locking) to indicate that
-	// CONNECT was processed. Again, this boolean is set/read in the
-	// readLoop without locking.
+	c.mu.Lock()
 	c.gw.connected = true
+	// Set the Ping timer after sending connect and info.
+	c.setFirstPingTimer()
+	c.mu.Unlock()
 
 	return nil
 }
@@ -1011,6 +1013,13 @@ func (c *client) processGatewayInfo(info *Info) {
 			return
 		}
 
+		// Check for duplicate server name with servers in our cluster
+		if s.isDuplicateServerName(info.Name) {
+			c.Errorf("Remote server has a duplicate name: %q", info.Name)
+			c.closeConnection(DuplicateServerName)
+			return
+		}
+
 		// Possibly add URLs that we get from the INFO protocol.
 		if len(info.GatewayURLs) > 0 {
 			cfg.updateURLs(info.GatewayURLs)
@@ -1043,6 +1052,10 @@ func (c *client) processGatewayInfo(info *Info) {
 				c.Noticef("Outbound gateway connection to %q (%s) registered", gwName, info.ID)
 				// Now that the outbound gateway is registered, we can remove from temp map.
 				s.removeFromTempClients(cid)
+				// Set the Ping timer after sending connect and info.
+				c.mu.Lock()
+				c.setFirstPingTimer()
+				c.mu.Unlock()
 			} else {
 				// There was a bug that would cause a connection to possibly
 				// be called twice resulting in reconnection of twice the
@@ -1077,6 +1090,13 @@ func (c *client) processGatewayInfo(info *Info) {
 
 	} else if isFirstINFO {
 		// This is the first INFO of an inbound connection...
+
+		// Check for duplicate server name with servers in our cluster
+		if s.isDuplicateServerName(info.Name) {
+			c.Errorf("Remote server has a duplicate name: %q", info.Name)
+			c.closeConnection(DuplicateServerName)
+			return
+		}
 
 		s.registerInboundGatewayConnection(cid, c)
 		c.Noticef("Inbound gateway connection from %q (%s) registered", info.Gateway, info.ID)
@@ -1472,6 +1492,13 @@ func (g *gatewayCfg) updateURLs(infoURLs []string) {
 	}
 	// Then add the ones from the infoURLs array we got.
 	g.addURLs(infoURLs)
+	// The call above will set varzUpdateURLs only when finding ULRs in infoURLs
+	// that are not present in the config. That does not cover the case where
+	// previously "discovered" URLs are now gone. We could check "before" size
+	// of g.urls and if bigger than current size, set the boolean to true.
+	// Not worth it... simply set this to true to allow a refresh of gateway
+	// URLs in varz.
+	g.varzUpdateURLs = true
 	g.Unlock()
 }
 
@@ -2552,7 +2579,7 @@ func (c *client) sendMsgToGateways(acc *Account, msg, subject, reply []byte, qgr
 		sub.nm, sub.max = 0, 0
 		sub.client = gwc
 		sub.subject = subject
-		didDeliver = c.deliverMsg(sub, subject, mreply, mh, msg, false) || didDeliver
+		didDeliver = c.deliverMsg(sub, acc, subject, mreply, mh, msg, false) || didDeliver
 	}
 	// Done with subscription, put back to pool. We don't need
 	// to reset content since we explicitly set when using it.
@@ -2797,7 +2824,7 @@ func (c *client) handleGatewayReply(msg []byte) (processed bool) {
 	// If route is nil, we will process the incoming message locally.
 	if route == nil {
 		// Check if this is a service reply subject (_R_)
-		isServiceReply := len(acc.imports.services) > 0 && isServiceReply(c.pa.subject)
+		isServiceReply := isServiceReply(c.pa.subject)
 
 		var queues [][]byte
 		if len(r.psubs)+len(r.qsubs) > 0 {
@@ -3160,6 +3187,12 @@ func (s *Server) startGWReplyMapExpiration() {
 				}
 			case cttl := <-s.gwrm.ch:
 				ttl = cttl
+				if !t.Stop() {
+					select {
+					case <-t.C:
+					default:
+					}
+				}
 				t.Reset(ttl)
 			case <-s.quitCh:
 				return
