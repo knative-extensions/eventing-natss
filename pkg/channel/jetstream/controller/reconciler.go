@@ -64,12 +64,7 @@ const (
 	dispatcherServiceCreated        = "DispatcherServiceCreated"
 	dispatcherServiceFailed         = "DispatcherServiceFailed"
 	dispatcherServiceUpdated        = "DispatcherServiceUpdated"
-	natsJetStreamChannelReconciled  = "NatsJetStreamChannelReconciled"
 )
-
-func newReconciledNormal(namespace, name string) reconciler.Event {
-	return reconciler.NewEvent(corev1.EventTypeNormal, natsJetStreamChannelReconciled, "NatsJetStreamChannel reconciled: \"%s/%s\"", namespace, name)
-}
 
 func newDeploymentWarn(err error) reconciler.Event {
 	return reconciler.NewEvent(corev1.EventTypeWarning, dispatcherDeploymentFailed, "Reconciling dispatcher Deployment failed with: %s", err)

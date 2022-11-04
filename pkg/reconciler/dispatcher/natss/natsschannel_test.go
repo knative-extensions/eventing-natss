@@ -187,14 +187,6 @@ type failOnFatalAndErrorLogger struct {
 	t *testing.T
 }
 
-func (l *failOnFatalAndErrorLogger) Error(msg string, fields ...zap.Field) {
-	l.t.Fatalf("Error() called - msg: %s - fields: %v", msg, fields)
-}
-
-func (l *failOnFatalAndErrorLogger) Fatal(msg string, fields ...zap.Field) {
-	l.t.Fatalf("Fatal() called - msg: %s - fields: %v", msg, fields)
-}
-
 func TestNewController(t *testing.T) {
 	os.Setenv("POD_NAME", "testpod")
 	os.Setenv("CONTAINER_NAME", "testcontainer")
