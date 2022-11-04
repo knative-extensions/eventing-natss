@@ -20,9 +20,11 @@ limitations under the License.
 package e2e
 
 import (
+	"flag"
 	"os"
 	"testing"
 
+	"knative.dev/pkg/injection"
 	"knative.dev/pkg/system"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -36,10 +38,17 @@ import (
 	"knative.dev/reconciler-test/pkg/knative"
 )
 
+func init() {
+	environment.InitFlags(flag.CommandLine)
+}
+
 var global environment.GlobalEnvironment
 
 func TestMain(m *testing.M) {
-	global = environment.NewStandardGlobalEnvironment()
+	flag.Parse()
+	ctx, startInformers := injection.EnableInjectionOrDie(nil, nil) //nolint
+	startInformers()
+	global = environment.NewGlobalEnvironment(ctx)
 	os.Exit(m.Run())
 }
 

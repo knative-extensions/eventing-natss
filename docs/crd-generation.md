@@ -16,4 +16,4 @@ You then need to copy the contents of `natsjetstreamchannel.yaml` into the
 property: `spec.versions[].schema.openAPIV3Schema`, within the correct item of `spec.version[]` which you're editing.
 
 > There's a common issue where `.status.address` is marked as a required field in the schema generation, you will have 
-> to manually remove the `.status.required` array to fix this.  
+> to manually remove the `.status.required` array to fix this.
