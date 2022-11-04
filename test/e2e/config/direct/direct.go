@@ -39,8 +39,5 @@ func Install() feature.StepFn {
 }
 
 func registerImages(ctx context.Context, t feature.T) {
-	opt := environment.RegisterPackage(manifest.ImagesFromFS(ctx, yamls)...)
-	if _, err := opt(ctx, nil); err != nil {
-		t.Fatal(err)
-	}
+	environment.RegisterPackage(manifest.ImagesFromFS(yamls)...)
 }

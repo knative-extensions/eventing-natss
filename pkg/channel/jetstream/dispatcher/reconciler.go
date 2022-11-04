@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
@@ -34,7 +36,6 @@ import (
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
-	"time"
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	jsmreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsjetstreamchannel"

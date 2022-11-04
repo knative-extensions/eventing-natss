@@ -21,6 +21,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	nethttp "net/http"
+	"sync"
+
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/google/uuid"
@@ -32,8 +35,6 @@ import (
 	commonce "knative.dev/eventing-natss/pkg/common/cloudevents"
 	commonerr "knative.dev/eventing-natss/pkg/common/error"
 	"knative.dev/eventing-natss/pkg/tracing"
-	nethttp "net/http"
-	"sync"
 
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/pkg/kmeta"

@@ -19,6 +19,8 @@ package dispatcher
 import (
 	"context"
 	"errors"
+	"sync"
+
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/nats-io/nats.go"
@@ -28,7 +30,6 @@ import (
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
 	"knative.dev/eventing/pkg/kncloudevents"
-	"sync"
 )
 
 const (

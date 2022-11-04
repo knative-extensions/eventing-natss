@@ -19,6 +19,7 @@ package fsloader
 import (
 	"context"
 	"errors"
+
 	"knative.dev/eventing-natss/pkg/common/configloader"
 )
 
