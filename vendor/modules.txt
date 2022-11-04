@@ -188,7 +188,7 @@ github.com/grpc-ecosystem/grpc-gateway/utilities
 # github.com/hashicorp/go-cleanhttp v0.5.1
 ## explicit
 github.com/hashicorp/go-cleanhttp
-# github.com/hashicorp/go-retryablehttp v0.6.7
+# github.com/hashicorp/go-retryablehttp v0.6.7 => github.com/hashicorp/go-retryablehttp v0.6.8
 ## explicit; go 1.13
 github.com/hashicorp/go-retryablehttp
 # github.com/hashicorp/golang-lru v0.5.4
@@ -1186,3 +1186,4 @@ sigs.k8s.io/structured-merge-diff/v4/value
 ## explicit; go 1.12
 sigs.k8s.io/yaml
 # github.com/cloudevents/sdk-go/v2 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
+# github.com/hashicorp/go-retryablehttp => github.com/hashicorp/go-retryablehttp v0.6.8

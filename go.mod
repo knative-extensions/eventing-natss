@@ -131,3 +131,5 @@ require (
 )
 
 replace github.com/cloudevents/sdk-go/v2 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
+
+replace github.com/hashicorp/go-retryablehttp => github.com/hashicorp/go-retryablehttp v0.6.8
