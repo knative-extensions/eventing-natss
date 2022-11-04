@@ -177,13 +177,13 @@ spec:
         tags: [ "" ]          # place the stream on servers with specific tags
       mirror: # mirror this stream from another stream
         name: ""            # the name of the stream to mirror
-        optStartSeq: ""     # stringified uint64 - takes precendence over optStartTime
+        optStartSeq: ""     # stringified uint64 - takes precedence over optStartTime
         optStartTime: ""    # RFC3339 datetime
         filterSubject: ""   # defaults to no filter
       sources: [ ]             # an array of stream sources (see mirror)
   consumerConfigTemplate: # a consumer per .spec.subscribers[] will be created with these defaults
     deliverPolicy: ""           # one of: All, Last, New, ByStartSequence, ByStartTime - defaults to "All"
-    optStartSeq: ""             # stringified uint64 - takes precendence over optStartTime
+    optStartSeq: ""             # stringified uint64 - takes precedence over optStartTime
     optStartTime: ""            # RFC3339 datetime
     ackWait: ""                 # time.Duration
     maxDeliver: 0               # defaults to no maximum
