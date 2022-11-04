@@ -28,7 +28,6 @@ jobs:
           kind-version: v0.11.1
           kind-image-sha: sha256:ca3587e6e545a96c07bf82e2c46503d9ef86fc704f44c17577fca7bcabf5f978
     env:
-      GOPATH: ${{ github.workspace }}
       KO_DOCKER_REPO: kind.local
       SYSTEM_NAMESPACE: knative-eventing
       KIND_CLUSTER_NAME: kind
@@ -40,10 +39,10 @@ jobs:
           echo "SLACK_WEBHOOK=exists" >> $GITHUB_ENV
         fi
 
-    - name: Set up Go 1.16.x
+    - name: Set up Go 1.18.x
       uses: actions/setup-go@v2
       with:
-        go-version: 1.16.x
+        go-version: 1.18.x
 
     - name: Install Dependencies
       run: |
@@ -53,13 +52,10 @@ jobs:
         sudo mv ko /usr/local/bin
         echo '::endgroup::'
 
-    - name: Check out code onto GOPATH
+    - name: Check out code
       uses: actions/checkout@v2
-      with:
-        path: ./src/knative.dev/${{ github.event.repository.name }}
 
     - name: Install KinD
-      working-directory: ./src/knative.dev/${{ github.event.repository.name }}
       env:
         KIND_VERSION: ${{ matrix.kind-version }}
       run: |
@@ -70,7 +66,6 @@ jobs:
         sudo mv kind /usr/local/bin
 
     - name: Create KinD Cluster
-      working-directory: ./src/knative.dev/${{ github.event.repository.name }}
       run: |
         set -x
 
@@ -103,7 +98,6 @@ jobs:
         kind create cluster --config kind.yaml
 
     - name: Install natss
-      working-directory: ./src/knative.dev/${{ github.event.repository.name }}
       run: |
         set -x
 
@@ -122,7 +116,6 @@ jobs:
         kubectl apply --filename https://github.com/knative/eventing/releases/download/${{ matrix.eventing-version }}/mt-channel-broker.yaml
 
     - name: Install
-      working-directory: ./src/knative.dev/${{ github.event.repository.name }}
       run: |
         set -x
         # TODO: this should use the release script and then apply the newly created release yaml in the future.
@@ -131,7 +124,6 @@ jobs:
         ko apply -f ./config/
 
     - name: Wait for Ready
-      working-directory: ./src/knative.dev/${{ github.event.repository.name }}
       run: |
         set -x
 
@@ -143,7 +135,6 @@ jobs:
         kubectl get pods --all-namespaces
 
     - name: Run e2e Tests
-      working-directory: ./src/knative.dev/${{ github.event.repository.name }}
       run: |
         set -x
 
