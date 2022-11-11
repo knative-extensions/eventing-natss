@@ -34,11 +34,11 @@ Add the following job entries under
       action: keep
       regex: knative-eventing;controller;natss-channel;metrics
     # Rename metadata labels to be reader friendly
-    - source_labels: [__meta_kubernetes_namespace]
+    - source_labels: [ __meta_kubernetes_namespace ]
       target_label: namespace
-    - source_labels: [__meta_kubernetes_pod_name]
+    - source_labels: [ __meta_kubernetes_pod_name ]
       target_label: pod
-    - source_labels: [__meta_kubernetes_service_name]
+    - source_labels: [ __meta_kubernetes_service_name ]
       target_label: service
 
 # natsschannel_dispatcher
@@ -59,11 +59,11 @@ Add the following job entries under
       action: keep
       regex: knative-eventing;dispatcher;natss-channel;metrics
     # Rename metadata labels to be reader friendly
-    - source_labels: [__meta_kubernetes_namespace]
+    - source_labels: [ __meta_kubernetes_namespace ]
       target_label: namespace
-    - source_labels: [__meta_kubernetes_pod_name]
+    - source_labels: [ __meta_kubernetes_pod_name ]
       target_label: pod
-    - source_labels: [__meta_kubernetes_service_name]
+    - source_labels: [ __meta_kubernetes_service_name ]
       target_label: service
 ```
 
