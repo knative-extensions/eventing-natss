@@ -20,21 +20,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"knative.dev/eventing-natss/pkg/client/clientset/versioned"
-	commonerr "knative.dev/eventing-natss/pkg/common/error"
 	v1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
+	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/pkg/apis/duck"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
-	"time"
+
+	"knative.dev/eventing-natss/pkg/client/clientset/versioned"
+	commonerr "knative.dev/eventing-natss/pkg/common/error"
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	jsmreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsjetstreamchannel"
@@ -285,6 +288,19 @@ func (r *Reconciler) newConfigFromChannel(nc *v1alpha1.NatsJetStreamChannel) Cha
 		newSubs := make([]Subscription, len(nc.Spec.SubscribableSpec.Subscribers))
 		for i, source := range nc.Spec.SubscribableSpec.Subscribers {
 			innerSub, _ := fanout.SubscriberSpecToFanoutConfig(source)
+
+			// This functionality cannot be configured via the Subscription CRD. The default implementation is
+			// kncloudevents.RetryIfGreaterThan300 which is not ideal behaviour since we will retry on bad requests.
+			// This may be improved in the future with a more specific implementation, but consumers which wish the
+			// event be redelivered should respond with a 429 Too Many Requests code.
+			//
+			// We could leverage JetStream's ability to redeliver messages to a consumer, but this would require
+			// not using DispatchMessageWithRetries, and translate the subscription's delivery configuration into
+			// the JetStream ConsumerConfig. We would then use dispatcher.Consumer's MsgHandler function to handle
+			// whether to ack, nack or term the message.
+			if innerSub.RetryConfig != nil {
+				innerSub.RetryConfig.CheckRetry = kncloudevents.SelectiveRetry
+			}
 
 			newSubs[i] = Subscription{
 				Subscription: *innerSub,
