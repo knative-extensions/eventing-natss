@@ -26,6 +26,7 @@ export GO111MODULE=on
 declare -A COMPONENTS
 COMPONENTS=(
   ["eventing-natss.yaml"]="./config"
+  ["eventing-jsm.yaml"]="./config/webhook,./config/jetstream"
 )
 readonly COMPONENTS
 
