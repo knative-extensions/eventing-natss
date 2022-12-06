@@ -223,7 +223,8 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 		ctx:              ctx,
 	}
 
-	consumer.jsSub, err = d.js.QueueSubscribe(info.Config.DeliverSubject, info.Config.DeliverGroup, consumer.MsgHandler, nats.Bind(info.Stream, info.Name))
+	consumer.jsSub, err = d.js.QueueSubscribe(info.Config.DeliverSubject, info.Config.DeliverGroup, consumer.MsgHandler,
+		nats.Bind(info.Stream, info.Name), nats.ManualAck())
 	if err != nil {
 		logger.Errorw("failed to create queue subscription for consumer")
 		return SubscriberStatusTypeError, err
