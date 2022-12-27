@@ -82,12 +82,8 @@ func (c *Consumer) MsgHandler(msg *nats.Msg) {
 		for {
 			select {
 			case <-tickerCtx.Done():
-				logger.Debugw("ticker: context done", "ctx_err", tickerCtx.Err())
-
 				return
 			case <-ticker.C:
-				logger.Debugw("ticker: sending +WPI to JetStream", "ctx_err", tickerCtx.Err())
-
 				if err := msg.InProgress(nats.Context(tickerCtx)); err != nil && !errors.Is(err, context.Canceled) {
 					logging.FromContext(ctx).Errorw("failed to mark message as in progress", zap.Error(err))
 				}
