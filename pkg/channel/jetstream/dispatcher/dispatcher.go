@@ -25,11 +25,13 @@ import (
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
+	"go.opencensus.io/trace"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	commonce "knative.dev/eventing-natss/pkg/common/cloudevents"
 	commonerr "knative.dev/eventing-natss/pkg/common/error"
+	"knative.dev/eventing-natss/pkg/tracing"
 	nethttp "net/http"
 	"sync"
 
@@ -304,8 +306,11 @@ func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.Ch
 
 	eventID := commonce.IDExtractorTransformer("")
 
+	transformers = append(transformers, tracing.SerializeTraceTransformers(trace.FromContext(ctx).SpanContext())...)
+	transformers = append(transformers, &eventID)
+
 	writer := new(bytes.Buffer)
-	if err := cejs.WriteMsg(ctx, message, writer, append(transformers, &eventID)...); err != nil {
+	if err := cejs.WriteMsg(ctx, message, writer, transformers...); err != nil {
 		logger.Error("failed to write binding.Message to bytes.Buffer")
 		return err
 	}

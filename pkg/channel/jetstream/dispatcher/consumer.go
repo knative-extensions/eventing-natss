@@ -23,7 +23,9 @@ import (
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/protocol"
 	"github.com/nats-io/nats.go"
+	"go.opencensus.io/trace"
 	"go.uber.org/zap"
+	"knative.dev/eventing-natss/pkg/tracing"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
 	"knative.dev/eventing/pkg/kncloudevents"
@@ -31,6 +33,10 @@ import (
 	"net/http"
 	"sync"
 	"time"
+)
+
+const (
+	jsmChannel = "jsm-channel"
 )
 
 var (
@@ -142,12 +148,26 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 		return errors.New("received a message with unknown encoding")
 	}
 
+	event := tracing.ConvertNatsMsgToEvent(c.logger.Desugar(), msg)
+	additionalHeaders := tracing.ConvertEventToHttpHeader(event)
+
+	sc, ok := tracing.ParseSpanContext(event)
+	var span *trace.Span
+	if !ok {
+		c.logger.Warn("Cannot parse the spancontext, creating a new span")
+		c.ctx, span = trace.StartSpan(c.ctx, jsmChannel+"-"+string(c.sub.UID))
+	} else {
+		c.ctx, span = trace.StartSpanWithRemoteParent(c.ctx, jsmChannel+"-"+string(c.sub.UID), sc)
+	}
+
+	defer span.End()
+
 	te := kncloudevents.TypeExtractorTransformer("")
 
 	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithRetries(
 		ctx,
 		message,
-		nil,
+		additionalHeaders,
 		c.sub.Subscriber,
 		c.sub.Reply,
 		c.sub.DeadLetter,

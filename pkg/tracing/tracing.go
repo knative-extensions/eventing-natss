@@ -41,7 +41,7 @@ func keyValTransformer(key string, value string) binding.TransformerFunc {
 }
 
 func StartTraceFromMessage(logger *zap.Logger, inCtx context.Context, message *event.Event, spanName string) (context.Context, *trace.Span) {
-	sc, ok := parseSpanContext(message)
+	sc, ok := ParseSpanContext(message)
 	if !ok {
 		logger.Warn("Cannot parse the spancontext, creating a new span")
 		return trace.StartSpan(inCtx, spanName)
@@ -50,7 +50,7 @@ func StartTraceFromMessage(logger *zap.Logger, inCtx context.Context, message *e
 	return trace.StartSpanWithRemoteParent(inCtx, spanName, sc)
 }
 
-func parseSpanContext(message *event.Event) (sc trace.SpanContext, ok bool) {
+func ParseSpanContext(message *event.Event) (sc trace.SpanContext, ok bool) {
 	if message == nil {
 		return trace.SpanContext{}, false
 	}
