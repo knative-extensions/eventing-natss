@@ -1,0 +1,5 @@
+apiVersion: messaging.knative.dev/v1alpha1
+kind: NatsJetStreamChannel
+metadata:
+  name: channel-defaults
+  namespace: knative-eventing

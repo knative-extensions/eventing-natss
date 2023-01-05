@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-nats
+  namespace: knative-eventing
+data:
+  eventing-nats: |
+    url: nats://nats.nats-io.svc.cluster.local
+
+

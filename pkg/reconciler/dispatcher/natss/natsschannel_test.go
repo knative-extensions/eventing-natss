@@ -187,14 +187,6 @@ type failOnFatalAndErrorLogger struct {
 	t *testing.T
 }
 
-func (l *failOnFatalAndErrorLogger) Error(msg string, fields ...zap.Field) {
-	l.t.Fatalf("Error() called - msg: %s - fields: %v", msg, fields)
-}
-
-func (l *failOnFatalAndErrorLogger) Fatal(msg string, fields ...zap.Field) {
-	l.t.Fatalf("Fatal() called - msg: %s - fields: %v", msg, fields)
-}
-
 func TestNewController(t *testing.T) {
 	os.Setenv("POD_NAME", "testpod")
 	os.Setenv("CONTAINER_NAME", "testcontainer")
@@ -225,7 +217,7 @@ func TestNewControllerSetupDynamicPublishingError(t *testing.T) {
 		}
 	}()
 
-	setupDynamicPublishing = func(logger *zap.SugaredLogger, configMapWatcher configmap.Watcher, serviceName, tracingConfigName string) error {
+	tSetupPublishingWithDynamicConfig = func(logger *zap.SugaredLogger, configMapWatcher configmap.Watcher, serviceName, tracingConfigName string) error {
 		return errors.New("empty error")
 	}
 
@@ -233,6 +225,11 @@ func TestNewControllerSetupDynamicPublishingError(t *testing.T) {
 		Logger: zap.NewNop(),
 		t:      t,
 	}
+
+	dNewNatssDispatcher = func(args dispatcher.Args) (dispatcher.NatsDispatcher, error) {
+		return dispatchertesting.NewDispatcherDoNothing(), nil
+	}
+
 	ctx := logging.WithLogger(context.Background(), logger.Sugar())
 	ctx, _ = fakekubeclient.With(ctx)
 	ctx, _ = fakeeventingclient.With(ctx)
