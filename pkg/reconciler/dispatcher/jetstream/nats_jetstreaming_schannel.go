@@ -288,7 +288,6 @@ func toChannel(jetStreamChannel *v1alpha1.NatsJetStreamChannel) *messagingv1.Cha
 						URL: jetStreamChannel.Status.Address.URL,
 					}},
 				SubscribableStatus: eventingduckv1.SubscribableStatus{},
-				DeadLetterChannel:  nil,
 			},
 			Channel: nil,
 		}

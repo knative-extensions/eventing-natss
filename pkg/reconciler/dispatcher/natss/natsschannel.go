@@ -288,7 +288,6 @@ func toChannel(natssChannel *v1beta1.NatssChannel) *messagingv1.Channel {
 						URL: natssChannel.Status.Address.URL,
 					}},
 				SubscribableStatus: eventingduckv1.SubscribableStatus{},
-				DeadLetterChannel:  nil,
 			},
 			Channel: nil,
 		}
