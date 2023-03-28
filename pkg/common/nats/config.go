@@ -18,6 +18,7 @@ package nats
 
 import (
 	"fmt"
+
 	"k8s.io/apimachinery/pkg/util/yaml"
 	commonconfig "knative.dev/eventing-natss/pkg/common/config"
 	"knative.dev/eventing-natss/pkg/common/constants"

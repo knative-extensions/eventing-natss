@@ -17,8 +17,9 @@ limitations under the License.
 package main
 
 import (
-	jsmcontroller "knative.dev/eventing-natss/pkg/channel/jetstream/controller"
 	"os"
+
+	jsmcontroller "knative.dev/eventing-natss/pkg/channel/jetstream/controller"
 
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"

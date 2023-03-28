@@ -18,6 +18,7 @@ package webhook
 
 import (
 	"context"
+
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
