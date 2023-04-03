@@ -17,9 +17,10 @@ limitations under the License.
 package utils
 
 import (
+	"time"
+
 	"github.com/nats-io/nats.go"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	"time"
 )
 
 func ConvertRetentionPolicy(in v1alpha1.RetentionPolicy, def nats.RetentionPolicy) nats.RetentionPolicy {
