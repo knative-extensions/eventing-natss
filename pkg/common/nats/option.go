@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+
 	"github.com/nats-io/nats.go"
 	v1 "k8s.io/api/core/v1"
 )

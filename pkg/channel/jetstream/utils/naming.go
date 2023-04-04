@@ -18,8 +18,9 @@ package utils
 
 import (
 	"fmt"
-	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"strings"
+
+	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 )
 
 var (

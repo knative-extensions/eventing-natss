@@ -17,9 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"log"
+
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
-	"log"
 
 	"knative.dev/hack/schema/commands"
 	"knative.dev/hack/schema/registry"
