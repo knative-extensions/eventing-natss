@@ -149,6 +149,9 @@ jobs:
         echo "===================== Brokers =============================="
         kubectl get broker --all-namespaces=true -oyaml
 
+        echo "===================== Channels ============================="
+        kubectl get channel --all-namespaces=true -oyaml
+
         echo "===================== Triggers ============================="
         kubectl get trigger --all-namespaces=true -oyaml
 
