@@ -1,6 +1,6 @@
 module knative.dev/eventing-natss
 
-go 1.17
+go 1.18
 
 require (
 	github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.0.0-20210715165402-49fda7a51425
