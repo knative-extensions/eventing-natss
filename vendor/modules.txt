@@ -1255,7 +1255,6 @@ knative.dev/eventing/test/performance/infra/receiver
 knative.dev/eventing/test/performance/infra/sender
 knative.dev/eventing/test/test_images
 knative.dev/eventing/test/test_images/event-sender
-knative.dev/eventing/test/test_images/heartbeats
 knative.dev/eventing/test/test_images/performance
 knative.dev/eventing/test/test_images/print
 # knative.dev/hack v0.0.0-20220928014218-68872175ea9c
