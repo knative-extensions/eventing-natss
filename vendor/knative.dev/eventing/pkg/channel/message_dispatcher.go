@@ -19,6 +19,8 @@ package channel
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	nethttp "net/http"
@@ -32,10 +34,13 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"knative.dev/eventing/pkg/broker"
 	"knative.dev/eventing/pkg/channel/attributes"
 	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/eventing/pkg/tracing"
 	"knative.dev/eventing/pkg/utils"
+	"knative.dev/pkg/network"
+	"knative.dev/pkg/system"
 )
 
 const (
@@ -234,16 +239,16 @@ func (d *MessageDispatcherImpl) executeRequest(ctx context.Context,
 	}
 	execInfo.Time = dispatchTime
 
-	body := make([]byte, attributes.KnativeErrorDataExtensionMaxLength)
+	body := new(bytes.Buffer)
+	_, readErr := body.ReadFrom(response.Body)
 
 	if isFailure(response.StatusCode) {
 		// Read response body into execInfo for failures
-		readLen, err := response.Body.Read(body)
-		if err != nil && err != io.EOF {
-			d.logger.Error("failed to read response body into DispatchExecutionInfo", zap.Error(err))
+		if readErr != nil && readErr != io.EOF {
+			d.logger.Error("failed to read response body", zap.Error(err))
 			execInfo.ResponseBody = []byte(fmt.Sprintf("dispatch error: %s", err.Error()))
 		} else {
-			execInfo.ResponseBody = body[:readLen]
+			execInfo.ResponseBody = body.Bytes()
 		}
 		_ = response.Body.Close()
 		// Reject non-successful responses.
@@ -251,13 +256,11 @@ func (d *MessageDispatcherImpl) executeRequest(ctx context.Context,
 	}
 
 	var responseMessageBody []byte
-	// Read response body into responseMessage for message accepted
-	readLen, err := response.Body.Read(body)
-	if err != nil && err != io.EOF {
-		d.logger.Error("failed to read response body into cloudevents' Message", zap.Error(err))
+	if readErr != nil && readErr != io.EOF {
+		d.logger.Error("failed to read response body", zap.Error(err))
 		responseMessageBody = []byte(fmt.Sprintf("Failed to read response body: %s", err.Error()))
 	} else {
-		responseMessageBody = body[:readLen]
+		responseMessageBody = body.Bytes()
 	}
 	responseMessage := http.NewMessage(response.Header, io.NopCloser(bytes.NewReader(responseMessageBody)))
 
@@ -290,12 +293,37 @@ func (d *MessageDispatcherImpl) dispatchExecutionInfoTransformers(destination *u
 	if destination == nil {
 		destination = &url.URL{}
 	}
+
+	httpResponseBody := dispatchExecutionInfo.ResponseBody
+	if destination.Host == network.GetServiceHostname("broker-filter", system.Namespace()) {
+
+		var errExtensionInfo broker.ErrExtensionInfo
+
+		err := json.Unmarshal(dispatchExecutionInfo.ResponseBody, &errExtensionInfo)
+		if err != nil {
+			d.logger.Debug("Unmarshal dispatchExecutionInfo ResponseBody failed", zap.Error(err))
+			return nil
+		}
+		destination = errExtensionInfo.ErrDestination
+		httpResponseBody = errExtensionInfo.ErrResponseBody
+	}
+
 	destination = d.sanitizeURL(destination)
 	// Unprintable control characters are not allowed in header values
 	// and cause HTTP requests to fail if not removed.
 	// https://pkg.go.dev/golang.org/x/net/http/httpguts#ValidHeaderFieldValue
-	httpBody := sanitizeHTTPBody(dispatchExecutionInfo.ResponseBody)
-	return attributes.KnativeErrorTransformers(*destination, dispatchExecutionInfo.ResponseCode, httpBody)
+	httpBody := sanitizeHTTPBody(httpResponseBody)
+
+	// Encodes response body as base64 for the resulting length.
+	bodyLen := len(httpBody)
+	encodedLen := base64.StdEncoding.EncodedLen(bodyLen)
+	if encodedLen > attributes.KnativeErrorDataExtensionMaxLength {
+		encodedLen = attributes.KnativeErrorDataExtensionMaxLength
+	}
+	encodedBuf := make([]byte, encodedLen)
+	base64.StdEncoding.Encode(encodedBuf, []byte(httpBody))
+
+	return attributes.KnativeErrorTransformers(*destination, dispatchExecutionInfo.ResponseCode, string(encodedBuf[:encodedLen]))
 }
 
 func sanitizeHTTPBody(body []byte) string {

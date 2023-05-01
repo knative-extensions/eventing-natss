@@ -83,7 +83,7 @@ func RetryConfigFromDeliverySpec(spec v1.DeliverySpec) (RetryConfig, error) {
 
 	retryConfig := NoRetries()
 
-	retryConfig.CheckRetry = RetryIfGreaterThan300
+	retryConfig.CheckRetry = SelectiveRetry
 
 	if spec.Retry != nil {
 		retryConfig.RetryMax = int(*spec.Retry)
@@ -131,15 +131,11 @@ func RetryConfigFromDeliverySpec(spec v1.DeliverySpec) (RetryConfig, error) {
 	return retryConfig, nil
 }
 
-// RetryIfGreaterThan300 is a simple default implementation
-func RetryIfGreaterThan300(_ context.Context, response *http.Response, err error) (bool, error) {
-	return !(response != nil && (response.StatusCode < 300 && response.StatusCode != -1)), err
-}
-
 // SelectiveRetry is an alternative function to determine whether to retry based on response
 //
 // Note - Returning true indicates a retry should occur.  Returning an error will result in that
-//        error being returned instead of any errors from the Request.
+//
+//	error being returned instead of any errors from the Request.
 //
 // A retry is triggered for:
 // * nil responses
