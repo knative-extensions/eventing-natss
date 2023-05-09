@@ -338,25 +338,6 @@ spec:
                       type:
                         description: Type of condition.
                         type: string
-                deadLetterChannel:
-                  description: DeadLetterChannel is a KReference and is set by the channel when it supports native error handling via a channel Failed messages are delivered here. Deprecated in favor of DeliveryStatus, to be removed September 2022.
-                  type: object
-                  properties:
-                    apiVersion:
-                      description: API version of the referent.
-                      type: string
-                    group:
-                      description: 'Group of the API, without the version of the group. This can be used as an alternative to the APIVersion, and then resolved using ResolveGroup. Note: This API is EXPERIMENTAL and might break anytime. For more details: https://github.com/knative/eventing/issues/5086'
-                      type: string
-                    kind:
-                      description: 'Kind of the referent. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
-                      type: string
-                    name:
-                      description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names'
-                      type: string
-                    namespace:
-                      description: 'Namespace of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/ This is optional field, it gets defaulted to the object holding it if left out.'
-                      type: string
                 deadLetterSinkUri:
                   description: DeadLetterSink is a KReference that is the reference to the native, platform specific channel where failed events are sent to.
                   type: string

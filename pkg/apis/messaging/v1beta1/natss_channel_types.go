@@ -72,8 +72,6 @@ type NatssChannelStatus struct {
 	// * Conditions - the latest available observations of a resource's current state.
 	// * AddressStatus is the part where the Channelable fulfills the Addressable contract.
 	// * Subscribers is populated with the statuses of each of the Channelable's subscribers.
-	// * DeadLetterChannel is a KReference and is set by the channel when it supports native error handling via a channel
-	//   Failed messages are delivered here.
 	eventingduckv1.ChannelableStatus `json:",inline"`
 }
 
