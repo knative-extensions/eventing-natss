@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-br-default-channel
+  namespace: knative-eventing
+  labels:
+    eventing.knative.dev/release: devel
+data:
+  channelTemplateSpec: |
+    apiVersion: messaging.knative.dev/v1alpha1
+    kind: NatsJetStreamChannel
+    spec:
+      stream:
+        config:
+          retention: Limits
+          maxBytes: 1000000000
+          replicas: 1
+      consumerConfigTemplate:
+        deliverPolicy: New
+        maxDeliver: 1

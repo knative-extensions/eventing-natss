@@ -6,5 +6,8 @@ metadata:
 data:
   eventing-nats: |
     url: nats://nats.nats-io.svc.cluster.local
-
+    connOpts:
+      retryOnFailedConnect: true
+      maxReconnects: 5
+      reconnectWait: 2000
 

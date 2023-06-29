@@ -16,14 +16,18 @@ limitations under the License.
 
 package config
 
-import v1 "k8s.io/api/core/v1"
+import (
+	v1 "k8s.io/api/core/v1"
+	"time"
+)
 
 // EventingNatsConfig represents the YAML configuration which can be provided in the `config-nats` ConfigMap under the
 // key, "eventing-nats".
 type EventingNatsConfig struct {
-	URL    string          `json:"url,omitempty"`
-	Auth   *ENConfigAuth   `json:"auth,omitempty"`
-	RootCA *ENConfigRootCA `json:"tls,omitempty"`
+	URL      string          `json:"url,omitempty"`
+	ConnOpts *ConnOpts       `json:"connOpts,omitempty"`
+	Auth     *ENConfigAuth   `json:"auth,omitempty"`
+	RootCA   *ENConfigRootCA `json:"tls,omitempty"`
 }
 
 // ENConfigAuth provides configuration on how the client should authenticate itself to the server.
@@ -59,4 +63,13 @@ type ENConfigRootCA struct {
 
 	// Secret is a reference to an existing Secret where the controller will extract a certificate by the "ca.crt" key.
 	Secret *v1.LocalObjectReference `json:"secret,omitempty"`
+}
+
+type ConnOpts struct {
+	// MaxReconnects how many attempts to reconnect
+	MaxReconnects int `json:"maxReconnects,omitempty"`
+	// RetryOnFailedConnect should retry on failed reconnect
+	RetryOnFailedConnect bool `json:"retryOnFailedConnect,omitempty"`
+	// ReconnectWait time between reconnects in milliseconds
+	ReconnectWait time.Duration `json:"reconnectWait,omitempty"`
 }
