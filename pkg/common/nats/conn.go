@@ -88,7 +88,7 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 		opts = append(opts, nats.MaxReconnects(config.ConnOpts.MaxReconnects))
 		opts = append(opts, nats.CustomReconnectDelay(func(attempts int) time.Duration {
 			if (config.ConnOpts.MaxReconnects - attempts) < 0 {
-				logger.Fatalf("Failed to recconect to Nats, not attemtps left")
+				logger.Fatalf("Failed to recconect to Nats, not attempts left")
 			}
 			if attempts < 5 {
 				logger.Infof("Attempts left: %d", config.ConnOpts.MaxReconnects-attempts)
