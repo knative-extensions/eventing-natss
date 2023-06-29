@@ -17,8 +17,9 @@ limitations under the License.
 package config
 
 import (
-	v1 "k8s.io/api/core/v1"
 	"time"
+
+	v1 "k8s.io/api/core/v1"
 )
 
 // EventingNatsConfig represents the YAML configuration which can be provided in the `config-nats` ConfigMap under the
