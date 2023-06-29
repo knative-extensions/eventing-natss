@@ -56,7 +56,7 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 		logger.Panicf("unable to process required environment variables: %v", err)
 	}
 
-	_, err := tracing.SetupPublishingWithDynamicConfig(logger, cmw, "jetstream-ch-dispatcher", "config-tracing")
+	err := tracing.SetupDynamicPublishing(logger, cmw, "jetstream-ch-dispatcher", "config-tracing")
 	if err != nil {
 		logger.Fatalw("failed to setup tracing", zap.Error(err))
 	}
