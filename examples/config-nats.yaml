@@ -9,5 +9,5 @@ data:
     connOpts:
       retryOnFailedConnect: true
       maxReconnects: 5
-      reconnectWait: 2000
+      reconnectWaitMilliseconds: 2000
 

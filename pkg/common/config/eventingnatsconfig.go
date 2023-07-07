@@ -17,8 +17,6 @@ limitations under the License.
 package config
 
 import (
-	"time"
-
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -71,6 +69,6 @@ type ConnOpts struct {
 	MaxReconnects int `json:"maxReconnects,omitempty"`
 	// RetryOnFailedConnect should retry on failed reconnect
 	RetryOnFailedConnect bool `json:"retryOnFailedConnect,omitempty"`
-	// ReconnectWait time between reconnects in milliseconds
-	ReconnectWait time.Duration `json:"reconnectWait,omitempty"`
+	// ReconnectWaitMilliseconds time between reconnects in milliseconds
+	ReconnectWaitMilliseconds int `json:"reconnectWaitMilliseconds,omitempty"`
 }

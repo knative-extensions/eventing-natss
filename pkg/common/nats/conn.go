@@ -80,19 +80,17 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 	}
 
 	// reconnection options
-	if config.ConnOpts.RetryOnFailedConnect {
-		reconnectWait := config.ConnOpts.ReconnectWait * time.Millisecond
+	if config.ConnOpts != nil && config.ConnOpts.RetryOnFailedConnect {
+		reconnectWait := time.Duration(config.ConnOpts.ReconnectWaitMilliseconds) * time.Millisecond
 		logger.Infof("Configuring retries: %#v", config.ConnOpts)
 		opts = append(opts, nats.RetryOnFailedConnect(config.ConnOpts.RetryOnFailedConnect))
 		opts = append(opts, nats.ReconnectWait(reconnectWait))
 		opts = append(opts, nats.MaxReconnects(config.ConnOpts.MaxReconnects))
 		opts = append(opts, nats.CustomReconnectDelay(func(attempts int) time.Duration {
 			if (config.ConnOpts.MaxReconnects - attempts) < 0 {
-				logger.Fatalf("Failed to recconect to Nats, not attempts left")
+				logger.Fatalf("Failed to recconect to Nats, no attempts left")
 			}
-			if attempts < 5 {
-				logger.Infof("Attempts left: %d", config.ConnOpts.MaxReconnects-attempts)
-			}
+			logger.Debugf("Reconnect attempts left: %d", config.ConnOpts.MaxReconnects-attempts)
 			return reconnectWait
 		}))
 		opts = append(opts, nats.ReconnectJitter(1000, time.Millisecond))
