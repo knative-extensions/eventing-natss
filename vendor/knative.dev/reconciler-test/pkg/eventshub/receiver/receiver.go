@@ -18,6 +18,7 @@ package receiver
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"knative.dev/pkg/logging"
 
 	"knative.dev/reconciler-test/pkg/eventshub"
+
 	"knative.dev/reconciler-test/pkg/eventshub/dropevents"
 )
 
@@ -50,11 +52,15 @@ type Receiver struct {
 	skipResponseCode    int
 	skipResponseHeaders map[string]string
 	skipResponseBody    string
+	EnforceTLS          bool
 }
 
 type envConfig struct {
 	// ReceiverName is used to identify this instance of the receiver.
 	ReceiverName string `envconfig:"POD_NAME" default:"receiver-default" required:"true"`
+
+	// EnforceTLS is used to enforce TLS.
+	EnforceTLS bool `envconfig:"ENFORCE_TLS" default:"false"`
 
 	// ResponseWaitTime is the seconds to wait for the eventshub to write any response
 	ResponseWaitTime int `envconfig:"RESPONSE_WAIT_TIME" default:"0" required:"false"`
@@ -128,6 +134,7 @@ func NewFromEnv(ctx context.Context, eventLogs *eventshub.EventLogs) *Receiver {
 
 	return &Receiver{
 		Name:                env.ReceiverName,
+		EnforceTLS:          env.EnforceTLS,
 		EventLogs:           eventLogs,
 		ctx:                 ctx,
 		replyFunc:           replyFunc,
@@ -149,21 +156,45 @@ func (o *Receiver) Start(ctx context.Context, handlerFuncs ...func(handler http.
 	}
 
 	server := &http.Server{Addr: ":8080", Handler: handler}
-
-	var err error
-	go func() {
-		err = server.ListenAndServe()
-	}()
-
-	<-ctx.Done()
-
-	if err != nil {
-		return fmt.Errorf("error while starting the HTTP server: %w", err)
+	serverTLS := &http.Server{
+		Addr: ":8443",
+		TLSConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+		Handler: handler,
 	}
 
-	logging.FromContext(ctx).Info("Closing the HTTP server")
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	return server.Close()
+	errors := make(chan error, 2)
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			errors <- fmt.Errorf("error while starting the HTTP server: %w", err)
+			cancel()
+		}
+		defer server.Close()
+	}()
+	if o.EnforceTLS {
+		go func() {
+			if err := serverTLS.ListenAndServeTLS("/etc/tls/certificates/tls.crt", "/etc/tls/certificates/tls.key"); err != nil {
+				errors <- fmt.Errorf("error while starting the HTTPS server: %w", err)
+				cancel()
+			}
+		}()
+		defer serverTLS.Close()
+	}
+
+	<-ctx.Done()
+	close(errors)
+
+	for err := range errors {
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -173,6 +204,11 @@ func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 		writer.WriteHeader(code)
 		_, _ = writer.Write([]byte(http.StatusText(code)))
 		return
+	}
+
+	var rejectErr error
+	if o.EnforceTLS && !isTLS(request) {
+		rejectErr = fmt.Errorf("failed to enforce TLS connection for request %s", request.URL.String())
 	}
 
 	m := cloudeventshttp.NewMessageFromHttpRequest(request)
@@ -190,15 +226,17 @@ func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 		headers.Set("Host", request.Host)
 	}
 
-	eventErrStr := ""
-	if eventErr != nil {
-		eventErrStr = eventErr.Error()
+	errString := ""
+	if rejectErr != nil {
+		errString = rejectErr.Error()
+	} else if eventErr != nil {
+		errString = eventErr.Error()
 	}
 
 	shouldSkip := o.counter.Skip()
 	var s uint64
 	var kind eventshub.EventKind
-	if shouldSkip {
+	if shouldSkip || rejectErr != nil {
 		kind = eventshub.EventRejected
 		s = atomic.AddUint64(&o.dropSeq, 1)
 	} else {
@@ -207,7 +245,7 @@ func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 	}
 
 	eventInfo := eventshub.EventInfo{
-		Error:       eventErrStr,
+		Error:       errString,
 		Event:       event,
 		HTTPHeaders: headers,
 		Origin:      request.RemoteAddr,
@@ -215,6 +253,7 @@ func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 		Time:        time.Now(),
 		Sequence:    s,
 		Kind:        kind,
+		Connection:  toConnection(request),
 	}
 
 	if err := o.EventLogs.Vent(eventInfo); err != nil {
@@ -226,7 +265,12 @@ func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 		time.Sleep(o.responseWaitTime)
 	}
 
-	if shouldSkip {
+	if rejectErr != nil {
+		for headerKey, headerValue := range o.skipResponseHeaders {
+			writer.Header().Set(headerKey, headerValue)
+		}
+		writer.WriteHeader(http.StatusBadRequest)
+	} else if shouldSkip {
 		// Trigger a redelivery
 		for headerKey, headerValue := range o.skipResponseHeaders {
 			writer.Header().Set(headerKey, headerValue)
@@ -236,4 +280,36 @@ func (o *Receiver) ServeHTTP(writer http.ResponseWriter, request *http.Request) 
 	} else {
 		o.replyFunc(o.ctx, writer, eventInfo)
 	}
+}
+
+func toConnection(request *http.Request) *eventshub.Connection {
+
+	if request.TLS != nil {
+		c := &eventshub.Connection{TLS: &eventshub.ConnectionTLS{}}
+		c.TLS.CipherSuite = request.TLS.CipherSuite
+		c.TLS.CipherSuiteName = tls.CipherSuiteName(request.TLS.CipherSuite)
+		c.TLS.HandshakeComplete = request.TLS.HandshakeComplete
+		c.TLS.IsInsecureCipherSuite = isInsecureCipherSuite(request.TLS)
+		return c
+	}
+
+	return nil
+}
+
+func isTLS(request *http.Request) bool {
+	return request.TLS != nil && request.TLS.HandshakeComplete && !isInsecureCipherSuite(request.TLS)
+}
+
+func isInsecureCipherSuite(conn *tls.ConnectionState) bool {
+	if conn == nil {
+		return true
+	}
+
+	res := false
+	for _, s := range tls.InsecureCipherSuites() {
+		if s.ID == conn.CipherSuite {
+			res = true
+		}
+	}
+	return res
 }
