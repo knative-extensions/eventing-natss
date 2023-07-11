@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -39,6 +38,7 @@ import (
 	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/kncloudevents"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 
 	"knative.dev/eventing-natss/pkg/natsutil"
 	"knative.dev/eventing-natss/pkg/tracing"
@@ -307,22 +307,31 @@ func (s *subscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 		}
 		s.logger.Debug("NATSS message received", zap.String("subject", stanMsg.Subject), zap.Uint64("sequence", stanMsg.Sequence), zap.Time("timestamp", time.Unix(stanMsg.Timestamp, 0)))
 
-		var destination *url.URL
+		var destination duckv1.Addressable
 		if !subscription.SubscriberURI.IsEmpty() {
-			destination = subscription.SubscriberURI.URL()
-			s.logger.Debug("dispatch message", zap.String("destination", destination.String()))
+			destination = duckv1.Addressable{
+				URL:     subscription.SubscriberURI,
+				CACerts: subscription.SubscriberCACerts,
+			}
+			s.logger.Debug("dispatch message", zap.String("destination", destination.URL.String()))
 		}
 
-		var reply *url.URL
+		var reply *duckv1.Addressable
 		if !subscription.ReplyURI.IsEmpty() {
-			reply = subscription.ReplyURI.URL()
-			s.logger.Debug("dispatch message", zap.String("reply", reply.String()))
+			reply = &duckv1.Addressable{
+				URL:     subscription.ReplyURI,
+				CACerts: subscription.ReplyCACerts,
+			}
+			s.logger.Debug("dispatch message", zap.String("reply", reply.URL.String()))
 		}
 
-		var deadLetter *url.URL
+		var deadLetter *duckv1.Addressable
 		if subscription.Delivery != nil && subscription.Delivery.DeadLetterSink != nil && !subscription.Delivery.DeadLetterSink.URI.IsEmpty() {
-			deadLetter = subscription.Delivery.DeadLetterSink.URI.URL()
-			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.String()))
+			deadLetter = &duckv1.Addressable{
+				URL:     subscription.Delivery.DeadLetterSink.URI,
+				CACerts: subscription.Delivery.DeadLetterSink.CACerts,
+			}
+			s.logger.Debug("dispatch message", zap.String("deadLetter", deadLetter.URL.String()))
 		}
 
 		event := tracing.ConvertNatssMsgToEvent(s.logger, stanMsg)

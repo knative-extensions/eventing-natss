@@ -21,15 +21,8 @@ package natsjetstreamchannel
 import (
 	context "context"
 
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	labels "k8s.io/apimachinery/pkg/labels"
-	cache "k8s.io/client-go/tools/cache"
-	apismessagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	versioned "knative.dev/eventing-natss/pkg/client/clientset/versioned"
 	v1alpha1 "knative.dev/eventing-natss/pkg/client/informers/externalversions/messaging/v1alpha1"
-	client "knative.dev/eventing-natss/pkg/client/injection/client"
 	factory "knative.dev/eventing-natss/pkg/client/injection/informers/factory"
-	messagingv1alpha1 "knative.dev/eventing-natss/pkg/client/listers/messaging/v1alpha1"
 	controller "knative.dev/pkg/controller"
 	injection "knative.dev/pkg/injection"
 	logging "knative.dev/pkg/logging"
@@ -37,7 +30,6 @@ import (
 
 func init() {
 	injection.Default.RegisterInformer(withInformer)
-	injection.Dynamic.RegisterDynamicInformer(withDynamicInformer)
 }
 
 // Key is used for associating the Informer inside the context.Context.
@@ -49,11 +41,6 @@ func withInformer(ctx context.Context) (context.Context, controller.Informer) {
 	return context.WithValue(ctx, Key{}, inf), inf.Informer()
 }
 
-func withDynamicInformer(ctx context.Context) context.Context {
-	inf := &wrapper{client: client.Get(ctx), resourceVersion: injection.GetResourceVersion(ctx)}
-	return context.WithValue(ctx, Key{}, inf)
-}
-
 // Get extracts the typed informer from the context.
 func Get(ctx context.Context) v1alpha1.NatsJetStreamChannelInformer {
 	untyped := ctx.Value(Key{})
@@ -62,55 +49,4 @@ func Get(ctx context.Context) v1alpha1.NatsJetStreamChannelInformer {
 			"Unable to fetch knative.dev/eventing-natss/pkg/client/informers/externalversions/messaging/v1alpha1.NatsJetStreamChannelInformer from context.")
 	}
 	return untyped.(v1alpha1.NatsJetStreamChannelInformer)
-}
-
-type wrapper struct {
-	client versioned.Interface
-
-	namespace string
-
-	resourceVersion string
-}
-
-var _ v1alpha1.NatsJetStreamChannelInformer = (*wrapper)(nil)
-var _ messagingv1alpha1.NatsJetStreamChannelLister = (*wrapper)(nil)
-
-func (w *wrapper) Informer() cache.SharedIndexInformer {
-	return cache.NewSharedIndexInformer(nil, &apismessagingv1alpha1.NatsJetStreamChannel{}, 0, nil)
-}
-
-func (w *wrapper) Lister() messagingv1alpha1.NatsJetStreamChannelLister {
-	return w
-}
-
-func (w *wrapper) NatsJetStreamChannels(namespace string) messagingv1alpha1.NatsJetStreamChannelNamespaceLister {
-	return &wrapper{client: w.client, namespace: namespace, resourceVersion: w.resourceVersion}
-}
-
-// SetResourceVersion allows consumers to adjust the minimum resourceVersion
-// used by the underlying client.  It is not accessible via the standard
-// lister interface, but can be accessed through a user-defined interface and
-// an implementation check e.g. rvs, ok := foo.(ResourceVersionSetter)
-func (w *wrapper) SetResourceVersion(resourceVersion string) {
-	w.resourceVersion = resourceVersion
-}
-
-func (w *wrapper) List(selector labels.Selector) (ret []*apismessagingv1alpha1.NatsJetStreamChannel, err error) {
-	lo, err := w.client.MessagingV1alpha1().NatsJetStreamChannels(w.namespace).List(context.TODO(), v1.ListOptions{
-		LabelSelector:   selector.String(),
-		ResourceVersion: w.resourceVersion,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for idx := range lo.Items {
-		ret = append(ret, &lo.Items[idx])
-	}
-	return ret, nil
-}
-
-func (w *wrapper) Get(name string) (*apismessagingv1alpha1.NatsJetStreamChannel, error) {
-	return w.client.MessagingV1alpha1().NatsJetStreamChannels(w.namespace).Get(context.TODO(), name, v1.GetOptions{
-		ResourceVersion: w.resourceVersion,
-	})
 }
