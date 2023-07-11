@@ -105,6 +105,10 @@ data:
             caBundle: ""                # caBundle is a base64 PEM encoded CA certificate chain
             secret:
                 name: ""                # a secret containing a `ca.crt` entry.
+        connOpts:
+          retryOnFailedConnect: true    # should it reconnect on failed connection
+          maxReconnects: 50             # max reconnect attempts
+          reconnectWait: 2000           # delay between reconnect attempts
 ```
 
 ## JetStream integration

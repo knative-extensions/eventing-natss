@@ -21,6 +21,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
+
+	"knative.dev/pkg/logging"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,6 +45,8 @@ var (
 )
 
 func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*nats.Conn, error) {
+	logger := logging.FromContext(ctx)
+
 	url := config.URL
 	if url == "" {
 		url = constants.DefaultNatsURL
@@ -54,7 +59,7 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 
 	secrets := coreV1Client.Secrets(getNamespace(ctx))
 
-	var opts []nats.Option
+	opts := []nats.Option{nats.Name("kn jsm dispatcher")}
 
 	if config.Auth != nil {
 		o, err := buildAuthOption(ctx, *config.Auth, secrets)
@@ -74,6 +79,32 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 		opts = append(opts, o)
 	}
 
+	// reconnection options
+	if config.ConnOpts != nil && config.ConnOpts.RetryOnFailedConnect {
+		reconnectWait := time.Duration(config.ConnOpts.ReconnectWaitMilliseconds) * time.Millisecond
+		logger.Infof("Configuring retries: %#v", config.ConnOpts)
+		opts = append(opts, nats.RetryOnFailedConnect(config.ConnOpts.RetryOnFailedConnect))
+		opts = append(opts, nats.ReconnectWait(reconnectWait))
+		opts = append(opts, nats.MaxReconnects(config.ConnOpts.MaxReconnects))
+		opts = append(opts, nats.CustomReconnectDelay(func(attempts int) time.Duration {
+			if (config.ConnOpts.MaxReconnects - attempts) < 0 {
+				logger.Fatalf("Failed to recconect to Nats, no attempts left")
+			}
+			logger.Debugf("Reconnect attempts left: %d", config.ConnOpts.MaxReconnects-attempts)
+			return reconnectWait
+		}))
+		opts = append(opts, nats.ReconnectJitter(1000, time.Millisecond))
+		opts = append(opts, nats.DisconnectErrHandler(func(conn *nats.Conn, err error) {
+			logger.Warnf("Disconnected from JSM: err=%v", err)
+			logger.Warnf("Disconnected from JSM: will attempt reconnects for %d", config.ConnOpts.MaxReconnects)
+		}))
+		opts = append(opts, nats.ReconnectHandler(func(nc *nats.Conn) {
+			logger.Infof("Reconnected to JSM [%s]", nc.ConnectedUrl())
+		}))
+		opts = append(opts, nats.ClosedHandler(func(nc *nats.Conn) {
+			logger.Fatal("Exiting, no JSM servers available")
+		}))
+	}
 	return nats.Connect(url, opts...)
 }
 
