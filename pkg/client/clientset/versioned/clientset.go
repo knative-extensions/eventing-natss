@@ -35,8 +35,7 @@ type Interface interface {
 	MessagingV1alpha1() messagingv1alpha1.MessagingV1alpha1Interface
 }
 
-// Clientset contains the clients for groups. Each group has exactly one
-// version included in a Clientset.
+// Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
 	messagingV1beta1  *messagingv1beta1.MessagingV1beta1Client
