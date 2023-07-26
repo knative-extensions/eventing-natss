@@ -1052,7 +1052,7 @@ k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.37.1-0.20230721081414-6911db0b3592
+# knative.dev/eventing v0.37.1-0.20230725143141-855fbedc00d0
 ## explicit; go 1.19
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
@@ -1097,6 +1097,7 @@ knative.dev/eventing/pkg/client/injection/client
 knative.dev/eventing/pkg/client/injection/client/fake
 knative.dev/eventing/pkg/client/listers/eventing/v1beta2
 knative.dev/eventing/pkg/eventingtls
+knative.dev/eventing/pkg/eventtype
 knative.dev/eventing/pkg/kncloudevents
 knative.dev/eventing/pkg/metrics
 knative.dev/eventing/pkg/tracing
