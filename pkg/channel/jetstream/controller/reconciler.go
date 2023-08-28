@@ -235,6 +235,15 @@ func (r *Reconciler) reconcileDispatcher(ctx context.Context, scope, dispatcherN
 		OwnerRef:            r.controllerRef,
 	}
 
+	if nc.Spec.K8sConfig != nil && nc.Spec.K8sConfig.Deployment != nil {
+		logger.Infow("Dispatcher deployment configuration", zap.Any("DispatcherDeployment", nc.Spec.K8sConfig.Deployment))
+		args.DeploymentAnnotations = nc.Spec.K8sConfig.Deployment.Annotations
+		args.DeploymentLabels = nc.Spec.K8sConfig.Deployment.Labels
+		args.DeploymentNodeSelector = nc.Spec.K8sConfig.Deployment.NodeSelector
+		args.DeploymentAffinity = nc.Spec.K8sConfig.Deployment.Affinity
+		args.DeploymentResources = nc.Spec.K8sConfig.Deployment.Resources
+	}
+
 	want := resources.NewDispatcherDeploymentBuilder().WithArgs(&args).Build()
 	d, err := r.deploymentLister.Deployments(dispatcherNamespace).Get(jetstream.DispatcherName)
 	if err != nil {
