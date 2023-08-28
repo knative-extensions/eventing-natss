@@ -49,6 +49,28 @@ spec:
               description: Spec defines the desired state of the Channel.
               type: object
               properties:
+                k8sConfig:
+                  description: Deployment configurations to apply to programmatically created dispatcher.
+                  type: object
+                  properties:
+                    deployment:
+                      type: object
+                      properties:
+                        resources:
+                          type: object
+                          additionalProperties: true
+                        affinity:
+                          type: object
+                          additionalProperties: true
+                        nodeSelector:
+                          type: object
+                          additionalProperties: true
+                        labels:
+                          type: object
+                          additionalProperties: true
+                        annotations:
+                          type: object
+                          additionalProperties: true
                 consumerConfigTemplate:
                   type: object
                   properties:
