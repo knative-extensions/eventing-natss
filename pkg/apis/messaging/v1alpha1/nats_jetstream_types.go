@@ -145,7 +145,7 @@ type NatsJetStreamChannelSpec struct {
 	ConsumerConfigTemplate *ConsumerConfigTemplate `json:"consumerConfigTemplate,omitempty"`
 
 	// +optional
-	K8sConfig *NatsJetStreamKubernetesConfig `json:"k8sConfig,omitempty"`
+	DeploymentSpecTemplate *JetStreamDispatcherDeploymentTemplate `json:"deploymentSpecTemplate,omitempty"`
 }
 
 // Stream provides customization options to how the eventing-jetstream dispatcher creates streams.
@@ -305,11 +305,7 @@ type ConsumerConfigTemplate struct {
 	MaxAckPending int `json:"maxAckPending,omitempty"`
 }
 
-type NatsJetStreamKubernetesConfig struct {
-	Deployment *JetStreamDeployemnt `json:"deployment,omitempty"`
-}
-
-type JetStreamDeployemnt struct {
+type JetStreamDispatcherDeploymentTemplate struct {
 	Annotations  map[string]string           `json:"annotations,omitempty"`
 	Labels       map[string]string           `json:"labels,omitempty"`
 	NodeSelector map[string]string           `json:"nodeSelector,omitempty"`
