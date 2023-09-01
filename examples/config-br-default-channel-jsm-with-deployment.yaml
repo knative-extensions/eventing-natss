@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-br-default-channel
+  namespace: knative-eventing
+  labels:
+    eventing.knative.dev/release: devel
+data:
+  channelTemplateSpec: |
+    apiVersion: messaging.knative.dev/v1alpha1
+    kind: NatsJetStreamChannel
+    spec:
+      stream:
+        config:
+          retention: Limits
+          maxBytes: 1000000000
+          replicas: 1
+      consumerConfigTemplate:
+        deliverPolicy: New
+        maxDeliver: 1
+      deploymentSpecTemplate:
+        labels:
+          mykey: myvalue
+        annotations:
+          amykey: amyvalue
+        nodeSelector:
+          myselector: qwerty
+        affinity:
+          nodeAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+            - preference:
+                matchExpressions:
+                - key: high-memory
+                  operator: In
+                  values:
+                  - "true"
+              weight: 1
+        resources:
+          requests:
+            cpu: 20m
+            memory: 20Mi
+          limits:
+            cpu: 200m
+            memory: 200Mi

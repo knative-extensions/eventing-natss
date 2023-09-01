@@ -49,6 +49,25 @@ spec:
               description: Spec defines the desired state of the Channel.
               type: object
               properties:
+                deploymentSpecTemplate:
+                  description: Deployment configurations to apply to programmatically created dispatcher.
+                  type: object
+                  properties:
+                    resources:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    affinity:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    nodeSelector:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    labels:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    annotations:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
                 consumerConfigTemplate:
                   type: object
                   properties:
