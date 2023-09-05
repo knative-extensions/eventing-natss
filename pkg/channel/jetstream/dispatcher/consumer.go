@@ -19,21 +19,19 @@ package dispatcher
 import (
 	"context"
 	"errors"
-	"net/http"
-	"sync"
-
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/protocol"
 	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/tracing"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
 	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/pkg/logging"
+	"net/http"
+	"sync"
 )
 
 const (
@@ -134,15 +132,6 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 
 	te := kncloudevents.TypeExtractorTransformer("")
 
-	meta, err := msg.Metadata()
-	if err != nil {
-		return errors.New("failed to get nats message metadata")
-	}
-
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, utils.CalculateRequestTimeout(int(meta.NumDelivered), c.sub.RetryConfig))
-	defer cancel()
-
 	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithRetries(
 		ctx,
 		message,
@@ -150,7 +139,7 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 		c.sub.Subscriber,
 		c.sub.Reply,
 		c.sub.DeadLetter,
-		nil,
+		c.sub.RetryConfig,
 		&te,
 	)
 
