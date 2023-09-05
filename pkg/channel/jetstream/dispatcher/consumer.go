@@ -34,6 +34,8 @@ import (
 	"knative.dev/eventing/pkg/channel/fanout"
 	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/pkg/logging"
+	"net/http"
+	"sync"
 )
 
 const (
