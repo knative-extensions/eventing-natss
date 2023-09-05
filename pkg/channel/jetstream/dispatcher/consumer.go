@@ -19,10 +19,6 @@ package dispatcher
 import (
 	"context"
 	"errors"
-	"net/http"
-	"sync"
-	"time"
-
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/protocol"
@@ -34,6 +30,8 @@ import (
 	"knative.dev/eventing/pkg/channel/fanout"
 	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/pkg/logging"
+	"net/http"
+	"sync"
 )
 
 const (
@@ -73,43 +71,12 @@ func (c *Consumer) Close() error {
 }
 
 func (c *Consumer) MsgHandler(msg *nats.Msg) {
-	logger := c.logger.With(zap.String("msg_id", msg.Header.Get(nats.MsgIdHdr)))
-	ctx := logging.WithLogger(c.ctx, logger)
-	tickerCtx, tickerCancel := context.WithCancel(c.ctx)
-
-	tickerDone := make(chan struct{})
-
 	go func() {
-		defer close(tickerDone)
-
-		// TODO(dan-j): this should be a fraction of the Consumer's AckWait
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-tickerCtx.Done():
-				return
-			case <-ticker.C:
-				if err := msg.InProgress(nats.Context(tickerCtx)); err != nil && !errors.Is(err, context.Canceled) {
-					logging.FromContext(ctx).Errorw("failed to mark message as in progress", zap.Error(err))
-				}
-			}
-		}
-	}()
-
-	go func() {
+		logger := c.logger.With(zap.String("msg_id", msg.Header.Get(nats.MsgIdHdr)))
+		ctx := logging.WithLogger(c.ctx, logger)
 		var result protocol.Result
 
-		// wrap the handler in a local function so that the tickerCtx is cancelled even if a panic occurs.
-		func() {
-			defer tickerCancel()
-			result = c.doHandle(ctx, msg)
-		}()
-
-		// wait for the ticker to stop to prevent attempts to mark the message as in progress after it has been acked
-		// or nacked
-		<-tickerDone
+		result = c.doHandle(ctx, msg)
 
 		switch {
 		case protocol.IsACK(result):
