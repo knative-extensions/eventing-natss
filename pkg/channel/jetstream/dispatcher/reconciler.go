@@ -212,6 +212,7 @@ func (r *Reconciler) reconcileStream(ctx context.Context, nc *v1alpha1.NatsJetSt
 	streamConfig := buildStreamConfig(streamName, primarySubject, nc.Spec.Stream.Config)
 	isCreating := existing == nil
 
+	// if stream is existing then it may return error and prevent update of subscriptions
 	if isCreating {
 		// AddStream is idempotent if the config is identical to that on the server
 		info, err := r.js.AddStream(streamConfig)
