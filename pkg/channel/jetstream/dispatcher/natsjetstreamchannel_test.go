@@ -27,7 +27,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgotesting "k8s.io/client-go/testing"
@@ -41,19 +40,6 @@ import (
 	natsjschannelreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsjetstreamchannel"
 	reconciletesting "knative.dev/eventing-natss/pkg/reconciler/testing"
 )
-
-type failOnFatalAndErrorLogger struct {
-	*zap.Logger
-	t *testing.T
-}
-
-func (l *failOnFatalAndErrorLogger) Error(msg string, fields ...zap.Field) {
-	l.t.Fatalf("Error() called - msg: %s - fields: %v", msg, fields)
-}
-
-func (l *failOnFatalAndErrorLogger) Fatal(msg string, fields ...zap.Field) {
-	l.t.Fatalf("Fatal() called - msg: %s - fields: %v", msg, fields)
-}
 
 const (
 	testNS = "test-namespace"
