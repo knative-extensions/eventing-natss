@@ -19,10 +19,11 @@ package dispatcher
 import (
 	"context"
 	"fmt"
+	"testing"
+
 	"k8s.io/apimachinery/pkg/types"
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/pkg/apis"
-	"testing"
 
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
@@ -141,7 +142,6 @@ func TestAllCases(t *testing.T) {
 			},
 			WantEvents: []string{
 				finalizerUpdatedEvent,
-				//Eventf(v1.EventTypeNormal, ReasonJetstreamStreamCreated, "JetStream stream created"),
 			},
 			WantPatches: []clientgotesting.PatchActionImpl{
 				makeFinalizerPatch(testNS, ncName),

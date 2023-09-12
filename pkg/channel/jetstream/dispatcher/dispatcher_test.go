@@ -16,7 +16,21 @@ limitations under the License.
 package dispatcher
 
 import (
+	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
+	dispatchertesting "knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/testing"
+	"knative.dev/eventing-natss/pkg/client/injection/client"
+	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
+	reconcilertesting "knative.dev/eventing-natss/pkg/reconciler/testing"
+	fakeeventingclient "knative.dev/eventing/pkg/client/injection/client/fake"
+	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
+	"knative.dev/pkg/controller"
+	"knative.dev/pkg/logging"
+	logtesting "knative.dev/pkg/logging/testing"
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
@@ -31,6 +45,60 @@ func TestDispatcher_RegisterChannelHost(t *testing.T) {
 	d := &Dispatcher{}
 
 	err := d.RegisterChannelHost(*config)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDispatcher_ReconcileConsumers(t *testing.T) {
+	ctx := logging.WithLogger(context.Background(), logtesting.TestLogger(t))
+
+	s := dispatchertesting.RunBasicJetstreamServer()
+	defer dispatchertesting.ShutdownJSServerAndRemoveStorage(t, s)
+	_, js := dispatchertesting.JsClient(t, s)
+
+	ls := reconcilertesting.NewListers([]runtime.Object{})
+
+	ctx, _ = fakekubeclient.With(ctx, ls.GetKubeObjects()...)
+	ctx, _ = fakeeventingclient.With(ctx, ls.GetEventingObjects()...)
+	ctx, _ = fakeclientset.With(ctx, ls.GetNatssObjects()...)
+
+	eventRecorder := record.NewFakeRecorder(10)
+	ctx = controller.WithEventRecorder(ctx, eventRecorder)
+
+	nc := reconciletesting.NewNatsJetStreamChannel(testNS, ncName, reconciletesting.WithNatsJetStreamChannelSubscribers(subscribers))
+	config := createChannelConfig(nc, Subscription{
+		UID: subscriber1UID,
+	})
+
+	d, err := NewDispatcher(ctx, NatsDispatcherArgs{
+		JetStream:           js,
+		SubjectFunc:         utils.PublishSubjectName,
+		ConsumerNameFunc:    utils.ConsumerName,
+		ConsumerSubjectFunc: utils.ConsumerSubjectName,
+		PodName:             "test",
+		ContainerName:       "test",
+	})
+	require.NoError(t, err)
+
+	reconciler := &Reconciler{
+		clientSet:        client.Get(ctx),
+		js:               js,
+		dispatcher:       d,
+		streamNameFunc:   utils.StreamName,
+		consumerNameFunc: utils.ConsumerName,
+	}
+	_ = reconciler.reconcileStream(ctx, nc)
+
+	err = d.ReconcileConsumers(ctx, *config, true)
+	configNew := createChannelConfig(nc, Subscription{
+		UID: subscriber1UID,
+	}, Subscription{
+		UID: subscriber2UID,
+	})
+
+	err = d.ReconcileConsumers(ctx, *configNew, true)
+
 	if err != nil {
 		t.Fatal(err)
 	}
