@@ -91,6 +91,10 @@ func TestDispatcher_ReconcileConsumers(t *testing.T) {
 	_ = reconciler.reconcileStream(ctx, nc)
 
 	err = d.ReconcileConsumers(ctx, *config, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	configNew := createChannelConfig(nc, Subscription{
 		UID: subscriber1UID,
 	}, Subscription{
@@ -98,7 +102,6 @@ func TestDispatcher_ReconcileConsumers(t *testing.T) {
 	})
 
 	err = d.ReconcileConsumers(ctx, *configNew, true)
-
 	if err != nil {
 		t.Fatal(err)
 	}
