@@ -217,7 +217,7 @@ func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfi
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, nil)
+		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate)
 
 		_, err := d.js.UpdateConsumer(config.StreamName, consumerConfig)
 		if err != nil {
@@ -300,7 +300,7 @@ func (d *Dispatcher) getOrEnsureConsumer(ctx context.Context, config ChannelConf
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
+		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate)
 
 		// AddConsumer is idempotent so this will either create the consumer, update to match expected config, or no-op
 		info, err := d.js.AddConsumer(config.StreamName, consumerConfig)
