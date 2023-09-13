@@ -21,9 +21,12 @@ import (
 	"fmt"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/types"
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
+	"knative.dev/pkg/apis"
+
 	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgotesting "k8s.io/client-go/testing"
@@ -38,22 +41,12 @@ import (
 	reconciletesting "knative.dev/eventing-natss/pkg/reconciler/testing"
 )
 
-type failOnFatalAndErrorLogger struct {
-	*zap.Logger
-	t *testing.T
-}
-
-func (l *failOnFatalAndErrorLogger) Error(msg string, fields ...zap.Field) {
-	l.t.Fatalf("Error() called - msg: %s - fields: %v", msg, fields)
-}
-
-func (l *failOnFatalAndErrorLogger) Fatal(msg string, fields ...zap.Field) {
-	l.t.Fatalf("Fatal() called - msg: %s - fields: %v", msg, fields)
-}
-
 const (
 	testNS = "test-namespace"
 	ncName = "test-nc"
+
+	twoSubscriberPatch    = `[{"op":"add","path":"/status/subscribers","value":[{"observedGeneration":1,"ready":"True","uid":"2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1"},{"observedGeneration":2,"ready":"True","uid":"34c5aec8-deb6-11e8-9f32-f2801f1b9fd1"}]}]`
+	channelServiceAddress = "test-nc-kn-jsm-channel.test-namespace.svc.cluster.local"
 )
 
 var (
@@ -62,6 +55,26 @@ var (
 		"FinalizerUpdate",
 		fmt.Sprintf(`Updated %q finalizers`, ncName),
 	)
+
+	subscriber1UID        = types.UID("2f9b5e8e-deb6-11e8-9f32-f2801f1b9fd1")
+	subscriber2UID        = types.UID("34c5aec8-deb6-11e8-9f32-f2801f1b9fd1")
+	subscriber1Generation = int64(1)
+	subscriber2Generation = int64(2)
+
+	subscriber1 = eventingduckv1.SubscriberSpec{
+		UID:           subscriber1UID,
+		Generation:    subscriber1Generation,
+		SubscriberURI: apis.HTTP("call1"),
+		ReplyURI:      apis.HTTP("sink2"),
+	}
+
+	subscriber2 = eventingduckv1.SubscriberSpec{
+		UID:           subscriber2UID,
+		Generation:    subscriber2Generation,
+		SubscriberURI: apis.HTTP("call2"),
+		ReplyURI:      apis.HTTP("sink2"),
+	}
+	subscribers = []eventingduckv1.SubscriberSpec{subscriber1, subscriber2}
 )
 
 func TestAllCases(t *testing.T) {
@@ -96,6 +109,29 @@ func TestAllCases(t *testing.T) {
 			},
 			WantPatches: []clientgotesting.PatchActionImpl{
 				makeFinalizerPatch(testNS, ncName),
+			},
+		},
+		{
+			Name: "reconcile ok: update consumer",
+			Key:  ncKey,
+			Objects: []runtime.Object{
+				reconciletesting.NewNatsJetStreamChannel(ncName, testNS,
+					reconciletesting.WithNatsJetStreamInitChannelConditions,
+					reconciletesting.WithNatsJetStreamChannelAddress(channelServiceAddress),
+					reconciletesting.JetStreamAddressable(),
+					reconciletesting.WithNatsJetStreamChannelChannelServiceReady(),
+					reconciletesting.WithNatsJetStreamChannelServiceReady(),
+					reconciletesting.WithNatsJetStreamChannelEndpointsReady(),
+					reconciletesting.WithNatsJetStreamChannelDeploymentReady(),
+					reconciletesting.WithNatsJetStreamChannelStreamReady(),
+					reconciletesting.WithNatsJetStreamChannelSubscribers(subscribers)),
+			},
+			WantEvents: []string{
+				finalizerUpdatedEvent,
+			},
+			WantPatches: []clientgotesting.PatchActionImpl{
+				makeFinalizerPatch(testNS, ncName),
+				makePatch(testNS, ncName, twoSubscriberPatch),
 			},
 		},
 	}

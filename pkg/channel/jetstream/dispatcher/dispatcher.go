@@ -147,6 +147,7 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 
 	toAddSubs := expectedSubs.Difference(currentSubs)
 	toRemoveSubs := currentSubs.Difference(expectedSubs)
+	toUpdateSubs := currentSubs.Intersection(expectedSubs)
 
 	nextSubs := sets.NewString()
 	var subErrs commonerr.SubscriberErrors
@@ -160,6 +161,11 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 			err    error
 		)
 
+		if toUpdateSubs.Has(uid) {
+			subLogger.Debugw("updating existing subscription")
+			_ = d.updateSubscription(logging.WithLogger(ctx, subLogger), config, sub, isLeader)
+		}
+
 		if toAddSubs.Has(uid) {
 			subLogger.Debugw("subscription not configured for dispatcher, subscribing")
 			status, err = d.subscribe(logging.WithLogger(ctx, subLogger), config, sub, isLeader)
@@ -167,6 +173,8 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 			subLogger.Debugw("subscription already up to date")
 			status = SubscriberStatusTypeUpToDate
 		}
+
+		logger.Debugw("Subscription status after add/update", zap.Any("SubStatus", status))
 
 		switch status {
 		case SubscriberStatusTypeCreated, SubscriberStatusTypeUpToDate:
@@ -197,6 +205,25 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 	// return isn't the same as the type of subErrs: https://yourbasic.org/golang/gotcha-why-nil-error-not-equal-nil/
 	if len(subErrs) > 0 {
 		return subErrs
+	}
+
+	return nil
+}
+
+func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfig, sub Subscription, isLeader bool) error {
+	logger := logging.FromContext(ctx)
+	d.consumers[sub.UID].sub = sub
+	consumerName := d.consumerNameFunc(string(sub.UID))
+
+	if isLeader {
+		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
+		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate)
+
+		_, err := d.js.UpdateConsumer(config.StreamName, consumerConfig)
+		if err != nil {
+			logger.Errorw("failed to update queue subscription for consumer", zap.Error(err))
+			return err
+		}
 	}
 
 	return nil

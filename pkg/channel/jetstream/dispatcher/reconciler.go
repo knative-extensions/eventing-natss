@@ -212,16 +212,17 @@ func (r *Reconciler) reconcileStream(ctx context.Context, nc *v1alpha1.NatsJetSt
 	streamConfig := buildStreamConfig(streamName, primarySubject, nc.Spec.Stream.Config)
 	isCreating := existing == nil
 
-	// AddStream is idempotent if the config is identical to that on the server
-	info, err := r.js.AddStream(streamConfig)
-	if err != nil {
-		logger.Errorw("failed to add stream")
-		controller.GetEventRecorder(ctx).Event(nc, corev1.EventTypeWarning, ReasonJetstreamStreamFailed, err.Error())
-		nc.Status.MarkStreamFailed("DispatcherCreateStreamFailed", "Failed to create JetStream stream")
-		return err
-	}
-
+	// if stream is existing then it may return error and prevent update of subscriptions
 	if isCreating {
+		// AddStream is idempotent if the config is identical to that on the server
+		info, err := r.js.AddStream(streamConfig)
+		if err != nil {
+			logger.Errorw("failed to add stream")
+			controller.GetEventRecorder(ctx).Event(nc, corev1.EventTypeWarning, ReasonJetstreamStreamFailed, err.Error())
+			nc.Status.MarkStreamFailed("DispatcherCreateStreamFailed", "Failed to create JetStream stream")
+			return err
+		}
+
 		logger.Infow("jetstream stream created", zap.String("stream_name", info.Config.Name))
 		controller.GetEventRecorder(ctx).Event(nc, corev1.EventTypeNormal, ReasonJetstreamStreamCreated, "JetStream stream created")
 	}
