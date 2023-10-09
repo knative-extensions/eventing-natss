@@ -28,6 +28,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
+	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/tracing"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
@@ -133,6 +134,15 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 
 	te := kncloudevents.TypeExtractorTransformer("")
 
+	meta, err := msg.Metadata()
+	if err != nil {
+		return errors.New("failed to get nats message metadata")
+	}
+
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, utils.CalculateRequestTimeout(int(meta.NumDelivered), c.sub.RetryConfig))
+	defer cancel()
+
 	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithRetries(
 		ctx,
 		message,
@@ -140,7 +150,7 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 		c.sub.Subscriber,
 		c.sub.Reply,
 		c.sub.DeadLetter,
-		c.sub.RetryConfig,
+		nil,
 		&te,
 	)
 
