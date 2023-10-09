@@ -17,14 +17,8 @@ limitations under the License.
 package utils
 
 import (
-	"math"
-	"time"
-
 	"github.com/nats-io/nats.go"
-	"github.com/rickb777/date/period"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	v1 "knative.dev/eventing/pkg/apis/duck/v1"
-	"knative.dev/eventing/pkg/kncloudevents"
 )
 
 func ConvertDeliverPolicy(in v1alpha1.DeliverPolicy, def nats.DeliverPolicy) nats.DeliverPolicy {
