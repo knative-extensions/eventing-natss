@@ -143,6 +143,8 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 	ctx, cancel = context.WithTimeout(ctx, utils.CalculateRequestTimeout(int(meta.NumDelivered), c.sub.RetryConfig))
 	defer cancel()
 
+	var noRetires = kncloudevents.NoRetries()
+
 	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithRetries(
 		ctx,
 		message,
@@ -150,7 +152,7 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 		c.sub.Subscriber,
 		c.sub.Reply,
 		c.sub.DeadLetter,
-		nil,
+		&noRetires,
 		&te,
 	)
 
