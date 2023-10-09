@@ -28,7 +28,6 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/tracing"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
