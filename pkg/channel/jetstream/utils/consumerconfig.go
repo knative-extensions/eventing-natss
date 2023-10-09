@@ -17,8 +17,14 @@ limitations under the License.
 package utils
 
 import (
+	"math"
+	"time"
+
 	"github.com/nats-io/nats.go"
+	"github.com/rickb777/date/period"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	v1 "knative.dev/eventing/pkg/apis/duck/v1"
+	"knative.dev/eventing/pkg/kncloudevents"
 )
 
 func ConvertDeliverPolicy(in v1alpha1.DeliverPolicy, def nats.DeliverPolicy) nats.DeliverPolicy {
@@ -47,4 +53,48 @@ func ConvertReplayPolicy(in v1alpha1.ReplayPolicy, def nats.ReplayPolicy) nats.R
 	}
 
 	return def
+}
+
+func CalculateRequestTimeout(attemptNum int, config *kncloudevents.RetryConfig) time.Duration {
+	backoff, backoffDelay := parseBackoffFuncAndDelay(config)
+	return backoff(attemptNum, backoffDelay) * config.RequestTimeout
+}
+
+type backoffFunc func(attemptNum int, delayDuration time.Duration) time.Duration
+
+func CalculateAckWaitAndBackoffDelays(config *kncloudevents.RetryConfig) (time.Duration, []time.Duration) {
+	var delays = make([]time.Duration, config.RetryMax)
+	var totalDelays = config.RequestTimeout * time.Duration(config.RetryMax)
+
+	backoff, backoffDelay := parseBackoffFuncAndDelay(config)
+
+	for i := 0; i <= config.RetryMax; i++ {
+		nextDelay := backoff(i, backoffDelay)
+		totalDelays += nextDelay
+		delays = append(delays, nextDelay)
+	}
+	return totalDelays, delays
+}
+
+func LinearBackoff(attemptNum int, delayDuration time.Duration) time.Duration {
+	return delayDuration * time.Duration(attemptNum)
+}
+
+func ExpBackoff(attemptNum int, delayDuration time.Duration) time.Duration {
+	return delayDuration * time.Duration(math.Exp2(float64(attemptNum)))
+}
+
+func parseBackoffFuncAndDelay(config *kncloudevents.RetryConfig) (backoffFunc, time.Duration) {
+	var backoff backoffFunc
+	switch *config.BackoffPolicy {
+	case v1.BackoffPolicyExponential:
+		backoff = ExpBackoff
+	case v1.BackoffPolicyLinear:
+		backoff = LinearBackoff
+	}
+	// it should be validated at this point
+	delay, _ := period.Parse(*config.BackoffDelay)
+	backoffDelay, _ := delay.Duration()
+
+	return backoff, backoffDelay
 }
