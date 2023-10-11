@@ -23,7 +23,6 @@ import (
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
-	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	testing "k8s.io/client-go/testing"
@@ -36,9 +35,9 @@ type FakeNatsJetStreamChannels struct {
 	ns   string
 }
 
-var natsjetstreamchannelsResource = schema.GroupVersionResource{Group: "messaging.knative.dev", Version: "v1alpha1", Resource: "natsjetstreamchannels"}
+var natsjetstreamchannelsResource = v1alpha1.SchemeGroupVersion.WithResource("natsjetstreamchannels")
 
-var natsjetstreamchannelsKind = schema.GroupVersionKind{Group: "messaging.knative.dev", Version: "v1alpha1", Kind: "NatsJetStreamChannel"}
+var natsjetstreamchannelsKind = v1alpha1.SchemeGroupVersion.WithKind("NatsJetStreamChannel")
 
 // Get takes name of the natsJetStreamChannel, and returns the corresponding natsJetStreamChannel object, and an error if there is any.
 func (c *FakeNatsJetStreamChannels) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1alpha1.NatsJetStreamChannel, err error) {

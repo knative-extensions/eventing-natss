@@ -103,7 +103,7 @@ func TestAllCases(t *testing.T) {
 	table.Test(t, reconciletesting.MakeFactory(func(ctx context.Context, l *reconciletesting.Listers) controller.Reconciler {
 		_, js := dispatchertesting.JsClient(t, s)
 		return createReconciler(ctx, l, js, func() *Dispatcher {
-			d, err := NewDispatcher(context.TODO(), NatsDispatcherArgs{
+			d, err := NewDispatcher(ctx, NatsDispatcherArgs{
 				JetStream:           js,
 				SubjectFunc:         utils.PublishSubjectName,
 				ConsumerNameFunc:    utils.ConsumerName,

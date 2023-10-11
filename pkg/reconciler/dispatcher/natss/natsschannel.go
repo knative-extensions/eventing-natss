@@ -120,7 +120,7 @@ func NewController(ctx context.Context, watcher configmap.Watcher) *controller.I
 		Logger:   logger.Desugar(),
 		Reporter: reporter,
 	}
-	natssDispatcher, err := dNewNatssDispatcher(dispatcherArgs)
+	natssDispatcher, err := dNewNatssDispatcher(ctx, dispatcherArgs)
 	if err != nil {
 		logger.Fatal("Unable to create natss dispatcher", zap.Error(err))
 	}
