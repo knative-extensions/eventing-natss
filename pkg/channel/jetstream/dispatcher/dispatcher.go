@@ -26,6 +26,7 @@ import (
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
+	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
@@ -36,7 +37,9 @@ import (
 	commonerr "knative.dev/eventing-natss/pkg/common/error"
 	"knative.dev/eventing-natss/pkg/tracing"
 
+	"knative.dev/eventing/pkg/auth"
 	eventingchannels "knative.dev/eventing/pkg/channel"
+	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/pkg/kmeta"
 	"knative.dev/pkg/logging"
 )
@@ -47,8 +50,8 @@ import (
 // - HTTP receiver which publishes to the desired Stream
 // - Consumer per .spec.subscribers[] of a channel, forwarding events to the specified subscriber address.
 type Dispatcher struct {
-	receiver   *eventingchannels.MessageReceiver
-	dispatcher *eventingchannels.MessageDispatcherImpl
+	receiver   *eventingchannels.EventReceiver
+	dispatcher *kncloudevents.Dispatcher
 	reporter   eventingchannels.StatsReporter
 
 	js nats.JetStreamContext
@@ -70,8 +73,9 @@ func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, e
 
 	reporter := eventingchannels.NewStatsReporter(args.ContainerName, kmeta.ChildName(args.PodName, uuid.New().String()))
 
+	oidcTokenProvider := auth.NewOIDCTokenProvider(ctx)
 	d := &Dispatcher{
-		dispatcher: eventingchannels.NewMessageDispatcher(logger.Desugar()),
+		dispatcher: kncloudevents.NewDispatcher(oidcTokenProvider),
 		reporter:   reporter,
 
 		js: args.JetStream,
@@ -84,11 +88,11 @@ func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, e
 		consumers:          make(map[types.UID]*Consumer),
 	}
 
-	receiverFunc, err := eventingchannels.NewMessageReceiver(
+	receiverFunc, err := eventingchannels.NewEventReceiver(
 		d.messageReceiver,
 		logger.Desugar(),
 		reporter,
-		eventingchannels.ResolveMessageChannelFromHostHeader(d.getChannelReferenceFromHost),
+		eventingchannels.ResolveChannelFromHostHeader(d.getChannelReferenceFromHost),
 	)
 	if err != nil {
 		logger.Error("failed to create message receiver")
@@ -301,14 +305,17 @@ func (d *Dispatcher) deleteConsumer(ctx context.Context, config ChannelConfig, u
 	return nil
 }
 
-func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.ChannelReference, message binding.Message, transformers []binding.Transformer, _ nethttp.Header) error {
+func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.ChannelReference, event event.Event, _ nethttp.Header) error {
+	message := binding.ToMessage(&event)
+
 	logger := logging.FromContext(ctx)
 	logger.Debugw("received message from HTTP receiver")
 
 	eventID := commonce.IDExtractorTransformer("")
 
-	transformers = append(transformers, tracing.SerializeTraceTransformers(trace.FromContext(ctx).SpanContext())...)
-	transformers = append(transformers, &eventID)
+	transformers := append([]binding.Transformer{&eventID},
+		tracing.SerializeTraceTransformers(trace.FromContext(ctx).SpanContext())...,
+	)
 
 	writer := new(bytes.Buffer)
 	if err := cejs.WriteMsg(ctx, message, writer, transformers...); err != nil {

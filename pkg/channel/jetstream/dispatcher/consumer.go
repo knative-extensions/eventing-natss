@@ -46,7 +46,7 @@ var (
 
 type Consumer struct {
 	sub              Subscription
-	dispatcher       eventingchannels.MessageDispatcher
+	dispatcher       *kncloudevents.Dispatcher
 	reporter         eventingchannels.StatsReporter
 	channelNamespace string
 
@@ -163,17 +163,17 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 
 	defer span.End()
 
-	te := kncloudevents.TypeExtractorTransformer("")
+	te := TypeExtractorTransformer("")
 
-	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithRetries(
+	dispatchExecutionInfo, err := c.dispatcher.SendMessage(
 		ctx,
 		message,
-		additionalHeaders,
 		c.sub.Subscriber,
-		c.sub.Reply,
-		c.sub.DeadLetter,
-		c.sub.RetryConfig,
-		&te,
+		kncloudevents.WithReply(c.sub.Reply),
+		kncloudevents.WithDeadLetterSink(c.sub.DeadLetter),
+		kncloudevents.WithRetryConfig(c.sub.RetryConfig),
+		kncloudevents.WithTransformers(&te),
+		kncloudevents.WithHeader(additionalHeaders),
 	)
 
 	args := eventingchannels.ReportArgs{
