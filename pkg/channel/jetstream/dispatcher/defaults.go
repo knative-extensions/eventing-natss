@@ -74,8 +74,7 @@ func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1
 	if template != nil {
 		consumerConfig.DeliverPolicy = utils.ConvertDeliverPolicy(template.DeliverPolicy, nats.DeliverAllPolicy)
 		consumerConfig.OptStartSeq = template.OptStartSeq
-		//consumerConfig.AckWait = template.AckWait.Duration
-		//consumerConfig.MaxDeliver = template.MaxDeliver
+		// ignoring template.AckWait and template.MaxDeliver
 		consumerConfig.FilterSubject = template.FilterSubject
 		consumerConfig.ReplayPolicy = utils.ConvertReplayPolicy(template.ReplayPolicy, nats.ReplayInstantPolicy)
 		consumerConfig.RateLimit = template.RateLimitBPS
