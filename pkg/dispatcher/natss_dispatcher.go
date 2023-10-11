@@ -30,6 +30,7 @@ import (
 
 	natsscloudevents "github.com/cloudevents/sdk-go/protocol/stan/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
+	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/nats-io/stan.go"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -60,8 +61,7 @@ type SubscriptionChannelMapping map[eventingchannels.ChannelReference]map[types.
 type subscriptionsSupervisor struct {
 	logger *zap.Logger
 
-	receiver   *eventingchannels.MessageReceiver
-	dispatcher *eventingchannels.MessageDispatcherImpl
+	receiver *eventingchannels.EventReceiver
 
 	subscriptionsMux sync.Mutex
 	subscriptions    SubscriptionChannelMapping
@@ -102,7 +102,6 @@ func NewNatssDispatcher(args Args) (NatsDispatcher, error) {
 
 	d := &subscriptionsSupervisor{
 		logger:         args.Logger,
-		dispatcher:     eventingchannels.NewMessageDispatcher(args.Logger),
 		subscriptions:  make(SubscriptionChannelMapping),
 		connect:        make(chan struct{}, maxElements),
 		natssURL:       args.NatssURL,
@@ -112,11 +111,11 @@ func NewNatssDispatcher(args Args) (NatsDispatcher, error) {
 		maxInflight:    args.MaxInflight,
 	}
 
-	receiver, err := eventingchannels.NewMessageReceiver(
+	receiver, err := eventingchannels.NewEventReceiver(
 		messageReceiverFunc(d),
 		d.logger,
 		args.Reporter,
-		eventingchannels.ResolveMessageChannelFromHostHeader(d.getChannelReferenceFromHost))
+		eventingchannels.ResolveChannelFromHostHeader(d.getChannelReferenceFromHost))
 	if err != nil {
 		return nil, err
 	}
@@ -134,8 +133,9 @@ func (s *subscriptionsSupervisor) signalReconnect() {
 	}
 }
 
-func messageReceiverFunc(s *subscriptionsSupervisor) eventingchannels.UnbufferedMessageReceiverFunc {
-	return func(ctx context.Context, channel eventingchannels.ChannelReference, message binding.Message, transformers []binding.Transformer, header http.Header) error {
+func messageReceiverFunc(s *subscriptionsSupervisor) eventingchannels.EventReceiverFunc {
+	return func(ctx context.Context, channel eventingchannels.ChannelReference, event event.Event, header http.Header) error {
+		message := binding.ToMessage(&event)
 		s.logger.Info("Received event", zap.String("channel", channel.String()))
 
 		s.natssConnMux.Lock()
@@ -340,7 +340,13 @@ func (s *subscriptionsSupervisor) subscribe(ctx context.Context, channel eventin
 		ctx, span := tracing.StartTraceFromMessage(s.logger, ctx, event, "natsschannel-"+channel.Name)
 		defer span.End()
 
-		executionInfo, err := s.dispatcher.DispatchMessage(ctx, message, additionalHeaders, destination, reply, deadLetter)
+		executionInfo, err := kncloudevents.SendMessage(
+			ctx,
+			message,
+			destination,
+			kncloudevents.WithHeader(additionalHeaders),
+			kncloudevents.WithReply(reply),
+			kncloudevents.WithDeadLetterSink(deadLetter))
 		if err != nil {
 			s.logger.Error("Failed to dispatch message: ", zap.Error(err))
 			return

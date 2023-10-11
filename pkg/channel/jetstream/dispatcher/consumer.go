@@ -25,7 +25,9 @@ import (
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
+	"github.com/cloudevents/sdk-go/v2/binding/spec"
 	"github.com/cloudevents/sdk-go/v2/protocol"
+	"github.com/cloudevents/sdk-go/v2/types"
 	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
@@ -46,7 +48,6 @@ var (
 
 type Consumer struct {
 	sub              Subscription
-	dispatcher       eventingchannels.MessageDispatcher
 	reporter         eventingchannels.StatsReporter
 	channelNamespace string
 
@@ -163,18 +164,14 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 
 	defer span.End()
 
-	te := kncloudevents.TypeExtractorTransformer("")
+	te := TypeExtractorTransformer("")
 
-	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithRetries(
-		ctx,
-		message,
-		additionalHeaders,
-		c.sub.Subscriber,
-		c.sub.Reply,
-		c.sub.DeadLetter,
-		c.sub.RetryConfig,
-		&te,
-	)
+	dispatchExecutionInfo, err := kncloudevents.SendMessage(ctx, message, c.sub.Subscriber,
+		kncloudevents.WithReply(c.sub.Reply),
+		kncloudevents.WithDeadLetterSink(c.sub.DeadLetter),
+		kncloudevents.WithRetryConfig(c.sub.RetryConfig),
+		kncloudevents.WithTransformers(&te),
+		kncloudevents.WithHeader(additionalHeaders))
 
 	args := eventingchannels.ReportArgs{
 		Ns:        c.channelNamespace,
@@ -201,4 +198,18 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 	logger.Debug("message forwarded to downstream subscriber")
 
 	return protocol.ResultACK
+}
+
+type TypeExtractorTransformer string
+
+func (a *TypeExtractorTransformer) Transform(reader binding.MessageMetadataReader, _ binding.MessageMetadataWriter) error {
+	_, ty := reader.GetAttribute(spec.Type)
+	if ty != nil {
+		tyParsed, err := types.ToString(ty)
+		if err != nil {
+			return err
+		}
+		*a = TypeExtractorTransformer(tyParsed)
+	}
+	return nil
 }

@@ -44,11 +44,11 @@ github.com/cloudevents/conformance/pkg/http
 ## explicit; go 1.17
 github.com/cloudevents/sdk-go/observability/opencensus/v2/client
 github.com/cloudevents/sdk-go/observability/opencensus/v2/http
-# github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.0.0-20210715165402-49fda7a51425
-## explicit; go 1.14
+# github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.13.0
+## explicit; go 1.17
 github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2
-# github.com/cloudevents/sdk-go/protocol/stan/v2 v2.2.0
-## explicit; go 1.13
+# github.com/cloudevents/sdk-go/protocol/stan/v2 v2.13.0
+## explicit; go 1.17
 github.com/cloudevents/sdk-go/protocol/stan/v2
 # github.com/cloudevents/sdk-go/sql/v2 v2.13.0
 ## explicit; go 1.17
@@ -59,8 +59,8 @@ github.com/cloudevents/sdk-go/sql/v2/gen
 github.com/cloudevents/sdk-go/sql/v2/parser
 github.com/cloudevents/sdk-go/sql/v2/runtime
 github.com/cloudevents/sdk-go/sql/v2/utils
-# github.com/cloudevents/sdk-go/v2 v2.13.0 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
-## explicit; go 1.14
+# github.com/cloudevents/sdk-go/v2 v2.13.0
+## explicit; go 1.17
 github.com/cloudevents/sdk-go/v2
 github.com/cloudevents/sdk-go/v2/binding
 github.com/cloudevents/sdk-go/v2/binding/format
@@ -182,6 +182,10 @@ github.com/grpc-ecosystem/grpc-gateway/v2/utilities
 # github.com/hashicorp/go-cleanhttp v0.5.1
 ## explicit
 github.com/hashicorp/go-cleanhttp
+# github.com/hashicorp/go-hclog v1.5.0
+## explicit; go 1.13
+# github.com/hashicorp/go-msgpack v0.5.5
+## explicit
 # github.com/hashicorp/go-retryablehttp v0.6.7
 ## explicit; go 1.13
 github.com/hashicorp/go-retryablehttp
@@ -189,6 +193,8 @@ github.com/hashicorp/go-retryablehttp
 ## explicit; go 1.12
 github.com/hashicorp/golang-lru
 github.com/hashicorp/golang-lru/simplelru
+# github.com/hashicorp/raft v1.5.0
+## explicit; go 1.16
 # github.com/imdario/mergo v0.3.9
 ## explicit
 github.com/imdario/mergo
@@ -316,7 +322,7 @@ github.com/spf13/cobra
 # github.com/spf13/pflag v1.0.5
 ## explicit; go 1.12
 github.com/spf13/pflag
-# github.com/stretchr/testify v1.8.1
+# github.com/stretchr/testify v1.8.2
 ## explicit; go 1.13
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/require
@@ -1266,4 +1272,3 @@ sigs.k8s.io/structured-merge-diff/v4/value
 # sigs.k8s.io/yaml v1.3.0
 ## explicit; go 1.12
 sigs.k8s.io/yaml
-# github.com/cloudevents/sdk-go/v2 => github.com/cloudevents/sdk-go/v2 v2.4.1-0.20210715165402-49fda7a51425
