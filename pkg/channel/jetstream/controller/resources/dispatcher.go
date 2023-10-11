@@ -45,18 +45,21 @@ type DispatcherDeploymentBuilder struct {
 }
 
 type DispatcherDeploymentArgs struct {
-	DispatcherScope       string
-	DispatcherNamespace   string
-	Image                 string
-	Replicas              int32
-	ServiceAccount        string
-	ConfigMapName         string
-	ConfigMapHash         string
-	OwnerRef              metav1.OwnerReference
-	DeploymentAnnotations map[string]string
-	DeploymentLabels      map[string]string
-	PodAnnotations        map[string]string
-	PodLabels             map[string]string
+	DispatcherScope        string
+	DispatcherNamespace    string
+	Image                  string
+	Replicas               int32
+	ServiceAccount         string
+	ConfigMapName          string
+	ConfigMapHash          string
+	OwnerRef               metav1.OwnerReference
+	DeploymentAnnotations  map[string]string
+	DeploymentLabels       map[string]string
+	DeploymentResources    corev1.ResourceRequirements
+	DeploymentNodeSelector map[string]string
+	DeploymentAffinity     *corev1.Affinity
+	PodAnnotations         map[string]string
+	PodLabels              map[string]string
 }
 
 // NewDispatcherDeploymentBuilder returns a builder which builds from scratch a dispatcher deployment.
@@ -94,9 +97,13 @@ func (b *DispatcherDeploymentBuilder) Build() *v1.Deployment {
 	b.deployment.Spec.Template.ObjectMeta.Labels = commonconfig.JoinStringMaps(b.deployment.Spec.Template.ObjectMeta.Labels, b.args.PodLabels)
 	b.deployment.Spec.Template.Spec.ServiceAccountName = b.args.ServiceAccount
 
+	b.deployment.Spec.Template.Spec.NodeSelector = b.args.DeploymentNodeSelector
+	b.deployment.Spec.Template.Spec.Affinity = b.args.DeploymentAffinity
+
 	for i, c := range b.deployment.Spec.Template.Spec.Containers {
 		if c.Name == DispatcherContainerName {
 			container := &b.deployment.Spec.Template.Spec.Containers[i]
+			container.Resources = b.args.DeploymentResources
 			container.Image = b.args.Image
 			if container.Env == nil {
 				container.Env = makeEnv(b.args)

@@ -227,6 +227,35 @@ func TestAllCases(t *testing.T) {
 			WantEvents: []string{
 				finalizerUpdatedEvent,
 			},
+		}, {
+			Name: "Works, channel with deployment spec",
+			Key:  ncKey,
+			Objects: []runtime.Object{
+				reconciletesting.NewNatsJetStreamChannel(ncName, testNS,
+					reconciletesting.WithNatsJetStreamDeploymentSpecTemplate),
+			},
+			WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
+				Object: reconciletesting.NewNatsJetStreamChannel(ncName, testNS,
+					reconciletesting.WithNatsJetStreamInitChannelConditions,
+					reconciletesting.WithNatsJetStreamChannelEndpointsNotReady(dispatcherEndpointsNotFound, "Dispatcher Endpoints does not exist"),
+					reconciletesting.WithNatsJetStreamChannelServiceReady(),
+					reconciletesting.WithNatsJetStreamDeploymentSpecTemplate,
+				),
+			}},
+			WantCreates: []runtime.Object{
+				makeDispatcherDeploymentWithSpec(),
+				makeDispatcherService(),
+			},
+			WantPatches: []clientgotesting.PatchActionImpl{{
+				Name:      ncName,
+				Patch:     []byte(`{"metadata":{"finalizers":["natsjetstreamchannels.messaging.knative.dev"],"resourceVersion":""}}`),
+				PatchType: types.MergePatchType,
+			}},
+			WantEvents: []string{
+				finalizerUpdatedEvent,
+				Eventf(v1.EventTypeNormal, dispatcherDeploymentCreated, "Dispatcher deployment created"),
+				Eventf(v1.EventTypeNormal, dispatcherServiceCreated, "Dispatcher service created"),
+			},
 		},
 	}
 
@@ -260,6 +289,23 @@ func makeDispatcherDeployment() *appsv1.Deployment {
 		Replicas:            1,
 		ServiceAccount:      dispatcherServiceAccount,
 		OwnerRef:            metav1.OwnerReference{}, // TODO: Make this work
+	}).Build()
+}
+
+func makeDispatcherDeploymentWithSpec() *appsv1.Deployment {
+	return resources.NewDispatcherDeploymentBuilder().WithArgs(&resources.DispatcherDeploymentArgs{
+		DispatcherScope:     "",
+		DispatcherNamespace: testNS,
+		Image:               dispatcherImage,
+		Replicas:            1,
+		ServiceAccount:      dispatcherServiceAccount,
+		OwnerRef:            metav1.OwnerReference{}, // TODO: Make this work
+		DeploymentLabels: map[string]string{
+			"label1": "value",
+		},
+		DeploymentAnnotations: map[string]string{
+			"annotation1": "value",
+		},
 	}).Build()
 }
 

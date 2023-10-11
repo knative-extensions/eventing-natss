@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -142,6 +143,9 @@ type NatsJetStreamChannelSpec struct {
 
 	// +optional
 	ConsumerConfigTemplate *ConsumerConfigTemplate `json:"consumerConfigTemplate,omitempty"`
+
+	// +optional
+	DeploymentSpecTemplate *JetStreamDispatcherDeploymentTemplate `json:"deploymentSpecTemplate,omitempty"`
 }
 
 // Stream provides customization options to how the eventing-jetstream dispatcher creates streams.
@@ -299,6 +303,14 @@ type ConsumerConfigTemplate struct {
 	// limit is reached message delivery will be suspended.
 	// +optional
 	MaxAckPending int `json:"maxAckPending,omitempty"`
+}
+
+type JetStreamDispatcherDeploymentTemplate struct {
+	Annotations  map[string]string           `json:"annotations,omitempty"`
+	Labels       map[string]string           `json:"labels,omitempty"`
+	NodeSelector map[string]string           `json:"nodeSelector,omitempty"`
+	Resources    corev1.ResourceRequirements `json:"resources,omitempty"`
+	Affinity     *corev1.Affinity            `json:"affinity,omitempty"`
 }
 
 // NatsJetStreamChannelStatus represents the current state of a NatssChannel.

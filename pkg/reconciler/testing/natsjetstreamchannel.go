@@ -79,6 +79,17 @@ func WithNatsJetStreamChannelDeleted(nc *v1alpha1.NatsJetStreamChannel) {
 	nc.ObjectMeta.SetDeletionTimestamp(&deleteTime)
 }
 
+func WithNatsJetStreamDeploymentSpecTemplate(nc *v1alpha1.NatsJetStreamChannel) {
+	nc.Spec.DeploymentSpecTemplate = &v1alpha1.JetStreamDispatcherDeploymentTemplate{
+		Labels: map[string]string{
+			"label1": "value",
+		},
+		Annotations: map[string]string{
+			"annotation1": "value",
+		},
+	}
+}
+
 func WithNatsJetStreamChannelDispatcherReady() NatsJetStreamChannelOption {
 	return func(nc *v1alpha1.NatsJetStreamChannel) {
 		nc.Status.MarkDispatcherTrue()
