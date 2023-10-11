@@ -65,13 +65,22 @@ type backoffFunc func(attemptNum int, delayDuration time.Duration) time.Duration
 func CalculateAckWaitAndBackoffDelays(config *kncloudevents.RetryConfig) (time.Duration, []time.Duration) {
 	var delays = make([]time.Duration, config.RetryMax)
 	var totalDelays = config.RequestTimeout * time.Duration(config.RetryMax)
+	// 1 second jitter
+	const jitter = 1 * time.Second
 
 	backoff, backoffDelay := parseBackoffFuncAndDelay(config)
 
-	for i := 0; i <= config.RetryMax; i++ {
-		nextDelay := backoff(i, backoffDelay)
+	for i := 0; i < config.RetryMax; i++ {
+		var nextDelay time.Duration
+		if i == 0 {
+			// the first backoff should be just request timeout + jitter
+			nextDelay = 0
+		} else {
+			nextDelay = backoff(i-1, backoffDelay)
+		}
+
 		totalDelays += nextDelay
-		delays = append(delays, nextDelay)
+		delays[i] = nextDelay + config.RequestTimeout + jitter
 	}
 	return totalDelays, delays
 }

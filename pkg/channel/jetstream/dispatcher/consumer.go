@@ -28,7 +28,6 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/tracing"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
@@ -86,9 +85,10 @@ func (c *Consumer) MsgHandler(msg *nats.Msg) {
 				logger.Errorw("failed to Ack message after successful delivery to subscriber", zap.Error(err))
 			}
 		case protocol.IsNACK(result):
-			if err := msg.Nak(nats.Context(ctx)); err != nil {
-				logger.Errorw("failed to Nack message after failed delivery to subscriber", zap.Error(err))
-			}
+			// do nothing
+			//if err := msg.Nak(nats.Context(ctx)); err != nil {
+			//	logger.Errorw("failed to Nack message after failed delivery to subscriber", zap.Error(err))
+			//}
 		default:
 			if err := msg.Term(nats.Context(ctx)); err != nil {
 				logger.Errorw("failed to Term message after failed delivery to subscriber", zap.Error(err))
@@ -134,13 +134,13 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 
 	te := kncloudevents.TypeExtractorTransformer("")
 
-	meta, err := msg.Metadata()
-	if err != nil {
-		return errors.New("failed to get nats message metadata")
-	}
+	//meta, err := msg.Metadata()
+	//if err != nil {
+	//	return errors.New("failed to get nats message metadata")
+	//}
 
 	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, utils.CalculateRequestTimeout(int(meta.NumDelivered), c.sub.RetryConfig))
+	ctx, cancel = context.WithTimeout(ctx, c.sub.RetryConfig.RequestTimeout)
 	defer cancel()
 
 	var noRetires = kncloudevents.NoRetries()
