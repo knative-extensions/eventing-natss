@@ -23,7 +23,6 @@ import (
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	labels "k8s.io/apimachinery/pkg/labels"
-	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	testing "k8s.io/client-go/testing"
@@ -36,9 +35,9 @@ type FakeNatssChannels struct {
 	ns   string
 }
 
-var natsschannelsResource = schema.GroupVersionResource{Group: "messaging.knative.dev", Version: "v1beta1", Resource: "natsschannels"}
+var natsschannelsResource = v1beta1.SchemeGroupVersion.WithResource("natsschannels")
 
-var natsschannelsKind = schema.GroupVersionKind{Group: "messaging.knative.dev", Version: "v1beta1", Kind: "NatssChannel"}
+var natsschannelsKind = v1beta1.SchemeGroupVersion.WithKind("NatssChannel")
 
 // Get takes name of the natssChannel, and returns the corresponding natssChannel object, and an error if there is any.
 func (c *FakeNatssChannels) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1beta1.NatssChannel, err error) {
