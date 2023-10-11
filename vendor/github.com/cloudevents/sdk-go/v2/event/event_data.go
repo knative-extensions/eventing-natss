@@ -73,7 +73,7 @@ func (e Event) Data() []byte {
 }
 
 // DataAs attempts to populate the provided data object with the event payload.
-// obj should be a pointer type.
+// data should be a pointer type.
 func (e Event) DataAs(obj interface{}) error {
 	data := e.Data()
 

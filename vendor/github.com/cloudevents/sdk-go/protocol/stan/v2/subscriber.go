@@ -1,8 +1,3 @@
-/*
- Copyright 2021 The CloudEvents Authors
- SPDX-License-Identifier: Apache-2.0
-*/
-
 package stan
 
 import "github.com/nats-io/stan.go"
