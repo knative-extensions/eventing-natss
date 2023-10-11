@@ -85,10 +85,7 @@ func (c *Consumer) MsgHandler(msg *nats.Msg) {
 				logger.Errorw("failed to Ack message after successful delivery to subscriber", zap.Error(err))
 			}
 		case protocol.IsNACK(result):
-			// do nothing
-			//if err := msg.Nak(nats.Context(ctx)); err != nil {
-			//	logger.Errorw("failed to Nack message after failed delivery to subscriber", zap.Error(err))
-			//}
+			// do nothing, if NAK then message is retried according to NAK delay, not backoff
 		default:
 			if err := msg.Term(nats.Context(ctx)); err != nil {
 				logger.Errorw("failed to Term message after failed delivery to subscriber", zap.Error(err))
@@ -133,11 +130,6 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 	defer span.End()
 
 	te := kncloudevents.TypeExtractorTransformer("")
-
-	//meta, err := msg.Metadata()
-	//if err != nil {
-	//	return errors.New("failed to get nats message metadata")
-	//}
 
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, c.sub.RetryConfig.RequestTimeout)

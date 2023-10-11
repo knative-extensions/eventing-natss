@@ -55,7 +55,7 @@ func ConvertReplayPolicy(in v1alpha1.ReplayPolicy, def nats.ReplayPolicy) nats.R
 	return def
 }
 
-func CalculateRequestTimeout(attemptNum int, config *kncloudevents.RetryConfig) time.Duration {
+func CalculateRequestTimeoutForRetryNumber(attemptNum int, config *kncloudevents.RetryConfig) time.Duration {
 	backoff, backoffDelay := parseBackoffFuncAndDelay(config)
 	return backoff(attemptNum, backoffDelay) * config.RequestTimeout
 }
