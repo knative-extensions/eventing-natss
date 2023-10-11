@@ -217,7 +217,7 @@ func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfi
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, nil)
+		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
 
 		_, err := d.js.UpdateConsumer(config.StreamName, consumerConfig)
 		if err != nil {
@@ -240,7 +240,7 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 			return SubscriberStatusTypeSkipped, nil
 		}
 
-		logger.Errorw("failed to getOrEnsureConsumer during subscribe")
+		logger.Errorw("failed to getOrEnsureConsumer during subscribe", zap.Error(err))
 		return SubscriberStatusTypeError, err
 	}
 
@@ -305,7 +305,7 @@ func (d *Dispatcher) getOrEnsureConsumer(ctx context.Context, config ChannelConf
 		// AddConsumer is idempotent so this will either create the consumer, update to match expected config, or no-op
 		info, err := d.js.AddConsumer(config.StreamName, consumerConfig)
 		if err != nil {
-			logger.Errorw("failed to add consumer")
+			logger.Errorw("failed to add consumer", zap.Error(err))
 			return nil, err
 		}
 

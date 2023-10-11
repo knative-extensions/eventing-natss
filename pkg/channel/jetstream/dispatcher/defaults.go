@@ -68,7 +68,7 @@ func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1
 		ackWait, backOffDelays := utils.CalculateAckWaitAndBackoffDelays(retryConfig)
 		consumerConfig.AckWait = ackWait
 		consumerConfig.BackOff = backOffDelays
-		consumerConfig.MaxDeliver = retryConfig.RetryMax
+		consumerConfig.MaxDeliver = retryConfig.RetryMax + 1
 	}
 
 	if template != nil {
