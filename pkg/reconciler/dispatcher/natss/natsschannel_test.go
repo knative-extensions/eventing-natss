@@ -234,7 +234,7 @@ func TestNewControllerTracingShutDown(t *testing.T) {
 		t:      t,
 	}
 
-	dNewNatssDispatcher = func(ctx context.Context, args dispatcher.Args) (dispatcher.NatsDispatcher, error) {
+	dNewNatssDispatcher = func(args dispatcher.Args) (dispatcher.NatsDispatcher, error) {
 		return dispatchertesting.NewDispatcherDoNothing(), nil
 	}
 
