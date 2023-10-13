@@ -28,6 +28,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
+	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/tracing"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
@@ -85,7 +86,16 @@ func (c *Consumer) MsgHandler(msg *nats.Msg) {
 				logger.Errorw("failed to Ack message after successful delivery to subscriber", zap.Error(err))
 			}
 		case protocol.IsNACK(result):
-			// do nothing, if NAK then message is retried according to NAK delay, not backoff
+			meta, err := msg.Metadata()
+			retryNumber := 1
+			if err != nil {
+				logger.Errorw("failed to get nats message metadata, assuming it is 1", zap.Error(err))
+			} else {
+				retryNumber = int(meta.NumDelivered)
+			}
+			if err := msg.NakWithDelay(utils.CalculateNakDelayForRetryNumber(retryNumber, c.sub.RetryConfig), nats.Context(ctx)); err != nil {
+				logger.Errorw("failed to Nack message after failed delivery to subscriber", zap.Error(err))
+			}
 		default:
 			if err := msg.Term(nats.Context(ctx)); err != nil {
 				logger.Errorw("failed to Term message after failed delivery to subscriber", zap.Error(err))

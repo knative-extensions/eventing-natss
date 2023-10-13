@@ -17,6 +17,8 @@ limitations under the License.
 package dispatcher
 
 import (
+	"time"
+
 	"github.com/nats-io/nats.go"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
@@ -57,6 +59,8 @@ func buildStreamConfig(streamName, subject string, config *v1alpha1.StreamConfig
 }
 
 func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1.ConsumerConfigTemplate, retryConfig *kncloudevents.RetryConfig) *nats.ConsumerConfig {
+	const jitter = time.Second * 5
+
 	consumerConfig := nats.ConsumerConfig{
 		Durable:        consumerName,
 		DeliverGroup:   consumerName,
@@ -65,9 +69,7 @@ func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1
 	}
 
 	if retryConfig != nil {
-		ackWait, backOffDelays := utils.CalculateAckWaitAndBackoffDelays(retryConfig)
-		consumerConfig.AckWait = ackWait
-		consumerConfig.BackOff = backOffDelays
+		consumerConfig.AckWait = retryConfig.RequestTimeout + jitter
 		consumerConfig.MaxDeliver = retryConfig.RetryMax + 1
 	}
 
