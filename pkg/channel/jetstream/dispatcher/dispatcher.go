@@ -251,6 +251,7 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 		channelNamespace: config.Namespace,
 		logger:           logger,
 		ctx:              ctx,
+		natsConsumerInfo: info,
 	}
 
 	consumer.jsSub, err = d.js.QueueSubscribe(info.Config.DeliverSubject, info.Config.DeliverGroup, consumer.MsgHandler,

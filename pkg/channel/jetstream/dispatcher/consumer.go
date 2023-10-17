@@ -50,7 +50,8 @@ type Consumer struct {
 	reporter         eventingchannels.StatsReporter
 	channelNamespace string
 
-	jsSub *nats.Subscription
+	jsSub            *nats.Subscription
+	natsConsumerInfo *nats.ConsumerInfo
 
 	logger *zap.SugaredLogger
 	ctx    context.Context
@@ -142,7 +143,7 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 	te := kncloudevents.TypeExtractorTransformer("")
 
 	var cancel context.CancelFunc
-	ctx, cancel = context.WithDeadline(ctx, utils.CalcRequestDeadline(msg, c.sub.RetryConfig.RequestTimeout))
+	ctx, cancel = context.WithDeadline(ctx, utils.CalcRequestDeadline(msg, c.natsConsumerInfo.Config.AckWait))
 	defer cancel()
 
 	var noRetires = kncloudevents.NoRetries()

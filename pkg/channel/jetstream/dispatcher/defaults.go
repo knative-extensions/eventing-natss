@@ -65,10 +65,14 @@ func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1
 		DeliverGroup:   consumerName,
 		DeliverSubject: deliverSubject,
 		AckPolicy:      nats.AckExplicitPolicy,
+		AckWait:        template.AckWait.Duration,
 	}
 
 	if retryConfig != nil {
-		consumerConfig.AckWait = retryConfig.RequestTimeout + jitter
+		if retryConfig.RequestTimeout > 0 {
+			consumerConfig.AckWait = retryConfig.RequestTimeout + jitter
+		}
+
 		consumerConfig.MaxDeliver = retryConfig.RetryMax + 1
 	}
 
