@@ -142,7 +142,7 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 	te := kncloudevents.TypeExtractorTransformer("")
 
 	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, c.sub.RetryConfig.RequestTimeout)
+	ctx, cancel = context.WithDeadline(ctx, utils.CalcRequestDeadline(msg, c.sub.RetryConfig.RequestTimeout))
 	defer cancel()
 
 	var noRetires = kncloudevents.NoRetries()

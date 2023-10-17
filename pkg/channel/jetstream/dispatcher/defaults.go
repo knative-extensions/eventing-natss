@@ -59,7 +59,7 @@ func buildStreamConfig(streamName, subject string, config *v1alpha1.StreamConfig
 }
 
 func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1.ConsumerConfigTemplate, retryConfig *kncloudevents.RetryConfig) *nats.ConsumerConfig {
-	const jitter = time.Second * 5
+	const jitter = time.Millisecond * 500
 	consumerConfig := nats.ConsumerConfig{
 		Durable:        consumerName,
 		DeliverGroup:   consumerName,
