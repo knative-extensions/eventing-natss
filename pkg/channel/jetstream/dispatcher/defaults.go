@@ -65,7 +65,10 @@ func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1
 		DeliverGroup:   consumerName,
 		DeliverSubject: deliverSubject,
 		AckPolicy:      nats.AckExplicitPolicy,
-		AckWait:        template.AckWait.Duration,
+	}
+
+	if template != nil {
+		consumerConfig.AckWait = template.AckWait.Duration
 	}
 
 	if retryConfig != nil {
