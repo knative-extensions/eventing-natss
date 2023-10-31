@@ -48,7 +48,7 @@ import (
 // - Consumer per .spec.subscribers[] of a channel, forwarding events to the specified subscriber address.
 type Dispatcher struct {
 	receiver   *eventingchannels.MessageReceiver
-	dispatcher *eventingchannels.MessageDispatcherImpl
+	dispatcher *NatsMessageDispatcherImpl
 	reporter   eventingchannels.StatsReporter
 
 	js nats.JetStreamContext
@@ -71,7 +71,7 @@ func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, e
 	reporter := eventingchannels.NewStatsReporter(args.ContainerName, kmeta.ChildName(args.PodName, uuid.New().String()))
 
 	d := &Dispatcher{
-		dispatcher: eventingchannels.NewMessageDispatcher(logger.Desugar()),
+		dispatcher: NewNatsMessageDispatcher(logger.Desugar()),
 		reporter:   reporter,
 
 		js: args.JetStream,

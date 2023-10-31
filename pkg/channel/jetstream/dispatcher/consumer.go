@@ -19,16 +19,13 @@ package dispatcher
 import (
 	"context"
 	"errors"
-	"net/http"
 	"sync"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
-	"github.com/cloudevents/sdk-go/v2/protocol"
 	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/tracing"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
@@ -46,7 +43,7 @@ var (
 
 type Consumer struct {
 	sub              Subscription
-	dispatcher       eventingchannels.MessageDispatcher
+	dispatcher       NatsMessageDispatcher
 	reporter         eventingchannels.StatsReporter
 	channelNamespace string
 
@@ -77,31 +74,8 @@ func (c *Consumer) MsgHandler(msg *nats.Msg) {
 	go func() {
 		logger := c.logger.With(zap.String("msg_id", msg.Header.Get(nats.MsgIdHdr)))
 		ctx := logging.WithLogger(c.ctx, logger)
-		var result protocol.Result
 
-		result = c.doHandle(ctx, msg)
-
-		switch {
-		case protocol.IsACK(result):
-			if err := msg.Ack(nats.Context(ctx)); err != nil {
-				logger.Errorw("failed to Ack message after successful delivery to subscriber", zap.Error(err))
-			}
-		case protocol.IsNACK(result):
-			meta, err := msg.Metadata()
-			retryNumber := 1
-			if err != nil {
-				logger.Errorw("failed to get nats message metadata, assuming it is 1", zap.Error(err))
-			} else {
-				retryNumber = int(meta.NumDelivered)
-			}
-			if err := msg.NakWithDelay(utils.CalculateNakDelayForRetryNumber(retryNumber, c.sub.RetryConfig), nats.Context(ctx)); err != nil {
-				logger.Errorw("failed to Nack message after failed delivery to subscriber", zap.Error(err))
-			}
-		default:
-			if err := msg.Term(nats.Context(ctx)); err != nil {
-				logger.Errorw("failed to Term message after failed delivery to subscriber", zap.Error(err))
-			}
-		}
+		c.doHandle(ctx, msg)
 	}()
 }
 
@@ -109,7 +83,7 @@ func (c *Consumer) MsgHandler(msg *nats.Msg) {
 // - Ack (includes `nil`): the event was successfully delivered to the subscriber
 // - Nack: the event was not delivered to the subscriber, but it can be retried
 // - any other error: the event should be terminated and not retried
-func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result {
+func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) error {
 	logger := logging.FromContext(ctx)
 
 	if logger.Desugar().Core().Enabled(zap.DebugLevel) {
@@ -142,20 +116,16 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 
 	te := kncloudevents.TypeExtractorTransformer("")
 
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithDeadline(ctx, utils.CalcRequestDeadline(msg, c.natsConsumerInfo.Config.AckWait))
-	defer cancel()
-
-	var noRetires = kncloudevents.NoRetries()
-
-	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithRetries(
+	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithNatsRetries(
 		ctx,
 		message,
 		additionalHeaders,
 		c.sub.Subscriber,
 		c.sub.Reply,
 		c.sub.DeadLetter,
-		&noRetires,
+		c.sub.RetryConfig,
+		c.natsConsumerInfo.Config.AckWait,
+		msg,
 		&te,
 	)
 
@@ -170,18 +140,11 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 			zap.Error(err),
 			zap.Any("dispatch_resp_code", dispatchExecutionInfo.ResponseCode))
 
-		code := dispatchExecutionInfo.ResponseCode
-		if code/100 == 5 || code == http.StatusTooManyRequests || code == http.StatusRequestTimeout {
-			// tell JSM to redeliver the message later
-			return protocol.NewReceipt(false, "%w", err)
-		}
-
 		// let knative decide what to do with the message, if it wraps an Ack/Nack then that is what will happen,
 		// otherwise we will Terminate the message
 		return err
 	}
 
 	logger.Debug("message forwarded to downstream subscriber")
-
-	return protocol.ResultACK
+	return nil
 }
