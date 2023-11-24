@@ -106,9 +106,11 @@ data:
             secret:
                 name: ""                # a secret containing a `ca.crt` entry.
         connOpts:
-          retryOnFailedConnect: true    # should it reconnect on failed connection
-          maxReconnects: 50             # max reconnect attempts
-          reconnectWait: 2000           # delay between reconnect attempts
+          retryOnFailedConnect: true           # should it reconnect on failed connection
+          maxReconnects: 50                    # max reconnect attempts
+          reconnectWait: 2000                  # delay between reconnect attempts
+          reconnectJitterMilliseconds: 100     # upper bound of a random delay added ReconnectWait
+          reconnectJitterTLSMilliseconds: 1000 # upper bound of a random delay added ReconnectWait
 ```
 
 ## JetStream integration

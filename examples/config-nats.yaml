@@ -10,4 +10,5 @@ data:
       retryOnFailedConnect: true
       maxReconnects: 5
       reconnectWaitMilliseconds: 2000
-
+      reconnectJitterMilliseconds: 100
+      reconnectJitterTLSMilliseconds: 1000
