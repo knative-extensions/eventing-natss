@@ -1084,7 +1084,7 @@ k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.39.1-0.20231201013659-223846c4f819
+# knative.dev/eventing v0.39.1-0.20231201104147-3fcc78a3d716
 ## explicit; go 1.19
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
@@ -1094,6 +1094,7 @@ knative.dev/eventing/pkg/apis/eventing
 knative.dev/eventing/pkg/apis/eventing/v1
 knative.dev/eventing/pkg/apis/eventing/v1beta1
 knative.dev/eventing/pkg/apis/eventing/v1beta2
+knative.dev/eventing/pkg/apis/eventing/v1beta3
 knative.dev/eventing/pkg/apis/feature
 knative.dev/eventing/pkg/apis/flows
 knative.dev/eventing/pkg/apis/flows/v1
@@ -1117,6 +1118,8 @@ knative.dev/eventing/pkg/client/clientset/versioned/typed/eventing/v1beta1
 knative.dev/eventing/pkg/client/clientset/versioned/typed/eventing/v1beta1/fake
 knative.dev/eventing/pkg/client/clientset/versioned/typed/eventing/v1beta2
 knative.dev/eventing/pkg/client/clientset/versioned/typed/eventing/v1beta2/fake
+knative.dev/eventing/pkg/client/clientset/versioned/typed/eventing/v1beta3
+knative.dev/eventing/pkg/client/clientset/versioned/typed/eventing/v1beta3/fake
 knative.dev/eventing/pkg/client/clientset/versioned/typed/flows/v1
 knative.dev/eventing/pkg/client/clientset/versioned/typed/flows/v1/fake
 knative.dev/eventing/pkg/client/clientset/versioned/typed/messaging/v1
