@@ -20,10 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"github.com/nats-io/nats.go"
 	"io"
-	v1 "knative.dev/eventing/pkg/apis/duck/v1"
-	"knative.dev/eventing/pkg/kncloudevents"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -31,6 +28,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nats-io/nats.go"
+	v1 "knative.dev/eventing/pkg/apis/duck/v1"
+	"knative.dev/eventing/pkg/kncloudevents"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
