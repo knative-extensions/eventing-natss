@@ -135,8 +135,6 @@ func (d *NatsMessageDispatcherImpl) DispatchMessageWithNatsRetries(ctx context.C
 		}
 		additionalHeadersForDestination.Set("Prefer", "reply")
 
-		//ctxWithDeadline, cancel := context.WithDeadline(ctx, jsutils.CalcRequestDeadline(msg, ackWait))
-		//defer cancel()
 		noRetires.RequestTimeout = jsutils.CalcRequestTimeout(msg, ackWait)
 
 		ctx, responseMessage, responseAdditionalHeaders, dispatchExecutionInfo, err = d.executeRequest(ctx, destination, message, additionalHeadersForDestination, &noRetires, transformers...)
