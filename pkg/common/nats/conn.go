@@ -88,7 +88,7 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 	if config.ConnOpts != nil && config.ConnOpts.RetryOnFailedConnect {
 		reconnectWait := time.Duration(config.ConnOpts.ReconnectWaitMilliseconds) * time.Millisecond
 		reconnectJitter := defaultJitterIfEmpty(config.ConnOpts.ReconnectJitterMilliseconds, defaultReconnectJitter)
-		reconnectJitterTLS := defaultJitterIfEmpty(config.ConnOpts.ReconnectJitterMilliseconds, defaultReconnectJitterTLS)
+		reconnectJitterTLS := defaultJitterIfEmpty(config.ConnOpts.ReconnectJitterTLSMilliseconds, defaultReconnectJitterTLS)
 
 		logger.Infof("Configuring retries: %#v", config.ConnOpts)
 		opts = append(opts, nats.RetryOnFailedConnect(config.ConnOpts.RetryOnFailedConnect))
