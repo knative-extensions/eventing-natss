@@ -331,8 +331,8 @@ github.com/spf13/cobra
 # github.com/spf13/pflag v1.0.5
 ## explicit; go 1.12
 github.com/spf13/pflag
-# github.com/stretchr/testify v1.8.2
-## explicit; go 1.13
+# github.com/stretchr/testify v1.8.4
+## explicit; go 1.20
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/require
 # github.com/tsenart/vegeta/v12 v12.11.1
@@ -1082,7 +1082,7 @@ k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.39.1-0.20231215172822-5d7e104e57b6
+# knative.dev/eventing v0.39.1-0.20231218171021-31abcdb97d88
 ## explicit; go 1.19
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
@@ -1243,7 +1243,7 @@ knative.dev/pkg/webhook/json
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20231205070418-c92305962aa8
+# knative.dev/reconciler-test v0.0.0-20231218144542-b67e75b2c1f0
 ## explicit; go 1.20
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
