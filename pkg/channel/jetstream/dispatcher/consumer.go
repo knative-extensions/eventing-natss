@@ -19,13 +19,10 @@ package dispatcher
 import (
 	"context"
 	"errors"
-	"net/http"
 	"sync"
-	"time"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
-	"github.com/cloudevents/sdk-go/v2/protocol"
 	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
@@ -46,11 +43,12 @@ var (
 
 type Consumer struct {
 	sub              Subscription
-	dispatcher       eventingchannels.MessageDispatcher
+	dispatcher       NatsMessageDispatcher
 	reporter         eventingchannels.StatsReporter
 	channelNamespace string
 
-	jsSub *nats.Subscription
+	jsSub            *nats.Subscription
+	natsConsumerInfo *nats.ConsumerInfo
 
 	logger *zap.SugaredLogger
 	ctx    context.Context
@@ -73,58 +71,11 @@ func (c *Consumer) Close() error {
 }
 
 func (c *Consumer) MsgHandler(msg *nats.Msg) {
-	logger := c.logger.With(zap.String("msg_id", msg.Header.Get(nats.MsgIdHdr)))
-	ctx := logging.WithLogger(c.ctx, logger)
-	tickerCtx, tickerCancel := context.WithCancel(c.ctx)
-
-	tickerDone := make(chan struct{})
-
 	go func() {
-		defer close(tickerDone)
+		logger := c.logger.With(zap.String("msg_id", msg.Header.Get(nats.MsgIdHdr)))
+		ctx := logging.WithLogger(c.ctx, logger)
 
-		// TODO(dan-j): this should be a fraction of the Consumer's AckWait
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-tickerCtx.Done():
-				return
-			case <-ticker.C:
-				if err := msg.InProgress(nats.Context(tickerCtx)); err != nil && !errors.Is(err, context.Canceled) {
-					logging.FromContext(ctx).Errorw("failed to mark message as in progress", zap.Error(err))
-				}
-			}
-		}
-	}()
-
-	go func() {
-		var result protocol.Result
-
-		// wrap the handler in a local function so that the tickerCtx is cancelled even if a panic occurs.
-		func() {
-			defer tickerCancel()
-			result = c.doHandle(ctx, msg)
-		}()
-
-		// wait for the ticker to stop to prevent attempts to mark the message as in progress after it has been acked
-		// or nacked
-		<-tickerDone
-
-		switch {
-		case protocol.IsACK(result):
-			if err := msg.Ack(nats.Context(ctx)); err != nil {
-				logger.Errorw("failed to Ack message after successful delivery to subscriber", zap.Error(err))
-			}
-		case protocol.IsNACK(result):
-			if err := msg.Nak(nats.Context(ctx)); err != nil {
-				logger.Errorw("failed to Nack message after failed delivery to subscriber", zap.Error(err))
-			}
-		default:
-			if err := msg.Term(nats.Context(ctx)); err != nil {
-				logger.Errorw("failed to Term message after failed delivery to subscriber", zap.Error(err))
-			}
-		}
+		c.doHandle(ctx, msg)
 	}()
 }
 
@@ -132,7 +83,7 @@ func (c *Consumer) MsgHandler(msg *nats.Msg) {
 // - Ack (includes `nil`): the event was successfully delivered to the subscriber
 // - Nack: the event was not delivered to the subscriber, but it can be retried
 // - any other error: the event should be terminated and not retried
-func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result {
+func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) error {
 	logger := logging.FromContext(ctx)
 
 	if logger.Desugar().Core().Enabled(zap.DebugLevel) {
@@ -165,7 +116,7 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 
 	te := kncloudevents.TypeExtractorTransformer("")
 
-	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithRetries(
+	dispatchExecutionInfo, err := c.dispatcher.DispatchMessageWithNatsRetries(
 		ctx,
 		message,
 		additionalHeaders,
@@ -173,6 +124,8 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 		c.sub.Reply,
 		c.sub.DeadLetter,
 		c.sub.RetryConfig,
+		c.natsConsumerInfo.Config.AckWait,
+		msg,
 		&te,
 	)
 
@@ -187,18 +140,11 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) protocol.Result 
 			zap.Error(err),
 			zap.Any("dispatch_resp_code", dispatchExecutionInfo.ResponseCode))
 
-		code := dispatchExecutionInfo.ResponseCode
-		if code/100 == 5 || code == http.StatusTooManyRequests || code == http.StatusRequestTimeout {
-			// tell JSM to redeliver the message later
-			return protocol.NewReceipt(false, "%w", err)
-		}
-
 		// let knative decide what to do with the message, if it wraps an Ack/Nack then that is what will happen,
 		// otherwise we will Terminate the message
 		return err
 	}
 
 	logger.Debug("message forwarded to downstream subscriber")
-
-	return protocol.ResultACK
+	return nil
 }

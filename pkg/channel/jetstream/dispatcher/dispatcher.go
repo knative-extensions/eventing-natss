@@ -48,7 +48,7 @@ import (
 // - Consumer per .spec.subscribers[] of a channel, forwarding events to the specified subscriber address.
 type Dispatcher struct {
 	receiver   *eventingchannels.MessageReceiver
-	dispatcher *eventingchannels.MessageDispatcherImpl
+	dispatcher *NatsMessageDispatcherImpl
 	reporter   eventingchannels.StatsReporter
 
 	js nats.JetStreamContext
@@ -71,7 +71,7 @@ func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, e
 	reporter := eventingchannels.NewStatsReporter(args.ContainerName, kmeta.ChildName(args.PodName, uuid.New().String()))
 
 	d := &Dispatcher{
-		dispatcher: eventingchannels.NewMessageDispatcher(logger.Desugar()),
+		dispatcher: NewNatsMessageDispatcher(logger.Desugar()),
 		reporter:   reporter,
 
 		js: args.JetStream,
@@ -217,7 +217,7 @@ func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfi
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate)
+		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
 
 		_, err := d.js.UpdateConsumer(config.StreamName, consumerConfig)
 		if err != nil {
@@ -251,6 +251,7 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 		channelNamespace: config.Namespace,
 		logger:           logger,
 		ctx:              ctx,
+		natsConsumerInfo: info,
 	}
 
 	consumer.jsSub, err = d.js.QueueSubscribe(info.Config.DeliverSubject, info.Config.DeliverGroup, consumer.MsgHandler,
@@ -300,7 +301,7 @@ func (d *Dispatcher) getOrEnsureConsumer(ctx context.Context, config ChannelConf
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate)
+		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
 
 		// AddConsumer is idempotent so this will either create the consumer, update to match expected config, or no-op
 		info, err := d.js.AddConsumer(config.StreamName, consumerConfig)
