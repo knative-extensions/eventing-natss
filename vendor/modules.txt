@@ -1083,7 +1083,7 @@ k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.39.1-0.20240108131026-9b42160cdad0
+# knative.dev/eventing v0.39.1-0.20240108142705-9d21385192f7
 ## explicit; go 1.19
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
@@ -1148,16 +1148,16 @@ knative.dev/eventing/test/test_images
 knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/performance
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20240108131554-2f27d6e3e2fd
+# knative.dev/hack v0.0.0-20240108153050-3ea694d6dad7
 ## explicit; go 1.18
 knative.dev/hack
-# knative.dev/hack/schema v0.0.0-20240108131554-2f27d6e3e2fd
+# knative.dev/hack/schema v0.0.0-20240108153050-3ea694d6dad7
 ## explicit; go 1.18
 knative.dev/hack/schema/commands
 knative.dev/hack/schema/docs
 knative.dev/hack/schema/registry
 knative.dev/hack/schema/schema
-# knative.dev/pkg v0.0.0-20240108131035-4c0661087b13
+# knative.dev/pkg v0.0.0-20240108152118-de3e9cc204c9
 ## explicit; go 1.18
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
@@ -1244,7 +1244,7 @@ knative.dev/pkg/webhook/json
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20240108131541-84d713d6674d
+# knative.dev/reconciler-test v0.0.0-20240108142423-3c6c7d6ae81c
 ## explicit; go 1.20
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
