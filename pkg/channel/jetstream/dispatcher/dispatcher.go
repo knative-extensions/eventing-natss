@@ -39,6 +39,7 @@ import (
 
 	"knative.dev/eventing/pkg/auth"
 	eventingchannels "knative.dev/eventing/pkg/channel"
+	"knative.dev/eventing/pkg/eventingtls"
 	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/pkg/kmeta"
 	"knative.dev/pkg/logging"
@@ -64,7 +65,7 @@ type Dispatcher struct {
 	hostToChannelMap sync.Map
 
 	consumerUpdateLock sync.Mutex
-	channelSubscribers map[types.NamespacedName]sets.String
+	channelSubscribers map[types.NamespacedName]sets.Set[string]
 	consumers          map[types.UID]*Consumer
 }
 
@@ -75,7 +76,7 @@ func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, e
 
 	oidcTokenProvider := auth.NewOIDCTokenProvider(ctx)
 	d := &Dispatcher{
-		dispatcher: kncloudevents.NewDispatcher(oidcTokenProvider),
+		dispatcher: kncloudevents.NewDispatcher(eventingtls.ClientConfig{}, oidcTokenProvider),
 		reporter:   reporter,
 
 		js: args.JetStream,
@@ -84,7 +85,7 @@ func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, e
 		consumerNameFunc:    args.ConsumerNameFunc,
 		consumerSubjectFunc: args.ConsumerSubjectFunc,
 
-		channelSubscribers: make(map[types.NamespacedName]sets.String),
+		channelSubscribers: make(map[types.NamespacedName]sets.Set[string]),
 		consumers:          make(map[types.UID]*Consumer),
 	}
 
@@ -145,15 +146,15 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 
 	currentSubs, ok := d.channelSubscribers[channelNamespacedName]
 	if !ok {
-		currentSubs = sets.NewString()
+		currentSubs = sets.New[string]()
 	}
-	expectedSubs := sets.NewString(config.SubscriptionsUIDs()...)
+	expectedSubs := sets.New[string](config.SubscriptionsUIDs()...)
 
 	toAddSubs := expectedSubs.Difference(currentSubs)
 	toRemoveSubs := currentSubs.Difference(expectedSubs)
 	toUpdateSubs := currentSubs.Intersection(expectedSubs)
 
-	nextSubs := sets.NewString()
+	nextSubs := sets.New[string]()
 	var subErrs commonerr.SubscriberErrors
 	for _, sub := range config.Subscriptions {
 
