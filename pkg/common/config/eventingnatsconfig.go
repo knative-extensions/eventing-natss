@@ -71,4 +71,8 @@ type ConnOpts struct {
 	RetryOnFailedConnect bool `json:"retryOnFailedConnect,omitempty"`
 	// ReconnectWaitMilliseconds time between reconnects in milliseconds
 	ReconnectWaitMilliseconds int `json:"reconnectWaitMilliseconds,omitempty"`
+	// ReconnectJitterMilliseconds Option to set the upper bound of a random delay added ReconnectWait
+	ReconnectJitterMilliseconds int `json:"reconnectJitterMilliseconds,omitempty"`
+	// ReconnectJitterTLSMilliseconds Option to set the upper bound of a random delay added ReconnectWait
+	ReconnectJitterTLSMilliseconds int `json:"reconnectJitterTLSMilliseconds,omitempty"`
 }
