@@ -38,6 +38,11 @@ import (
 	"knative.dev/eventing-natss/pkg/common/constants"
 )
 
+const (
+	defaultReconnectJitter    = time.Duration(100) * time.Millisecond
+	defaultReconnectJitterTLS = time.Duration(1000) * time.Millisecond
+)
+
 var (
 	ErrBadCredentialFileOption = errors.New("bad auth.credentialFile option")
 	ErrBadMTLSOption           = errors.New("bad auth.tls option")
@@ -82,6 +87,9 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 	// reconnection options
 	if config.ConnOpts != nil && config.ConnOpts.RetryOnFailedConnect {
 		reconnectWait := time.Duration(config.ConnOpts.ReconnectWaitMilliseconds) * time.Millisecond
+		reconnectJitter := defaultJitterIfEmpty(config.ConnOpts.ReconnectJitterMilliseconds, defaultReconnectJitter)
+		reconnectJitterTLS := defaultJitterIfEmpty(config.ConnOpts.ReconnectJitterTLSMilliseconds, defaultReconnectJitterTLS)
+
 		logger.Infof("Configuring retries: %#v", config.ConnOpts)
 		opts = append(opts, nats.RetryOnFailedConnect(config.ConnOpts.RetryOnFailedConnect))
 		opts = append(opts, nats.ReconnectWait(reconnectWait))
@@ -93,7 +101,7 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 			logger.Debugf("Reconnect attempts left: %d", config.ConnOpts.MaxReconnects-attempts)
 			return reconnectWait
 		}))
-		opts = append(opts, nats.ReconnectJitter(1000, time.Millisecond))
+		opts = append(opts, nats.ReconnectJitter(reconnectJitter, reconnectJitterTLS))
 		opts = append(opts, nats.DisconnectErrHandler(func(conn *nats.Conn, err error) {
 			logger.Warnf("Disconnected from JSM: err=%v", err)
 			logger.Warnf("Disconnected from JSM: will attempt reconnects for %d", config.ConnOpts.MaxReconnects)
@@ -106,6 +114,13 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 		}))
 	}
 	return nats.Connect(url, opts...)
+}
+
+func defaultJitterIfEmpty(jitter int, defaultValue time.Duration) time.Duration {
+	if jitter == 0 {
+		return defaultValue
+	}
+	return time.Duration(jitter) * time.Millisecond
 }
 
 func buildAuthOption(ctx context.Context, config commonconfig.ENConfigAuth, secrets clientsetcorev1.SecretInterface) ([]nats.Option, error) {

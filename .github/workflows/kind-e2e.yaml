@@ -15,18 +15,18 @@ jobs:
       fail-fast: false # Keep running if one leg fails.
       matrix:
         k8s-version:
-        - v1.26.6
+        - v1.27.3
 
         eventing-version:
-        - knative-v1.11.4
+        - knative-v1.12.3
 
         # Map between K8s and KinD versions.
         # This is attempting to make it a bit clearer what's being tested.
         # See: https://github.com/kubernetes-sigs/kind/releases/tag/v0.9.0
         include:
-        - k8s-version: v1.26.6
+        - k8s-version: v1.27.3
           kind-version: v0.20.0
-          kind-image-sha: sha256:6e2d8b28a5b601defe327b98bd1c2d1930b49e5d8c512e1895099e4504007adb
+          kind-image-sha: sha256:3966ac761ae0136263ffdb6cfd4db23ef8a83cba8a463690e98317add2c9ba72
     env:
       KO_DOCKER_REPO: kind.local
       SYSTEM_NAMESPACE: knative-eventing
