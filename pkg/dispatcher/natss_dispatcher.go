@@ -39,6 +39,7 @@ import (
 	messagingv1 "knative.dev/eventing/pkg/apis/messaging/v1"
 	"knative.dev/eventing/pkg/auth"
 	eventingchannels "knative.dev/eventing/pkg/channel"
+	"knative.dev/eventing/pkg/eventingtls"
 	"knative.dev/eventing/pkg/kncloudevents"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 
@@ -105,7 +106,7 @@ func NewNatssDispatcher(ctx context.Context, args Args) (NatsDispatcher, error) 
 	oidcTokenProvider := auth.NewOIDCTokenProvider(ctx)
 	d := &subscriptionsSupervisor{
 		logger:         args.Logger,
-		dispatcher:     kncloudevents.NewDispatcher(oidcTokenProvider),
+		dispatcher:     kncloudevents.NewDispatcher(eventingtls.ClientConfig{}, oidcTokenProvider),
 		subscriptions:  make(SubscriptionChannelMapping),
 		connect:        make(chan struct{}, maxElements),
 		natssURL:       args.NatssURL,
