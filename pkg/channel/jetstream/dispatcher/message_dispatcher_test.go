@@ -20,16 +20,15 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"knative.dev/eventing/pkg/eventingtls"
+	"knative.dev/pkg/apis"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
-
-	"knative.dev/eventing/pkg/eventingtls"
-	"knative.dev/pkg/apis"
-	duckv1 "knative.dev/pkg/apis/duck/v1"
 
 	"github.com/nats-io/nats.go"
 	v1 "knative.dev/eventing/pkg/apis/duck/v1"
@@ -349,6 +348,8 @@ func TestDispatchMessage(t *testing.T) {
 	}
 	for n, tc := range testCases {
 		t.Run(n, func(t *testing.T) {
+			var err error
+
 			destHandler := &fakeHandler{
 				t:        t,
 				response: tc.fakeResponse,
@@ -410,7 +411,6 @@ func TestDispatchMessage(t *testing.T) {
 
 			// We need to do message -> event -> message to emulate the same transformers the event receiver would do
 			message := binding.ToMessage(&event)
-			var err error
 			ev, err := binding.ToEvent(ctx, message, binding.Transformers{transformer.AddTimeNow})
 			if err != nil {
 				t.Fatal(err)
