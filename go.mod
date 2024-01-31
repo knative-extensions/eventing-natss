@@ -22,11 +22,11 @@ require (
 	k8s.io/apimachinery v0.28.5
 	k8s.io/client-go v0.28.5
 	k8s.io/utils v0.0.0-20230406110748-d93618cff8a2
-	knative.dev/eventing v0.40.1-0.20240130065832-54f3952a38e7
+	knative.dev/eventing v0.40.1-0.20240130192152-02bde5498cb7
 	knative.dev/hack v0.0.0-20240123160146-ab9b69024c39
 	knative.dev/hack/schema v0.0.0-20240123160146-ab9b69024c39
 	knative.dev/pkg v0.0.0-20240129160226-b6659cc45066
-	knative.dev/reconciler-test v0.0.0-20240130065949-ab0a030b829a
+	knative.dev/reconciler-test v0.0.0-20240130133634-9a526085b198
 )
 
 require github.com/stretchr/testify v1.8.4
