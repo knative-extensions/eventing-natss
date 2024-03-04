@@ -25,7 +25,7 @@ jobs:
         # See: https://github.com/kubernetes-sigs/kind/releases/tag/v0.9.0
         include:
         - k8s-version: v1.27.3
-          kind-version: v0.20.0
+          kind-version: v0.22.0
           kind-image-sha: sha256:3966ac761ae0136263ffdb6cfd4db23ef8a83cba8a463690e98317add2c9ba72
     env:
       KO_DOCKER_REPO: kind.local
