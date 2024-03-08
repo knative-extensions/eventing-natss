@@ -22,7 +22,7 @@ require (
 	k8s.io/apimachinery v0.29.2
 	k8s.io/client-go v0.29.2
 	k8s.io/utils v0.0.0-20240102154912-e7106e64919e
-	knative.dev/eventing v0.40.1-0.20240307115035-f81f1d3dd4c3
+	knative.dev/eventing v0.40.1-0.20240308124856-6f944bf4c7a9
 	knative.dev/hack v0.0.0-20240302114326-e6dedc74dc47
 	knative.dev/hack/schema v0.0.0-20240302114326-e6dedc74dc47
 	knative.dev/pkg v0.0.0-20240305144923-6b13f01ae5f7
@@ -51,7 +51,7 @@ require (
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.9.0 // indirect
-	github.com/go-jose/go-jose/v3 v3.0.1 // indirect
+	github.com/go-jose/go-jose/v3 v3.0.3 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
