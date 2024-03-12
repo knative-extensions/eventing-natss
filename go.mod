@@ -25,7 +25,7 @@ require (
 	knative.dev/eventing v0.40.1-0.20240311130728-8a18b168acd5
 	knative.dev/hack v0.0.0-20240302114326-e6dedc74dc47
 	knative.dev/hack/schema v0.0.0-20240302114326-e6dedc74dc47
-	knative.dev/pkg v0.0.0-20240311075308-106b052bd1a4
+	knative.dev/pkg v0.0.0-20240311204931-2c15a6fd07af
 	knative.dev/reconciler-test v0.0.0-20240306190141-db9cb7135914
 )
 
@@ -90,7 +90,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.19.0 // indirect
 	github.com/prometheus/client_model v0.6.0 // indirect
-	github.com/prometheus/common v0.49.0 // indirect
+	github.com/prometheus/common v0.50.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/prometheus/statsd_exporter v0.22.7 // indirect
 	github.com/rickb777/date v1.13.0 // indirect
