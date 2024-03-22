@@ -74,6 +74,12 @@ const (
 	ackWait      = 30 * time.Second
 )
 
+var (
+	retryCount    int32 = 3
+	backoffDelay        = "PT1S"
+	backoffPolicy       = v1.BackoffPolicyLinear
+)
+
 func TestDispatchMessage(t *testing.T) {
 	testCases := map[string]struct {
 		sendToDestination         bool
@@ -90,6 +96,7 @@ func TestDispatchMessage(t *testing.T) {
 		expectedReplyRequest      *requestValidation
 		expectedDeadLetterRequest *requestValidation
 		lastReceiver              string
+		delivery                  *v1.DeliverySpec
 	}{
 		"destination - only": {
 			sendToDestination: true,
@@ -792,6 +799,47 @@ func TestDispatchMessage(t *testing.T) {
 
 			lastReceiver: "reply",
 		},
+		"error response and retries": {
+			delivery: &v1.DeliverySpec{
+				Retry:         &retryCount,
+				BackoffDelay:  &backoffDelay,
+				BackoffPolicy: &backoffPolicy,
+			},
+			sendToDestination: true,
+			header: map[string][]string{
+				// do-not-forward should not get forwarded.
+				"do-not-forward": {"header"},
+				"x-request-id":   {"id123"},
+				"knative-1":      {"knative-1-value"},
+				"knative-2":      {"knative-2-value"},
+			},
+			body: "destination",
+			eventExtensions: map[string]string{
+				"abc": `"ce-abc-value"`,
+			},
+			expectedDestRequest: &requestValidation{
+				Headers: map[string][]string{
+					"x-request-id":   {"id123"},
+					"knative-1":      {"knative-1-value"},
+					"knative-2":      {"knative-2-value"},
+					"prefer":         {"reply"},
+					"traceparent":    {"ignored-value-header"},
+					"ce-abc":         {`"ce-abc-value"`},
+					"ce-id":          {"ignored-value-header"},
+					"ce-time":        {"ignored-value-header"},
+					"ce-source":      {testCeSource},
+					"ce-type":        {testCeType},
+					"ce-specversion": {cloudevents.VersionV1},
+				},
+				Body: `"destination"`,
+			},
+			fakeResponse: &http.Response{
+				StatusCode: http.StatusGatewayTimeout,
+				Body:       io.NopCloser(bytes.NewBufferString("destination-response")),
+			},
+			expectedErr:  true,
+			lastReceiver: "destination",
+		},
 	}
 	for n, tc := range testCases {
 		t.Run(n, func(t *testing.T) {
@@ -863,12 +911,23 @@ func TestDispatchMessage(t *testing.T) {
 				headers = utils.PassThroughHeaders(tc.header)
 			}
 			msg := nats.Msg{}
-			noRetries := kncloudevents.NoRetries()
-			backoffLinear := v1.BackoffPolicyLinear
-			noRetries.BackoffPolicy = &backoffLinear
-			backoffDelay := "5s"
-			noRetries.BackoffDelay = &backoffDelay
-			info, err := md.DispatchMessageWithNatsRetries(ctx, message, headers, destination, reply, deadLetterSink, &noRetries, ackWait, &msg)
+
+			var retryConfig kncloudevents.RetryConfig
+			if tc.delivery == nil {
+				retryConfig = kncloudevents.NoRetries()
+				backoffLinear := v1.BackoffPolicyLinear
+				retryConfig.BackoffPolicy = &backoffLinear
+				backoffDelay := "5s"
+				retryConfig.BackoffDelay = &backoffDelay
+			} else {
+				retryConfig = kncloudevents.RetryConfig{
+					RetryMax:      int(*tc.delivery.Retry),
+					BackoffPolicy: tc.delivery.BackoffPolicy,
+					BackoffDelay:  tc.delivery.BackoffDelay,
+				}
+			}
+
+			info, err := md.DispatchMessageWithNatsRetries(ctx, message, headers, destination, reply, deadLetterSink, &retryConfig, ackWait, &msg)
 
 			if tc.lastReceiver != "" {
 				switch tc.lastReceiver {
