@@ -112,7 +112,13 @@ func TestDispatcher_ReconcileConsumers(t *testing.T) {
 		UID: subscriber2UID,
 	})
 
-	err = d.ReconcileConsumers(ctx, *configNew, true)
+	err = d.ReconcileConsumers(ctx, *configNew, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newConfig := createChannelConfig(nc)
+	err = d.ReconcileConsumers(ctx, *newConfig, true)
 	if err != nil {
 		t.Fatal(err)
 	}
