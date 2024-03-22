@@ -840,6 +840,48 @@ func TestDispatchMessage(t *testing.T) {
 			expectedErr:  true,
 			lastReceiver: "destination",
 		},
+		"error response term message": {
+			delivery: &v1.DeliverySpec{
+				Retry:         &retryCount,
+				BackoffDelay:  &backoffDelay,
+				BackoffPolicy: &backoffPolicy,
+			},
+			sendToDestination: true,
+			sendToReply:       true,
+			header: map[string][]string{
+				// do-not-forward should not get forwarded.
+				"do-not-forward": {"header"},
+				"x-request-id":   {"id123"},
+				"knative-1":      {"knative-1-value"},
+				"knative-2":      {"knative-2-value"},
+			},
+			body: "destination",
+			eventExtensions: map[string]string{
+				"abc": `"ce-abc-value"`,
+			},
+			expectedDestRequest: &requestValidation{
+				Headers: map[string][]string{
+					"x-request-id":   {"id123"},
+					"knative-1":      {"knative-1-value"},
+					"knative-2":      {"knative-2-value"},
+					"prefer":         {"reply"},
+					"traceparent":    {"ignored-value-header"},
+					"ce-abc":         {`"ce-abc-value"`},
+					"ce-id":          {"ignored-value-header"},
+					"ce-time":        {"ignored-value-header"},
+					"ce-source":      {testCeSource},
+					"ce-type":        {testCeType},
+					"ce-specversion": {cloudevents.VersionV1},
+				},
+				Body: `"destination"`,
+			},
+			fakeResponse: &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Body:       io.NopCloser(bytes.NewBufferString("destination-response")),
+			},
+			expectedErr:  true,
+			lastReceiver: "destination",
+		},
 	}
 	for n, tc := range testCases {
 		t.Run(n, func(t *testing.T) {
