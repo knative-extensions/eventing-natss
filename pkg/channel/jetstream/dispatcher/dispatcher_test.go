@@ -18,6 +18,10 @@ package dispatcher
 import (
 	"context"
 	"testing"
+	"time"
+
+	"knative.dev/eventing/pkg/channel/fanout"
+	"knative.dev/eventing/pkg/kncloudevents"
 
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -67,8 +71,15 @@ func TestDispatcher_ReconcileConsumers(t *testing.T) {
 	ctx = controller.WithEventRecorder(ctx, eventRecorder)
 
 	nc := reconciletesting.NewNatsJetStreamChannel(testNS, ncName, reconciletesting.WithNatsJetStreamChannelSubscribers(subscribers))
+	sub := fanout.Subscription{
+		RetryConfig: &kncloudevents.RetryConfig{
+			RequestTimeout: time.Second,
+			RetryMax:       1,
+		},
+	}
 	config := createChannelConfig(nc, Subscription{
-		UID: subscriber1UID,
+		UID:          subscriber1UID,
+		Subscription: sub,
 	})
 
 	d, err := NewDispatcher(ctx, NatsDispatcherArgs{

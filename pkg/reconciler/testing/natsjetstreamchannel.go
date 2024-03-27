@@ -42,7 +42,9 @@ func NewNatsJetStreamChannel(name, namespace string, ncopt ...NatsJetStreamChann
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: v1alpha1.NatsJetStreamChannelSpec{},
+		Spec: v1alpha1.NatsJetStreamChannelSpec{
+			ConsumerConfigTemplate: &v1alpha1.ConsumerConfigTemplate{},
+		},
 	}
 	for _, opt := range ncopt {
 		opt(nc)
