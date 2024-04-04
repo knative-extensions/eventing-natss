@@ -22,11 +22,11 @@ require (
 	k8s.io/apimachinery v0.29.2
 	k8s.io/client-go v0.29.2
 	k8s.io/utils v0.0.0-20240102154912-e7106e64919e
-	knative.dev/eventing v0.40.1-0.20240402102742-4cec55450957
-	knative.dev/hack v0.0.0-20240327150553-47368d631660
-	knative.dev/hack/schema v0.0.0-20240327150553-47368d631660
-	knative.dev/pkg v0.0.0-20240402144403-fef5da99bd14
-	knative.dev/reconciler-test v0.0.0-20240327131444-6346b918a853
+	knative.dev/eventing v0.40.1-0.20240404013432-ce5b77fc2d0c
+	knative.dev/hack v0.0.0-20240404013450-1133b37da8d7
+	knative.dev/hack/schema v0.0.0-20240404013450-1133b37da8d7
+	knative.dev/pkg v0.0.0-20240404013351-5d4af76051e4
+	knative.dev/reconciler-test v0.0.0-20240404013441-de880e87410f
 )
 
 require github.com/stretchr/testify v1.8.4
@@ -101,6 +101,7 @@ require (
 	github.com/spf13/cobra v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tsenart/vegeta/v12 v12.11.1 // indirect
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/automaxprocs v1.5.3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
