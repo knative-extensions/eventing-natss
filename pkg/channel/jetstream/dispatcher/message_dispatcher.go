@@ -70,10 +70,7 @@ type NatsMessageDispatcherImpl struct {
 }
 
 func NewNatsMessageDispatcher(logger *zap.Logger) *NatsMessageDispatcherImpl {
-	sender, err := kncloudevents.NewHTTPMessageSenderWithTarget("")
-	if err != nil {
-		logger.Fatal("Unable to create cloudevents binding sender", zap.Error(err))
-	}
+	sender, _ := kncloudevents.NewHTTPMessageSenderWithTarget("")
 	return NewMessageDispatcherFromSender(logger, sender)
 }
 
@@ -111,7 +108,7 @@ func (d *NatsMessageDispatcherImpl) DispatchMessageWithNatsRetries(ctx context.C
 		retryNumber = int(meta.NumDelivered)
 	}
 
-	if retryNumber <= retriesConfig.RetryMax {
+	if (retriesConfig != nil) && (retryNumber <= retriesConfig.RetryMax) {
 		lastTry = false
 	} else {
 		lastTry = true
@@ -212,8 +209,11 @@ func (d *NatsMessageDispatcherImpl) processDispatchResult(ctx context.Context, m
 			zap.Any("dispatch_resp_code", dispatchExecutionInfo.ResponseCode))
 
 		code := dispatchExecutionInfo.ResponseCode
-		if code/100 == 5 || code == nethttp.StatusTooManyRequests || code == nethttp.StatusRequestTimeout {
-			// tell JSM to redeliver the message later
+		if retryConfig == nil || retryNumber >= retryConfig.RetryMax {
+			// no more retries, just ACK
+			result = protocol.ResultACK
+		} else if code/100 == 5 || code == nethttp.StatusTooManyRequests || code == nethttp.StatusRequestTimeout {
+			// NACK, tell JSM to redeliver the message later
 			result = protocol.NewReceipt(false, "%w", err)
 		} else {
 			result = err
