@@ -55,31 +55,6 @@ func ConvertReplayPolicy(in v1alpha1.ReplayPolicy, def nats.ReplayPolicy) nats.R
 	return def
 }
 
-func CalcRequestDeadline(msg *nats.Msg, ackWait time.Duration) time.Time {
-	const jitter = time.Millisecond * 200
-
-	// if previous deliveries were explicitly nacked earlier than the deadline, then our actual deadline will be earlier
-	// than the deadline above
-	ackDeadlineFromNow := time.Now().Add(ackWait).Add(-jitter)
-
-	meta, err := msg.Metadata()
-	if err != nil {
-		return ackDeadlineFromNow
-	}
-
-	// if each delivery has timed out, then multiplying the number of deliveries by the ack wait will give us the
-	// duration from publish which this attempt will be ack-waited
-	ackDurationFromPublish := time.Duration(meta.NumDelivered) * ackWait
-
-	// the deadline is the published timestamp plus our duration calculated above
-	deadline := meta.Timestamp.Add(ackDurationFromPublish).Add(-jitter)
-
-	if deadline.After(ackDeadlineFromNow) {
-		deadline = ackDeadlineFromNow
-	}
-	return deadline
-}
-
 func CalcRequestTimeout(msg *nats.Msg, ackWait time.Duration) time.Duration {
 	const jitter = time.Millisecond * 200
 
@@ -111,29 +86,6 @@ func CalculateNakDelayForRetryNumber(attemptNum int, config *kncloudevents.Retry
 }
 
 type backoffFunc func(attemptNum int, delayDuration time.Duration) time.Duration
-
-func CalculateAckWaitAndBackoffDelays(config *kncloudevents.RetryConfig) (time.Duration, []time.Duration) {
-	var delays = make([]time.Duration, config.RetryMax)
-	var totalDelays = config.RequestTimeout * time.Duration(config.RetryMax)
-	// 1 second jitter
-	const jitter = 1 * time.Second
-
-	backoff, backoffDelay := parseBackoffFuncAndDelay(config)
-
-	for i := 0; i < config.RetryMax; i++ {
-		var nextDelay time.Duration
-		if i == 0 {
-			// the first backoff should be just request timeout + jitter
-			nextDelay = 0
-		} else {
-			nextDelay = backoff(i-1, backoffDelay)
-		}
-
-		totalDelays += nextDelay
-		delays[i] = nextDelay + config.RequestTimeout + jitter
-	}
-	return totalDelays, delays
-}
 
 func LinearBackoff(attemptNum int, delayDuration time.Duration) time.Duration {
 	return delayDuration * time.Duration(attemptNum)
