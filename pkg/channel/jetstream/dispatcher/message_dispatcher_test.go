@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -27,11 +28,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
+
+	"github.com/nats-io/nats-server/v2/server"
+	natsserver "github.com/nats-io/nats-server/v2/test"
+	dispatchertesting "knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/testing"
+
 	"knative.dev/eventing/pkg/eventingtls"
 	"knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 
-	"github.com/nats-io/nats.go"
 	v1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/eventing/pkg/kncloudevents"
 
@@ -437,6 +443,11 @@ func TestDispatchMessage(t *testing.T) {
 			lastReceiver: "destination",
 		},
 	}
+
+	s := dispatchertesting.RunBasicJetstreamServer()
+	defer dispatchertesting.ShutdownJSServerAndRemoveStorage(t, s)
+	_, js := dispatchertesting.JsClient(t, s)
+
 	for n, tc := range testCases {
 		t.Run(n, func(t *testing.T) {
 			destHandler := &fakeHandler{
@@ -515,7 +526,23 @@ func TestDispatchMessage(t *testing.T) {
 			if tc.header != nil {
 				headers = utils.PassThroughHeaders(tc.header)
 			}
-			msg := nats.Msg{}
+			_, err = js.AddStream(&nats.StreamConfig{
+				Name:     "test",
+				Storage:  nats.MemoryStorage,
+				Subjects: []string{"test.>"},
+			})
+			if err != nil {
+				log.Fatalf("Failed to add stream, %s", err)
+			}
+			_, err = js.Publish("test.data", []byte("Here is a string...."))
+			if err != nil {
+				log.Fatalf("Failed to publish msg, %s", err)
+			}
+			natsSub, _ := js.SubscribeSync("test.>")
+			msg, err := natsSub.NextMsg(50 * time.Millisecond)
+			if err != nil {
+				log.Fatalf("Failed to read msg: %s", err)
+			}
 
 			var retryConfig kncloudevents.RetryConfig
 			if tc.delivery == nil {
@@ -539,7 +566,7 @@ func TestDispatchMessage(t *testing.T) {
 				message,
 				destination,
 				ackWait,
-				&msg,
+				msg,
 				WithReply(&replyDestination),
 				WithDeadLetterSink(&deadLetterSinkDestination),
 				WithRetryConfig(&retryConfig),
@@ -704,4 +731,14 @@ func canonicalizeHeaders(rvs ...requestValidation) {
 			}
 		}
 	}
+}
+
+func RunServerOnPort(port int) *server.Server {
+	opts := natsserver.DefaultTestOptions
+	opts.Port = port
+	return RunServerWithOptions(&opts)
+}
+
+func RunServerWithOptions(opts *server.Options) *server.Server {
+	return natsserver.RunServer(opts)
 }
