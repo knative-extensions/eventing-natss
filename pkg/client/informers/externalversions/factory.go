@@ -89,6 +89,14 @@ func WithTransform(transform cache.TransformFunc) SharedInformerOption {
 	}
 }
 
+// WithTransform sets a transform on all informers.
+func WithTransform(transform cache.TransformFunc) SharedInformerOption {
+	return func(factory *sharedInformerFactory) *sharedInformerFactory {
+		factory.transform = transform
+		return factory
+	}
+}
+
 // NewSharedInformerFactory constructs a new instance of sharedInformerFactory for all namespaces.
 func NewSharedInformerFactory(client versioned.Interface, defaultResync time.Duration) SharedInformerFactory {
 	return NewSharedInformerFactoryWithOptions(client, defaultResync)
