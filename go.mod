@@ -25,8 +25,8 @@ require (
 	knative.dev/eventing v0.41.1-0.20240507013633-96e5c1853b7c
 	knative.dev/hack v0.0.0-20240507013718-68e3bfb39d11
 	knative.dev/hack/schema v0.0.0-20240507013718-68e3bfb39d11
-	knative.dev/pkg v0.0.0-20240507013158-1d1616aa15db
-	knative.dev/reconciler-test v0.0.0-20240507013704-7b06e50b743e
+	knative.dev/pkg v0.0.0-20240507092124-360b72e4948e
+	knative.dev/reconciler-test v0.0.0-20240507120221-c76096ce6188
 )
 
 require github.com/stretchr/testify v1.8.4
