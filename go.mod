@@ -29,7 +29,11 @@ require (
 	knative.dev/reconciler-test v0.0.0-20240417065737-ca905cbb09a9
 )
 
-require github.com/stretchr/testify v1.8.4
+require (
+	github.com/hashicorp/go-retryablehttp v0.6.7
+	github.com/rickb777/date v1.13.0
+	github.com/stretchr/testify v1.8.4
+)
 
 require (
 	cloud.google.com/go/compute v1.24.0 // indirect
@@ -71,7 +75,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
 	github.com/hashicorp/go-hclog v1.5.0 // indirect
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
-	github.com/hashicorp/go-retryablehttp v0.6.7 // indirect
 	github.com/hashicorp/raft v1.5.0 // indirect
 	github.com/imdario/mergo v0.3.9 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -93,7 +96,6 @@ require (
 	github.com/prometheus/common v0.52.3 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/prometheus/statsd_exporter v0.22.7 // indirect
-	github.com/rickb777/date v1.13.0 // indirect
 	github.com/rickb777/plural v1.2.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rogpeppe/fastuuid v1.2.0 // indirect
