@@ -17,9 +17,12 @@ limitations under the License.
 package dispatcher
 
 import (
+	"time"
+
 	"github.com/nats-io/nats.go"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
+	"knative.dev/eventing/pkg/kncloudevents"
 )
 
 func buildStreamConfig(streamName, subject string, config *v1alpha1.StreamConfig) *nats.StreamConfig {
@@ -55,7 +58,8 @@ func buildStreamConfig(streamName, subject string, config *v1alpha1.StreamConfig
 
 }
 
-func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1.ConsumerConfigTemplate) *nats.ConsumerConfig {
+func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1.ConsumerConfigTemplate, retryConfig *kncloudevents.RetryConfig) *nats.ConsumerConfig {
+	const jitter = time.Millisecond * 500
 	consumerConfig := nats.ConsumerConfig{
 		Durable:        consumerName,
 		DeliverGroup:   consumerName,
@@ -64,10 +68,21 @@ func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1
 	}
 
 	if template != nil {
+		consumerConfig.AckWait = template.AckWait.Duration
+	}
+
+	if retryConfig != nil {
+		if retryConfig.RequestTimeout > 0 {
+			consumerConfig.AckWait = retryConfig.RequestTimeout + jitter
+		}
+
+		consumerConfig.MaxDeliver = retryConfig.RetryMax + 1
+	}
+
+	if template != nil {
 		consumerConfig.DeliverPolicy = utils.ConvertDeliverPolicy(template.DeliverPolicy, nats.DeliverAllPolicy)
 		consumerConfig.OptStartSeq = template.OptStartSeq
-		consumerConfig.AckWait = template.AckWait.Duration
-		consumerConfig.MaxDeliver = template.MaxDeliver
+		// ignoring template.AckWait and template.MaxDeliver
 		consumerConfig.FilterSubject = template.FilterSubject
 		consumerConfig.ReplayPolicy = utils.ConvertReplayPolicy(template.ReplayPolicy, nats.ReplayInstantPolicy)
 		consumerConfig.RateLimit = template.RateLimitBPS
