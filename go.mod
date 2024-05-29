@@ -22,17 +22,17 @@ require (
 	k8s.io/apimachinery v0.29.2
 	k8s.io/client-go v0.29.2
 	k8s.io/utils v0.0.0-20240102154912-e7106e64919e
-	knative.dev/eventing v0.41.1-0.20240510202101-157296784e29
-	knative.dev/hack v0.0.0-20240507013718-68e3bfb39d11
-	knative.dev/hack/schema v0.0.0-20240507013718-68e3bfb39d11
-	knative.dev/pkg v0.0.0-20240513091600-b1fd04d5c458
-	knative.dev/reconciler-test v0.0.0-20240507120221-c76096ce6188
+	knative.dev/eventing v0.41.1-0.20240529130930-2a11bb8636bf
+	knative.dev/hack v0.0.0-20240529131459-3b6d6441e7ea
+	knative.dev/hack/schema v0.0.0-20240529131459-3b6d6441e7ea
+	knative.dev/pkg v0.0.0-20240529130935-ff4756ab9454
+	knative.dev/reconciler-test v0.0.0-20240529131503-5c0e9f6b29f0
 )
 
 require (
 	github.com/hashicorp/go-retryablehttp v0.6.7
 	github.com/rickb777/date v1.13.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 )
 
 require (
@@ -117,10 +117,10 @@ require (
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.21.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	google.golang.org/api v0.180.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240415180920-8c6c420018be // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240429193739-8cf5692501f6 // indirect
-	google.golang.org/grpc v1.63.2 // indirect
+	google.golang.org/api v0.181.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240506185236-b8a5c65736ae // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240513163218-0867130af1f8 // indirect
+	google.golang.org/grpc v1.64.0 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
