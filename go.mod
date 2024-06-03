@@ -22,11 +22,11 @@ require (
 	k8s.io/apimachinery v0.29.2
 	k8s.io/client-go v0.29.2
 	k8s.io/utils v0.0.0-20240102154912-e7106e64919e
-	knative.dev/eventing v0.41.1-0.20240530202412-a58c1352db05
+	knative.dev/eventing v0.41.1-0.20240531140411-c53b44d67c71
 	knative.dev/hack v0.0.0-20240529131459-3b6d6441e7ea
 	knative.dev/hack/schema v0.0.0-20240529131459-3b6d6441e7ea
-	knative.dev/pkg v0.0.0-20240529181700-7d52a43448b2
-	knative.dev/reconciler-test v0.0.0-20240530174226-c8f73e2fdcd8
+	knative.dev/pkg v0.0.0-20240602234151-229e527a1366
+	knative.dev/reconciler-test v0.0.0-20240531150205-2723f53aa8ed
 )
 
 require (
