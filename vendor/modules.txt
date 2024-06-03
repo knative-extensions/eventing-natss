@@ -460,14 +460,14 @@ golang.org/x/tools/internal/stdlib
 # gomodules.xyz/jsonpatch/v2 v2.4.0
 ## explicit; go 1.20
 gomodules.xyz/jsonpatch/v2
-# google.golang.org/api v0.181.0
+# google.golang.org/api v0.182.0
 ## explicit; go 1.20
 google.golang.org/api/support/bundler
-# google.golang.org/genproto/googleapis/api v0.0.0-20240506185236-b8a5c65736ae
+# google.golang.org/genproto/googleapis/api v0.0.0-20240513163218-0867130af1f8
 ## explicit; go 1.19
 google.golang.org/genproto/googleapis/api/httpbody
-# google.golang.org/genproto/googleapis/rpc v0.0.0-20240513163218-0867130af1f8
-## explicit; go 1.19
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20240521202816-d264139d666e
+## explicit; go 1.20
 google.golang.org/genproto/googleapis/rpc/status
 # google.golang.org/grpc v1.64.0
 ## explicit; go 1.19
@@ -1076,7 +1076,7 @@ k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.41.1-0.20240531140411-c53b44d67c71
+# knative.dev/eventing v0.41.1-0.20240603072148-08b0813c5f8c
 ## explicit; go 1.21
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
@@ -1151,7 +1151,7 @@ knative.dev/hack/schema/commands
 knative.dev/hack/schema/docs
 knative.dev/hack/schema/registry
 knative.dev/hack/schema/schema
-# knative.dev/pkg v0.0.0-20240602234151-229e527a1366
+# knative.dev/pkg v0.0.0-20240603080447-170996133132
 ## explicit; go 1.21
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
