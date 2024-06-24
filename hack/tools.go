@@ -25,7 +25,6 @@ import (
 
 	// Test images from eventing
 	_ "knative.dev/eventing/test/test_images/event-sender"
-	_ "knative.dev/eventing/test/test_images/performance"
 	_ "knative.dev/eventing/test/test_images/print"
 
 	// eventshub is a cloudevents sender/receiver utility for e2e testing.
