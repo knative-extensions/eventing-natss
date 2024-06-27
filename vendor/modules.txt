@@ -162,15 +162,13 @@ github.com/google/uuid
 github.com/grpc-ecosystem/grpc-gateway/v2/internal/httprule
 github.com/grpc-ecosystem/grpc-gateway/v2/runtime
 github.com/grpc-ecosystem/grpc-gateway/v2/utilities
-# github.com/hashicorp/go-cleanhttp v0.5.1
-## explicit
-github.com/hashicorp/go-cleanhttp
-# github.com/hashicorp/go-hclog v1.5.0
+# github.com/hashicorp/go-cleanhttp v0.5.2
 ## explicit; go 1.13
+github.com/hashicorp/go-cleanhttp
 # github.com/hashicorp/go-msgpack v0.5.5
 ## explicit
-# github.com/hashicorp/go-retryablehttp v0.6.7
-## explicit; go 1.13
+# github.com/hashicorp/go-retryablehttp v0.7.7
+## explicit; go 1.19
 github.com/hashicorp/go-retryablehttp
 # github.com/hashicorp/golang-lru v1.0.2
 ## explicit; go 1.12
@@ -1035,8 +1033,8 @@ k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.41.1-0.20240621162417-825202fdffc5
-## explicit; go 1.21
+# knative.dev/eventing v0.41.1-0.20240627060150-a6ac8111e82f
+## explicit; go 1.22
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
 knative.dev/eventing/pkg/apis/duck
@@ -1111,7 +1109,7 @@ knative.dev/hack/schema/commands
 knative.dev/hack/schema/docs
 knative.dev/hack/schema/registry
 knative.dev/hack/schema/schema
-# knative.dev/pkg v0.0.0-20240621201938-fc0720b7a660
+# knative.dev/pkg v0.0.0-20240626134149-3f6a546ac3a4
 ## explicit; go 1.22
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
