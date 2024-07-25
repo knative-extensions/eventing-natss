@@ -129,7 +129,7 @@ jobs:
 
         # Probably don't need this anymore, but keep until we
         # have something that waits for pods to becomes ready.
-        sleep 60
+        sleep 120
 
         # For debugging.
         kubectl get pods --all-namespaces
