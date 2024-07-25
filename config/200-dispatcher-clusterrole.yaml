@@ -29,6 +29,19 @@ rules:
       - update
       - patch
   - apiGroups:
+      - eventing.knative.dev
+    resources:
+      - eventpolicies
+      - eventpolicies/status
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+      - patch
+      - watch
+  - apiGroups:
       - messaging.knative.dev
     resources:
       - natsschannels/finalizers

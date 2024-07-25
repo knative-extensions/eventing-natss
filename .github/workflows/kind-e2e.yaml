@@ -18,7 +18,7 @@ jobs:
         - v1.29.2
 
         eventing-version:
-        - knative-v1.12.3
+        - knative-v1.15.0
 
         # Map between K8s and KinD versions.
         # This is attempting to make it a bit clearer what's being tested.
