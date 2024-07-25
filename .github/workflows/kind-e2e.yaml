@@ -40,9 +40,7 @@ jobs:
         fi
 
     - name: Set up Go 1.21.x
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.21.x
+      uses: knative/actions/setup-go@main
 
     - name: Install Dependencies
       run: |
