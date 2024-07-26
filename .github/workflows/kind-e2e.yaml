@@ -39,10 +39,8 @@ jobs:
           echo "SLACK_WEBHOOK=exists" >> $GITHUB_ENV
         fi
 
-    - name: Set up Go 1.21.x
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.21.x
+    - name: Set up Go
+      uses: knative/actions/setup-go@main
 
     - name: Install ko
       uses: ko-build/setup-ko@v0.7
