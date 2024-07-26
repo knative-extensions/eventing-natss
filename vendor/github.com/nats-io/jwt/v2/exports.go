@@ -44,18 +44,18 @@ const (
 // are in nanoseconds.
 // see https://github.com/nats-io/nats-server/blob/main/server/accounts.go#L524
 // e.g.
-// {
-//  "app": "dlc22",
-//  "start": "2019-09-16T21:46:23.636869585-07:00",
-//  "svc": 219732,
-//  "nats": {
-//    "req": 320415,
-//    "resp": 228268,
-//    "sys": 0
-//  },
-//  "total": 768415
-// }
 //
+//	{
+//	 "app": "dlc22",
+//	 "start": "2019-09-16T21:46:23.636869585-07:00",
+//	 "svc": 219732,
+//	 "nats": {
+//	   "req": 320415,
+//	   "resp": 228268,
+//	   "sys": 0
+//	 },
+//	 "total": 768415
+//	}
 type ServiceLatency struct {
 	Sampling SamplingRate `json:"sampling"`
 	Results  Subject      `json:"results"`
@@ -119,6 +119,7 @@ type Export struct {
 	Latency              *ServiceLatency `json:"service_latency,omitempty"`
 	AccountTokenPosition uint            `json:"account_token_position,omitempty"`
 	Advertise            bool            `json:"advertise,omitempty"`
+	AllowTrace           bool            `json:"allow_trace,omitempty"`
 	Info
 }
 
@@ -160,8 +161,13 @@ func (e *Export) Validate(vr *ValidationResults) {
 	if e.IsService() && !e.IsSingleResponse() && !e.IsChunkedResponse() && !e.IsStreamResponse() {
 		vr.AddError("invalid response type for service: %q", e.ResponseType)
 	}
-	if e.IsStream() && e.ResponseType != "" {
-		vr.AddError("invalid response type for stream: %q", e.ResponseType)
+	if e.IsStream() {
+		if e.ResponseType != "" {
+			vr.AddError("invalid response type for stream: %q", e.ResponseType)
+		}
+		if e.AllowTrace {
+			vr.AddError("AllowTrace only valid for service export")
+		}
 	}
 	if e.Latency != nil {
 		if !e.IsService() {

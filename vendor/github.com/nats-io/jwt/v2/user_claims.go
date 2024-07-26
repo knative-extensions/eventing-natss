@@ -29,6 +29,7 @@ const (
 	ConnectionTypeLeafnodeWS = "LEAFNODE_WS"
 	ConnectionTypeMqtt       = "MQTT"
 	ConnectionTypeMqttWS     = "MQTT_WS"
+	ConnectionTypeInProcess  = "IN_PROCESS"
 )
 
 type UserPermissionLimits struct {
@@ -150,4 +151,8 @@ func (u *UserClaims) updateVersion() {
 // IsBearerToken returns true if nonce-signing requirements should be skipped
 func (u *UserClaims) IsBearerToken() bool {
 	return u.BearerToken
+}
+
+func (u *UserClaims) GetTags() TagList {
+	return u.User.Tags
 }

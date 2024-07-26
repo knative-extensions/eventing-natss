@@ -33,7 +33,7 @@ func (e *SubscriberErrors) AddError(uid string, err error) {
 }
 
 func (e SubscriberErrors) Error() string {
-	if e == nil || len(e) == 0 {
+	if len(e) == 0 {
 		return ""
 	}
 

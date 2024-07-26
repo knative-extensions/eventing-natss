@@ -1,4 +1,4 @@
-// Copyright 2020 The NATS Authors
+// Copyright 2020-2023 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,8 +15,7 @@ package server
 
 import (
 	"bytes"
-	"compress/flate"
-	"crypto/rand"
+	crand "crypto/rand"
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
@@ -24,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	mrand "math/rand"
 	"net"
@@ -35,6 +33,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/klauspost/compress/flate"
 )
 
 type wsOpCode int
@@ -125,12 +125,17 @@ type srvWebsocket struct {
 	server         *http.Server
 	listener       net.Listener
 	listenerErr    error
-	tls            bool
 	allowedOrigins map[string]*allowedOrigin // host will be the key
 	sameOrigin     bool
 	connectURLs    []string
 	connectURLsMap refCountedUrlSet
 	authOverride   bool // indicate if there is auth override in websocket config
+
+	// These are immutable and can be accessed without lock.
+	// This is the case when generating the client INFO.
+	tls  bool   // True if TLS is required (TLSConfig is specified).
+	host string // Host/IP the webserver is listening on (shortcut to opts.Websocket.Host).
+	port int    // Port the webserver is listening on. This is after an ephemeral port may have been selected (shortcut to opts.Websocket.Port).
 }
 
 type allowedOrigin struct {
@@ -406,7 +411,7 @@ func (r *wsReadInfo) decompress() ([]byte, error) {
 		d.(flate.Resetter).Reset(r, nil)
 	}
 	// This will do the decompression.
-	b, err := ioutil.ReadAll(d)
+	b, err := io.ReadAll(d)
 	decompressorPool.Put(d)
 	// Now reset the compressed buffers list.
 	r.cbufs = nil
@@ -453,7 +458,9 @@ func (c *client) wsHandleControlFrame(r *wsReadInfo, frameType wsOpCode, nc io.R
 				}
 			}
 		}
-		c.wsEnqueueControlMessage(wsCloseMessage, wsCreateCloseMessage(status, body))
+		clm := wsCreateCloseMessage(status, body)
+		c.wsEnqueueControlMessage(wsCloseMessage, clm)
+		nbPoolPut(clm) // wsEnqueueControlMessage has taken a copy.
 		// Return io.EOF so that readLoop will close the connection as ClientClosed
 		// after processing pending buffers.
 		return pos, io.EOF
@@ -503,7 +510,7 @@ func wsIsControlFrame(frameType wsOpCode) bool {
 // Create the frame header.
 // Encodes the frame type and optional compression flag, and the size of the payload.
 func wsCreateFrameHeader(useMasking, compressed bool, frameType wsOpCode, l int) ([]byte, []byte) {
-	fh := make([]byte, wsMaxFrameHeaderSize)
+	fh := nbPoolGet(wsMaxFrameHeaderSize)[:wsMaxFrameHeaderSize]
 	n, key := wsFillFrameHeader(fh, useMasking, wsFirstFrame, wsFinalFrame, compressed, frameType, l)
 	return fh[:n], key
 }
@@ -543,7 +550,7 @@ func wsFillFrameHeader(fh []byte, useMasking, first, final, compressed bool, fra
 	var key []byte
 	if useMasking {
 		var keyBuf [4]byte
-		if _, err := io.ReadFull(rand.Reader, keyBuf[:4]); err != nil {
+		if _, err := io.ReadFull(crand.Reader, keyBuf[:4]); err != nil {
 			kv := mrand.Int31()
 			binary.LittleEndian.PutUint32(keyBuf[:4], uint32(kv))
 		}
@@ -597,11 +604,13 @@ func (c *client) wsEnqueueControlMessageLocked(controlMsg wsOpCode, payload []by
 	if useMasking {
 		sz += 4
 	}
-	cm := make([]byte, sz+len(payload))
+	cm := nbPoolGet(sz + len(payload))
+	cm = cm[:cap(cm)]
 	n, key := wsFillFrameHeader(cm, useMasking, wsFirstFrame, wsFinalFrame, wsUncompressedFrame, controlMsg, len(payload))
+	cm = cm[:n]
 	// Note that payload is optional.
 	if len(payload) > 0 {
-		copy(cm[n:], payload)
+		cm = append(cm, payload...)
 		if useMasking {
 			wsMaskBuf(key, cm[n:])
 		}
@@ -647,6 +656,7 @@ func (c *client) wsEnqueueCloseMessage(reason ClosedState) {
 	}
 	body := wsCreateCloseMessage(status, reason.String())
 	c.wsEnqueueControlMessageLocked(wsCloseMessage, body)
+	nbPoolPut(body) // wsEnqueueControlMessageLocked has taken a copy.
 }
 
 // Create and then enqueue a close message with a protocol error and the
@@ -656,6 +666,7 @@ func (c *client) wsEnqueueCloseMessage(reason ClosedState) {
 func (c *client) wsHandleProtocolError(message string) error {
 	buf := wsCreateCloseMessage(wsCloseStatusProtocolError, message)
 	c.wsEnqueueControlMessage(wsCloseMessage, buf)
+	nbPoolPut(buf) // wsEnqueueControlMessage has taken a copy.
 	return fmt.Errorf(message)
 }
 
@@ -672,7 +683,7 @@ func wsCreateCloseMessage(status int, body string) []byte {
 		body = body[:wsMaxControlPayloadSize-5]
 		body += "..."
 	}
-	buf := make([]byte, 2+len(body))
+	buf := nbPoolGet(2 + len(body))[:2+len(body)]
 	// We need to have a 2 byte unsigned int that represents the error status code
 	// https://tools.ietf.org/html/rfc6455#section-5.5.1
 	binary.BigEndian.PutUint16(buf[:2], uint16(status))
@@ -687,9 +698,9 @@ func (s *Server) wsUpgrade(w http.ResponseWriter, r *http.Request) (*wsUpgradeRe
 	kind := CLIENT
 	if r.URL != nil {
 		ep := r.URL.EscapedPath()
-		if strings.HasPrefix(ep, leafNodeWSPath) {
+		if strings.HasSuffix(ep, leafNodeWSPath) {
 			kind = LEAF
-		} else if strings.HasPrefix(ep, mqttWSPath) {
+		} else if strings.HasSuffix(ep, mqttWSPath) {
 			kind = MQTT
 		}
 	}
@@ -858,7 +869,7 @@ func wsPMCExtensionSupport(header http.Header, checkPMCOnly bool) (bool, bool) {
 	return false, false
 }
 
-// Send an HTTP error with the given `status`` to the given http response writer `w`.
+// Send an HTTP error with the given `status` to the given http response writer `w`.
 // Return an error created based on the `reason` string.
 func wsReturnHTTPError(w http.ResponseWriter, r *http.Request, status int, reason string) error {
 	err := fmt.Errorf("%s - websocket handshake error: %s", r.RemoteAddr, reason)
@@ -952,7 +963,7 @@ func wsAcceptKey(key string) string {
 
 func wsMakeChallengeKey() (string, error) {
 	p := make([]byte, 16)
-	if _, err := io.ReadFull(rand.Reader, p); err != nil {
+	if _, err := io.ReadFull(crand.Reader, p); err != nil {
 		return _EMPTY_, err
 	}
 	return base64.StdEncoding.EncodeToString(p), nil
@@ -1044,6 +1055,10 @@ func (s *Server) wsConfigAuth(opts *WebsocketOpts) {
 }
 
 func (s *Server) startWebsocketServer() {
+	if s.isShuttingDown() {
+		return
+	}
+
 	sopts := s.getOpts()
 	o := &sopts.Websocket
 
@@ -1065,10 +1080,6 @@ func (s *Server) startWebsocketServer() {
 	// avoid the possibility of it being "intercepted".
 
 	s.mu.Lock()
-	if s.shutdown {
-		s.mu.Unlock()
-		return
-	}
 	// Do not check o.NoTLS here. If a TLS configuration is available, use it,
 	// regardless of NoTLS. If we don't have a TLS config, it means that the
 	// user has configured NoTLS because otherwise the server would have failed
@@ -1096,7 +1107,12 @@ func (s *Server) startWebsocketServer() {
 		s.Warnf("Websocket not configured with TLS. DO NOT USE IN PRODUCTION!")
 	}
 
-	s.websocket.tls = proto == "wss"
+	// These 3 are immutable and will be accessed without lock by the client
+	// when generating/sending the INFO protocols.
+	s.websocket.tls = proto == wsSchemePrefixTLS
+	s.websocket.host, s.websocket.port = o.Host, o.Port
+
+	// This will be updated when/if the cluster changes.
 	s.websocket.connectURLs, err = s.getConnectURLs(o.Advertise, o.Host, o.Port)
 	if err != nil {
 		s.Fatalf("Unable to get websocket connect URLs: %v", err)
@@ -1135,8 +1151,10 @@ func (s *Server) startWebsocketServer() {
 		ReadTimeout: o.HandshakeTimeout,
 		ErrorLog:    log.New(&captureHTTPServerLog{s, "websocket: "}, _EMPTY_, 0),
 	}
+	s.websocket.mu.Lock()
 	s.websocket.server = hs
 	s.websocket.listener = hl
+	s.websocket.mu.Unlock()
 	go func() {
 		if err := hs.Serve(hl); err != http.ErrServerClosed {
 			s.Fatalf("websocket listener error: %v", err)
@@ -1214,8 +1232,8 @@ func (s *Server) createWSClient(conn net.Conn, ws *websocket) *client {
 	c.mu.Unlock()
 
 	s.mu.Lock()
-	if !s.running || s.ldm {
-		if s.shutdown {
+	if !s.isRunning() || s.ldm {
+		if s.isShuttingDown() {
 			conn.Close()
 		}
 		s.mu.Unlock()
@@ -1228,12 +1246,14 @@ func (s *Server) createWSClient(conn net.Conn, ws *websocket) *client {
 		return nil
 	}
 	s.clients[c.cid] = c
-
-	// Websocket clients do TLS in the websocket http server.
-	// So no TLS here...
 	s.mu.Unlock()
 
 	c.mu.Lock()
+	// Websocket clients do TLS in the websocket http server.
+	// So no TLS initiation here...
+	if _, ok := conn.(*tls.Conn); ok {
+		c.flags.set(handshakeComplete)
+	}
 
 	if c.isClosed() {
 		c.mu.Unlock()
@@ -1261,18 +1281,11 @@ func (s *Server) createWSClient(conn net.Conn, ws *websocket) *client {
 }
 
 func (c *client) wsCollapsePtoNB() (net.Buffers, int64) {
-	var nb net.Buffers
+	nb := c.out.nb
 	var mfs int
 	var usz int
 	if c.ws.browser {
 		mfs = wsFrameSizeForBrowsers
-	}
-	if len(c.out.p) > 0 {
-		p := c.out.p
-		c.out.p = nil
-		nb = append(c.out.nb, p)
-	} else if len(c.out.nb) > 0 {
-		nb = c.out.nb
 	}
 	mask := c.ws.maskwrite
 	// Start with possible already framed buffers (that we could have
@@ -1293,8 +1306,7 @@ func (c *client) wsCollapsePtoNB() (net.Buffers, int64) {
 		if mfs > 0 && c.ws.nocompfrag {
 			mfs = 0
 		}
-		buf := &bytes.Buffer{}
-
+		buf := bytes.NewBuffer(nbPoolGet(usz))
 		cp := c.ws.compressor
 		if cp == nil {
 			c.ws.compressor, _ = flate.NewWriter(buf, flate.BestSpeed)
@@ -1305,6 +1317,7 @@ func (c *client) wsCollapsePtoNB() (net.Buffers, int64) {
 		var csz int
 		for _, b := range nb {
 			cp.Write(b)
+			nbPoolPut(b) // No longer needed as contents written to compressor.
 		}
 		if err := cp.Flush(); err != nil {
 			c.Errorf("Error during compression: %v", err)
@@ -1321,9 +1334,9 @@ func (c *client) wsCollapsePtoNB() (net.Buffers, int64) {
 				} else {
 					final = true
 				}
-				fh := make([]byte, wsMaxFrameHeaderSize)
 				// Only the first frame should be marked as compressed, so pass
 				// `first` for the compressed boolean.
+				fh := nbPoolGet(wsMaxFrameHeaderSize)[:wsMaxFrameHeaderSize]
 				n, key := wsFillFrameHeader(fh, mask, first, final, first, wsBinaryMessage, lp)
 				if mask {
 					wsMaskBuf(key, p[:lp])
@@ -1333,13 +1346,21 @@ func (c *client) wsCollapsePtoNB() (net.Buffers, int64) {
 				p = p[lp:]
 			}
 		} else {
-			h, key := wsCreateFrameHeader(mask, true, wsBinaryMessage, len(p))
+			ol := len(p)
+			h, key := wsCreateFrameHeader(mask, true, wsBinaryMessage, ol)
 			if mask {
 				wsMaskBuf(key, p)
 			}
-			bufs = append(bufs, h, p)
-			csz = len(h) + len(p)
+			if ol > 0 {
+				bufs = append(bufs, h, p)
+			}
+			csz = len(h) + ol
 		}
+		// Make sure that the compressor no longer holds a reference to
+		// the bytes.Buffer, so that the underlying memory gets cleaned
+		// up after flushOutbound/flushAndClose. For this to be safe, we
+		// always cp.Reset(...) before reusing the compressor again.
+		cp.Reset(nil)
 		// Add to pb the compressed data size (including headers), but
 		// remove the original uncompressed data size that was added
 		// during the queueing.
@@ -1350,14 +1371,15 @@ func (c *client) wsCollapsePtoNB() (net.Buffers, int64) {
 		if mfs > 0 {
 			// We are limiting the frame size.
 			startFrame := func() int {
-				bufs = append(bufs, make([]byte, wsMaxFrameHeaderSize))
+				bufs = append(bufs, nbPoolGet(wsMaxFrameHeaderSize))
 				return len(bufs) - 1
 			}
 			endFrame := func(idx, size int) {
+				bufs[idx] = bufs[idx][:wsMaxFrameHeaderSize]
 				n, key := wsFillFrameHeader(bufs[idx], mask, wsFirstFrame, wsFinalFrame, wsUncompressedFrame, wsBinaryMessage, size)
+				bufs[idx] = bufs[idx][:n]
 				c.out.pb += int64(n)
 				c.ws.fs += int64(n + size)
-				bufs[idx] = bufs[idx][:n]
 				if mask {
 					wsMaskBufs(key, bufs[idx+1:])
 				}
@@ -1367,8 +1389,10 @@ func (c *client) wsCollapsePtoNB() (net.Buffers, int64) {
 			for i := 0; i < len(nb); i++ {
 				b := nb[i]
 				if total+len(b) <= mfs {
-					bufs = append(bufs, b)
+					buf := nbPoolGet(len(b))
+					bufs = append(bufs, append(buf, b...))
 					total += len(b)
+					nbPoolPut(nb[i])
 					continue
 				}
 				for len(b) > 0 {
@@ -1383,9 +1407,11 @@ func (c *client) wsCollapsePtoNB() (net.Buffers, int64) {
 					if endStart {
 						fhIdx = startFrame()
 					}
-					bufs = append(bufs, b[:total])
+					buf := nbPoolGet(total)
+					bufs = append(bufs, append(buf, b[:total]...))
 					b = b[total:]
 				}
+				nbPoolPut(nb[i]) // No longer needed as copied into smaller frames.
 			}
 			if total > 0 {
 				endFrame(fhIdx, total)

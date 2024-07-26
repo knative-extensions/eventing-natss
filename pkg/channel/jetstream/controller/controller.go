@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/utils/ptr"
+
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/reconciler"
 
@@ -32,8 +34,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/utils/pointer"
-
 	kubeclient "knative.dev/pkg/client/injection/kube/client"
 	deploymentinformer "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment"
 	endpointsinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/endpoints"
@@ -146,9 +146,9 @@ func getControllerOwnerRef(ctx context.Context) (*metav1.OwnerReference, error) 
 	ownerRef := metav1.OwnerReference{
 		APIVersion: "rbac.authorization.k8s.io/v1",
 		Kind:       "ClusterRole",
-		Controller: pointer.BoolPtr(true),
+		Controller: ptr.To(true),
 	}
-	err := wait.PollImmediate(interval, timeout, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, interval, timeout, true, func(ctx context.Context) (done bool, err error) {
 		k8sClient := kubeclient.Get(ctx)
 		clusterRole, err := k8sClient.RbacV1().ClusterRoles().Get(ctx, jetstream.ControllerName, metav1.GetOptions{})
 		if err != nil {
@@ -158,6 +158,7 @@ func getControllerOwnerRef(ctx context.Context) (*metav1.OwnerReference, error) 
 		ownerRef.UID = clusterRole.UID
 		return true, nil
 	})
+
 	if err != nil {
 		return nil, err
 	}

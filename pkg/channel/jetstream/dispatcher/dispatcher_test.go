@@ -17,8 +17,11 @@ package dispatcher
 
 import (
 	"context"
+	nethttp "net/http"
 	"testing"
 	"time"
+
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 
 	"knative.dev/eventing/pkg/channel/fanout"
 	"knative.dev/eventing/pkg/kncloudevents"
@@ -52,6 +55,43 @@ func TestDispatcher_RegisterChannelHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestDispatcher_Start(t *testing.T) {
+	ctx := logging.WithLogger(context.Background(), logtesting.TestLogger(t))
+
+	s := dispatchertesting.RunBasicJetstreamServer()
+	defer dispatchertesting.ShutdownJSServerAndRemoveStorage(t, s)
+	_, js := dispatchertesting.JsClient(t, s)
+	streamConfig := buildStreamConfig("test", utils.PublishSubjectName(testNS, ncName), nil)
+	_, err := js.AddStream(streamConfig)
+	require.NoError(t, err)
+
+	ls := reconcilertesting.NewListers([]runtime.Object{})
+
+	ctx, _ = fakekubeclient.With(ctx, ls.GetKubeObjects()...)
+	ctx, _ = fakeeventingclient.With(ctx, ls.GetEventingObjects()...)
+	ctx, _ = fakeclientset.With(ctx, ls.GetNatssObjects()...)
+
+	eventRecorder := record.NewFakeRecorder(10)
+	ctx = controller.WithEventRecorder(ctx, eventRecorder)
+
+	d, err := NewDispatcher(ctx, NatsDispatcherArgs{
+		JetStream:           js,
+		SubjectFunc:         utils.PublishSubjectName,
+		ConsumerNameFunc:    utils.ConsumerName,
+		ConsumerSubjectFunc: utils.ConsumerSubjectName,
+		PodName:             "test",
+		ContainerName:       "test",
+	})
+	require.NoError(t, err)
+
+	event := cloudevents.NewEvent()
+
+	err = d.messageReceiver(ctx, channel.ChannelReference{
+		Namespace: testNS, Name: ncName,
+	}, event, nethttp.Header{})
+	require.NoError(t, err)
 }
 
 func TestDispatcher_ReconcileConsumers(t *testing.T) {
