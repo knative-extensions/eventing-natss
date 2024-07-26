@@ -38,8 +38,8 @@ github.com/cloudevents/conformance/pkg/http
 ## explicit; go 1.18
 github.com/cloudevents/sdk-go/observability/opencensus/v2/client
 github.com/cloudevents/sdk-go/observability/opencensus/v2/http
-# github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.13.0
-## explicit; go 1.17
+# github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.15.2
+## explicit; go 1.18
 github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2
 # github.com/cloudevents/sdk-go/protocol/stan/v2 v2.13.0
 ## explicit; go 1.17
@@ -191,8 +191,9 @@ github.com/json-iterator/go
 # github.com/kelseyhightower/envconfig v1.4.0
 ## explicit
 github.com/kelseyhightower/envconfig
-# github.com/klauspost/compress v1.17.8
+# github.com/klauspost/compress v1.17.9
 ## explicit; go 1.20
+github.com/klauspost/compress/flate
 github.com/klauspost/compress/internal/race
 github.com/klauspost/compress/s2
 # github.com/mailru/easyjson v0.7.7
@@ -200,7 +201,7 @@ github.com/klauspost/compress/s2
 github.com/mailru/easyjson/buffer
 github.com/mailru/easyjson/jlexer
 github.com/mailru/easyjson/jwriter
-# github.com/minio/highwayhash v1.0.2
+# github.com/minio/highwayhash v1.0.3
 ## explicit; go 1.15
 github.com/minio/highwayhash
 # github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
@@ -212,25 +213,31 @@ github.com/modern-go/reflect2
 # github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ## explicit
 github.com/munnerz/goautoneg
-# github.com/nats-io/jwt/v2 v2.2.1-0.20220330180145-442af02fd36a
-## explicit; go 1.16
+# github.com/nats-io/jwt/v2 v2.5.8
+## explicit; go 1.18
 github.com/nats-io/jwt/v2
-# github.com/nats-io/nats-server/v2 v2.8.4
-## explicit; go 1.17
+# github.com/nats-io/nats-server/v2 v2.10.18
+## explicit; go 1.21
 github.com/nats-io/nats-server/v2/conf
+github.com/nats-io/nats-server/v2/internal/fastrand
 github.com/nats-io/nats-server/v2/internal/ldap
 github.com/nats-io/nats-server/v2/logger
 github.com/nats-io/nats-server/v2/server
+github.com/nats-io/nats-server/v2/server/avl
+github.com/nats-io/nats-server/v2/server/certidp
+github.com/nats-io/nats-server/v2/server/certstore
 github.com/nats-io/nats-server/v2/server/pse
+github.com/nats-io/nats-server/v2/server/stree
 github.com/nats-io/nats-server/v2/server/sysmem
 github.com/nats-io/nats-server/v2/test
-# github.com/nats-io/nats.go v1.22.1
-## explicit; go 1.16
+# github.com/nats-io/nats.go v1.36.0
+## explicit; go 1.20
 github.com/nats-io/nats.go
 github.com/nats-io/nats.go/encoders/builtin
+github.com/nats-io/nats.go/internal/parser
 github.com/nats-io/nats.go/util
-# github.com/nats-io/nkeys v0.3.0
-## explicit; go 1.16
+# github.com/nats-io/nkeys v0.4.7
+## explicit; go 1.20
 github.com/nats-io/nkeys
 # github.com/nats-io/nuid v1.0.1
 ## explicit
@@ -346,14 +353,21 @@ go.uber.org/zap/zaptest
 # golang.org/x/crypto v0.25.0
 ## explicit; go 1.20
 golang.org/x/crypto/bcrypt
+golang.org/x/crypto/blake2b
 golang.org/x/crypto/blowfish
 golang.org/x/crypto/chacha20
 golang.org/x/crypto/chacha20poly1305
+golang.org/x/crypto/cryptobyte
+golang.org/x/crypto/cryptobyte/asn1
+golang.org/x/crypto/curve25519
 golang.org/x/crypto/ed25519
 golang.org/x/crypto/internal/alias
 golang.org/x/crypto/internal/poly1305
+golang.org/x/crypto/nacl/box
+golang.org/x/crypto/nacl/secretbox
 golang.org/x/crypto/ocsp
 golang.org/x/crypto/pbkdf2
+golang.org/x/crypto/salsa20/salsa
 # golang.org/x/mod v0.19.0
 ## explicit; go 1.18
 golang.org/x/mod/internal/lazyregexp

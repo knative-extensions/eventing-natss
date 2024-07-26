@@ -347,7 +347,7 @@ func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.Ch
 	)
 
 	writer := new(bytes.Buffer)
-	if err := cejs.WriteMsg(ctx, message, writer, transformers...); err != nil {
+	if _, err := cejs.WriteMsg(ctx, message, writer, transformers...); err != nil {
 		logger.Error("failed to write binding.Message to bytes.Buffer")
 		return err
 	}

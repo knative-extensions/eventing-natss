@@ -42,7 +42,7 @@ func NewSender(url, stream, subject string, natsOpts []nats.Option, jsmOpts []na
 	return s, nil
 }
 
-// NewSenderFromConn creates a new protocol.Sender which leaves responsibility for opening and closing the STAN
+// NewSenderFromConn creates a new protocol.Sender which leaves responsibility for opening and closing the NATS
 // connection to the caller
 func NewSenderFromConn(conn *nats.Conn, stream, subject string, jsmOpts []nats.JSOpt, opts ...SenderOption) (*Sender, error) {
 	jsm, err := conn.JetStream(jsmOpts...)
@@ -91,10 +91,18 @@ func (s *Sender) Send(ctx context.Context, in binding.Message, transformers ...b
 	}()
 
 	writer := new(bytes.Buffer)
-	if err = WriteMsg(ctx, in, writer, transformers...); err != nil {
+	header, err := WriteMsg(ctx, in, writer, transformers...)
+	if err != nil {
 		return err
 	}
-	_, err = s.Jsm.Publish(s.Subject, writer.Bytes())
+
+	natsMsg := &nats.Msg{
+		Subject: s.Subject,
+		Data:    writer.Bytes(),
+		Header:  header,
+	}
+
+	_, err = s.Jsm.PublishMsg(natsMsg)
 
 	return err
 }
