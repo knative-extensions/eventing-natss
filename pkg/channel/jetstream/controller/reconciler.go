@@ -20,11 +20,12 @@ import (
 	"context"
 	"fmt"
 
+	"knative.dev/pkg/ptr"
+
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/utils/pointer"
 	"knative.dev/eventing/pkg/apis/eventing"
 	"knative.dev/pkg/apis"
 	"knative.dev/pkg/controller"
@@ -64,12 +65,7 @@ const (
 	dispatcherServiceCreated        = "DispatcherServiceCreated"
 	dispatcherServiceFailed         = "DispatcherServiceFailed"
 	dispatcherServiceUpdated        = "DispatcherServiceUpdated"
-	natsJetStreamChannelReconciled  = "NatsJetStreamChannelReconciled"
 )
-
-func newReconciledNormal(namespace, name string) reconciler.Event {
-	return reconciler.NewEvent(corev1.EventTypeNormal, natsJetStreamChannelReconciled, "NatsJetStreamChannel reconciled: \"%s/%s\"", namespace, name)
-}
 
 func newDeploymentWarn(err error) reconciler.Event {
 	return reconciler.NewEvent(corev1.EventTypeWarning, dispatcherDeploymentFailed, "Reconciling dispatcher Deployment failed with: %s", err)
@@ -500,7 +496,7 @@ func (r *Reconciler) cleanDispatcherResources(ctx context.Context, namespace str
 	}
 
 	toUpdate := deployment.DeepCopy()
-	toUpdate.Spec.Replicas = pointer.Int32(0)
+	toUpdate.Spec.Replicas = ptr.Int32(0)
 
 	_, err = r.kubeClientSet.AppsV1().Deployments(namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})
 	if err != nil {
