@@ -39,18 +39,11 @@ jobs:
           echo "SLACK_WEBHOOK=exists" >> $GITHUB_ENV
         fi
 
-    - name: Set up Go 1.21.x
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.21.x
+    - name: Set up Go
+      uses: knative/actions/setup-go@main
 
-    - name: Install Dependencies
-      run: |
-        echo '::group:: install ko'
-        curl -L https://github.com/google/ko/releases/download/v0.7.0/ko_0.7.0_Linux_x86_64.tar.gz | tar xzf - ko
-        chmod +x ./ko
-        sudo mv ko /usr/local/bin
-        echo '::endgroup::'
+    - name: Install ko
+      uses: ko-build/setup-ko@v0.7
 
     - name: Check out code
       uses: actions/checkout@v4
@@ -125,12 +118,10 @@ jobs:
 
     - name: Wait for Ready
       run: |
-        set -x
-
-        # Probably don't need this anymore, but keep until we
-        # have something that waits for pods to becomes ready.
-        sleep 120
-
+        set -e
+        source ./vendor/knative.dev/hack/infra-library.sh
+        wait_until_pods_running ${SYSTEM_NAMESPACE}
+        
         # For debugging.
         kubectl get pods --all-namespaces
 
