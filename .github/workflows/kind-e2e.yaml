@@ -121,7 +121,7 @@ jobs:
         set -e
         source ./vendor/knative.dev/hack/infra-library.sh
         wait_until_pods_running ${SYSTEM_NAMESPACE}
-
+        
         # For debugging.
         kubectl get pods --all-namespaces
 
