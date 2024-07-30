@@ -19,6 +19,7 @@ package dispatcher
 import (
 	"context"
 	"errors"
+	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 	"sync"
 
 	"knative.dev/eventing/pkg/kncloudevents"
@@ -84,7 +85,7 @@ func (c *Consumer) MsgHandler(msg *nats.Msg) {
 // - Ack (includes `nil`): the event was successfully delivered to the subscriber
 // - Nack: the event was not delivered to the subscriber, but it can be retried
 // - any other error: the event should be terminated and not retried
-func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) error {
+func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) {
 	logger := logging.FromContext(ctx)
 
 	if logger.Desugar().Core().Enabled(zap.DebugLevel) {
@@ -98,7 +99,8 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) error {
 
 	message := cejs.NewMessage(msg)
 	if message.ReadEncoding() == binding.EncodingUnknown {
-		return errors.New("received a message with unknown encoding")
+		logger.Errorw("received a message with unknown encoding")
+		return
 	}
 
 	event := tracing.ConvertNatsMsgToEvent(c.logger.Desugar(), msg)
@@ -107,10 +109,10 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) error {
 	sc, ok := tracing.ParseSpanContext(event)
 	var span *trace.Span
 	if !ok {
-		c.logger.Warn("Cannot parse the spancontext, creating a new span")
-		c.ctx, span = trace.StartSpan(c.ctx, jsmChannel+"-"+string(c.sub.UID))
+		logger.Warn("Cannot parse the spancontext, creating a new span")
+		ctx, span = trace.StartSpan(ctx, jsmChannel+"-"+string(c.sub.UID))
 	} else {
-		c.ctx, span = trace.StartSpanWithRemoteParent(c.ctx, jsmChannel+"-"+string(c.sub.UID), sc)
+		ctx, span = trace.StartSpanWithRemoteParent(ctx, jsmChannel+"-"+string(c.sub.UID), sc)
 	}
 
 	defer span.End()
@@ -123,7 +125,7 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) error {
 		message,
 		c.sub.Subscriber,
 		c.natsConsumerInfo.Config.AckWait,
-		msg,
+		internal.NewNatsMessageWrapper(msg),
 		WithReply(c.sub.Reply),
 		WithDeadLetterSink(c.sub.DeadLetter),
 		WithRetryConfig(c.sub.RetryConfig),
@@ -131,23 +133,16 @@ func (c *Consumer) doHandle(ctx context.Context, msg *nats.Msg) error {
 		WithHeader(additionalHeaders),
 	)
 
-	args := eventingchannels.ReportArgs{
+	_ = fanout.ParseDispatchResultAndReportMetrics(fanout.NewDispatchResult(err, dispatchExecutionInfo), c.reporter, eventingchannels.ReportArgs{
 		Ns:        c.channelNamespace,
 		EventType: string(te),
-	}
-
-	_ = fanout.ParseDispatchResultAndReportMetrics(fanout.NewDispatchResult(err, dispatchExecutionInfo), c.reporter, args)
+	})
 
 	if err != nil {
 		logger.Errorw("failed to forward message to downstream subscriber",
 			zap.Error(err),
 			zap.Any("dispatch_resp_code", dispatchExecutionInfo.ResponseCode))
-
-		// let knative decide what to do with the message, if it wraps an Ack/Nack then that is what will happen,
-		// otherwise we will Terminate the message
-		return err
 	}
 
 	logger.Debug("message forwarded to downstream subscriber")
-	return nil
 }

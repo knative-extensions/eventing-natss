@@ -55,21 +55,21 @@ func ConvertReplayPolicy(in v1alpha1.ReplayPolicy, def nats.ReplayPolicy) nats.R
 	return def
 }
 
-func CalcRequestTimeout(msg *nats.Msg, ackWait time.Duration) time.Duration {
+func CalcRequestTimeout(numDelivered int, ackWait time.Duration) time.Duration {
 	const jitter = time.Millisecond * 200
 
 	// if previous deliveries were explicitly nacked earlier than the deadline, then our actual deadline will be earlier
 	// than the deadline above
 	ackDeadlineFromNow := ackWait - jitter
 
-	meta, err := msg.Metadata()
-	if err != nil {
-		return ackDeadlineFromNow
-	}
+	//meta, err := msg.Metadata()
+	//if err != nil {
+	//	return ackDeadlineFromNow
+	//}
 
 	// if each delivery has timed out, then multiplying the number of deliveries by the ack wait will give us the
 	// duration from publish which this attempt will be ack-waited
-	ackDurationFromPublish := time.Duration(meta.NumDelivered) * ackWait
+	ackDurationFromPublish := time.Duration(numDelivered) * ackWait
 
 	// the deadline is the published timestamp plus our duration calculated above
 	deadline := ackDurationFromPublish - jitter
