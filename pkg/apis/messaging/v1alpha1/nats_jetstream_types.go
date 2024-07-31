@@ -102,8 +102,8 @@ const (
 type ConsumerType string
 
 const (
-	PushConsumer ConsumerType = "Push"
-	PullConsumer ConsumerType = "Pull"
+	PushConsumerType ConsumerType = "Push"
+	PullConsumerType ConsumerType = "Pull"
 )
 
 // +genclient

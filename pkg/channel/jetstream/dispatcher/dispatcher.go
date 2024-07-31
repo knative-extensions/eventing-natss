@@ -341,9 +341,12 @@ func (d *Dispatcher) getOrEnsureConsumer(ctx context.Context, config ChannelConf
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
 
+		if len(config.ConsumerConfigTemplate.ConsumerType) == 0 {
+			config.ConsumerConfigTemplate.ConsumerType = v1alpha1.PushConsumerType
+		}
 		var consumerConfig *nats.ConsumerConfig
 		switch config.ConsumerConfigTemplate.ConsumerType {
-		case v1alpha1.PullConsumer:
+		case v1alpha1.PullConsumerType:
 			consumerConfig = buildPullConsumerConfig(consumerName, config.ConsumerConfigTemplate, sub.RetryConfig)
 		default:
 			//case v1alpha1.PushConsumer, for backward compatibility
