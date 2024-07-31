@@ -101,6 +101,7 @@ func buildPullConsumerConfig(consumerName string, template *v1alpha1.ConsumerCon
 	const jitter = time.Millisecond * 500
 
 	consumerConfig := nats.ConsumerConfig{
+		Name:      consumerName,
 		Durable:   consumerName,
 		AckPolicy: nats.AckExplicitPolicy,
 	}

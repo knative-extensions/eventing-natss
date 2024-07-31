@@ -68,7 +68,7 @@ type Dispatcher struct {
 
 	consumerUpdateLock sync.Mutex
 	channelSubscribers map[types.NamespacedName]sets.Set[string]
-	consumers          map[types.UID]*Consumer
+	consumers          map[types.UID]Consumer
 }
 
 func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, error) {
@@ -88,7 +88,7 @@ func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, e
 		consumerSubjectFunc: args.ConsumerSubjectFunc,
 
 		channelSubscribers: make(map[types.NamespacedName]sets.Set[string]),
-		consumers:          make(map[types.UID]*Consumer),
+		consumers:          make(map[types.UID]Consumer),
 	}
 
 	receiverFunc, err := eventingchannels.NewEventReceiver(
@@ -186,7 +186,7 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 		switch status {
 		case SubscriberStatusTypeCreated, SubscriberStatusTypeUpToDate:
 			nextSubs.Insert(uid)
-		case SubscriberStatusTypeSkipped, SubscriberStatusTypeError:
+		case SubscriberStatusTypeDeleted, SubscriberStatusTypeSkipped, SubscriberStatusTypeError:
 			nextSubs.Delete(uid)
 		}
 
@@ -219,7 +219,7 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 
 func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfig, sub Subscription, isLeader bool) error {
 	logger := logging.FromContext(ctx)
-	d.consumers[sub.UID].sub = sub
+	d.consumers[sub.UID].UpdateSubscription(sub)
 	consumerName := d.consumerNameFunc(string(sub.UID))
 
 	if isLeader {
@@ -268,21 +268,36 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 		return SubscriberStatusTypeError, err
 	}
 
-	consumer := &Consumer{
-		sub:              sub,
-		dispatcher:       d.dispatcher,
-		reporter:         d.reporter,
-		channelNamespace: config.Namespace,
-		logger:           logger,
-		ctx:              ctx,
-		natsConsumerInfo: info,
-	}
-
-	consumer.jsSub, err = d.js.QueueSubscribe(info.Config.DeliverSubject, info.Config.DeliverGroup, consumer.MsgHandler,
-		nats.Bind(info.Stream, info.Name), nats.ManualAck())
-	if err != nil {
-		logger.Errorw("failed to create queue subscription for consumer")
-		return SubscriberStatusTypeError, err
+	var consumer Consumer
+	if isPushConsumer(info) {
+		natsSub, err := d.js.PullSubscribe(".>", info.Config.Durable, nats.Bind(info.Stream, info.Name), nats.ManualAck())
+		if err != nil {
+			logger.Errorw("failed to pull subscribe to jetstream", zap.Error(err))
+			return SubscriberStatusTypeError, err
+		}
+		consumer, err = NewPullConsumer(ctx, natsSub, sub, d.dispatcher, d.reporter, config.Namespace)
+		if err != nil {
+			logger.Errorw("failed to create pull consumer", zap.Error(err))
+			return SubscriberStatusTypeError, err
+		}
+	} else {
+		pushConsumer := &PushConsumer{
+			sub:              sub,
+			dispatcher:       d.dispatcher,
+			reporter:         d.reporter,
+			channelNamespace: config.Namespace,
+			logger:           logger,
+			ctx:              ctx,
+			natsConsumerInfo: info,
+		}
+		jsSub, err := d.js.QueueSubscribe(info.Config.DeliverSubject, info.Config.DeliverGroup, pushConsumer.MsgHandler,
+			nats.Bind(info.Stream, info.Name), nats.ManualAck())
+		if err != nil {
+			logger.Errorw("failed to create queue subscription for consumer")
+			return SubscriberStatusTypeError, err
+		}
+		pushConsumer.jsSub = jsSub
+		consumer = pushConsumer
 	}
 
 	d.consumers[sub.UID] = consumer

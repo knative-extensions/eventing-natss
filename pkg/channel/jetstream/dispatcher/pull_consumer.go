@@ -129,6 +129,10 @@ func NewPullConsumer(
 	}, nil
 }
 
+func (c *PullConsumer) ConsumerType() ConsumerType {
+	return PullConsumerType
+}
+
 // Start begins the consumer and handles messages until Close is called. This method is blocking and
 // will return an error if the consumer fails prematurely. A nil error will be returned upon being
 // stopped by the Close method.
