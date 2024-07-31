@@ -20,24 +20,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.opencensus.io/trace"
-	"io"
-	"knative.dev/eventing-natss/pkg/tracing"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
+	"go.opencensus.io/trace"
+	"knative.dev/eventing-natss/pkg/tracing"
+
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"go.uber.org/zap"
 	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
 	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/pkg/logging"
-	//tracingnats "knative.dev/eventing-natss/pkg/tracing/nats"
 )
 
 const (
@@ -80,13 +78,13 @@ func init() {
 	}
 }
 
-type PullingConsumer struct {
+type PullConsumer struct {
 	dispatcher       *kncloudevents.Dispatcher
 	reporter         eventingchannels.StatsReporter
 	channelNamespace string
 
-	natsConsumer     jetstream.Consumer
-	natsConsumerInfo *jetstream.ConsumerInfo
+	natsConsumer     *nats.Subscription
+	natsConsumerInfo *nats.ConsumerInfo
 
 	logger *zap.SugaredLogger
 
@@ -99,22 +97,22 @@ type PullingConsumer struct {
 	closed      chan struct{}
 }
 
-func NewPullingConsumer(
+func NewPullConsumer(
 	ctx context.Context,
-	consumer jetstream.Consumer,
+	consumer *nats.Subscription,
 	subscription Subscription,
 	dispatcher *kncloudevents.Dispatcher,
 	reporter eventingchannels.StatsReporter,
 	channelNamespace string,
-) (*PullingConsumer, error) {
-	consumerInfo, err := consumer.Info(ctx)
+) (*PullConsumer, error) {
+	consumerInfo, err := consumer.ConsumerInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get consumer info: %w", err)
 	}
 
 	logger := logging.FromContext(ctx)
 
-	return &PullingConsumer{
+	return &PullConsumer{
 		dispatcher:       dispatcher,
 		reporter:         reporter,
 		channelNamespace: channelNamespace,
@@ -134,7 +132,7 @@ func NewPullingConsumer(
 // Start begins the consumer and handles messages until Close is called. This method is blocking and
 // will return an error if the consumer fails prematurely. A nil error will be returned upon being
 // stopped by the Close method.
-func (c *PullingConsumer) Start() error {
+func (c *PullConsumer) Start() error {
 	if err := c.checkStart(); err != nil {
 		return err
 	}
@@ -156,18 +154,12 @@ func (c *PullingConsumer) Start() error {
 
 	for {
 		// TODO move 200 into subscription config
-		batch, err := c.natsConsumer.Fetch(FetchBatchSize, jetstream.FetchMaxWait(200*time.Millisecond))
+		batch, err := c.natsConsumer.Fetch(FetchBatchSize, nats.MaxWait(200*time.Millisecond))
 		if err != nil {
 			return err
 		}
 
-		if err := c.consumeMessages(ctx, batch, &wg); err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-
-			return err
-		}
+		c.consumeMessages(ctx, batch, &wg)
 	}
 }
 
@@ -176,35 +168,25 @@ func (c *PullingConsumer) Start() error {
 //
 // This method returns once the MessageBatch has been consumed, or upon a call to Consumer.Close.
 // Returning as a result of Consumer.Close results in an io.EOF error.
-func (c *PullingConsumer) consumeMessages(ctx context.Context, batch jetstream.MessageBatch, wg *sync.WaitGroup) error {
-	for {
-		select {
-		case natMsg, ok := <-batch.Messages():
-			if !ok {
-				return batch.Error()
+func (c *PullConsumer) consumeMessages(ctx context.Context, batch []*nats.Msg, wg *sync.WaitGroup) {
+	for _, natsMsg := range batch {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			ctx := logging.WithLogger(ctx, c.logger.With(zap.String("msg_id", natsMsg.Header.Get(nats.MsgIdHdr))))
+			msg := internal.NewMessage(ctx, natsMsg, c.natsConsumerInfo.Config.AckWait)
+
+			if err := c.handleMessage(msg); err != nil {
+				// handleMessage only errors if the message cannot be finished, any other error
+				// is consumed by msg.Finish(err)
+				logging.FromContext(ctx).Errorw("failed to finish message", zap.Error(err))
 			}
-
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
-				ctx := logging.WithLogger(ctx, c.logger.With(zap.String("msg_id", natMsg.Headers().Get(nats.MsgIdHdr))))
-				msg := internal.NewMessage(ctx, natMsg, c.natsConsumerInfo.Config.AckWait)
-
-				if err := c.handleMessage(msg); err != nil {
-					// handleMessage only errors if the message cannot be finished, any other error
-					// is consumed by msg.Finish(err)
-					logging.FromContext(ctx).Errorw("failed to finish message", zap.Error(err))
-				}
-			}()
-		case <-c.closing:
-			return io.EOF
-		}
+		}()
 	}
 }
 
-func (c *PullingConsumer) UpdateSubscription(sub Subscription) {
+func (c *PullConsumer) UpdateSubscription(sub Subscription) {
 	// wait for any pending messages to be processed with the old subscription
 	c.subMu.Lock()
 	defer c.subMu.Unlock()
@@ -212,7 +194,7 @@ func (c *PullingConsumer) UpdateSubscription(sub Subscription) {
 	c.sub = sub
 }
 
-func (c *PullingConsumer) handleMessage(msg internal.Message) (err error) {
+func (c *PullConsumer) handleMessage(msg internal.Message) (err error) {
 	// ensure that c.sub is not modified while we are handling a message
 	c.subMu.RLock()
 	defer c.subMu.RUnlock()
@@ -234,7 +216,7 @@ func (c *PullingConsumer) handleMessage(msg internal.Message) (err error) {
 		return errors.New("received a message with unknown encoding")
 	}
 
-	event := tracing.ConvertJsMsgToEvent(c.logger.Desugar(), msg.NatsMessage())
+	event := tracing.ConvertNatsMsgToEvent(c.logger.Desugar(), msg.NatsMessage())
 	additionalHeaders := tracing.ConvertEventToHttpHeader(event)
 
 	sc, ok := tracing.ParseSpanContext(event)
@@ -256,7 +238,7 @@ func (c *PullingConsumer) handleMessage(msg internal.Message) (err error) {
 		msg,
 		c.sub.Subscriber,
 		c.natsConsumerInfo.Config.AckWait,
-		internal.NewJsMessageWrapper(msg.NatsMessage()),
+		internal.NewNatsMessageWrapper(msg.NatsMessage()),
 		WithReply(c.sub.Reply),
 		WithDeadLetterSink(c.sub.DeadLetter),
 		WithRetryConfig(c.sub.RetryConfig),
@@ -285,7 +267,7 @@ func (c *PullingConsumer) handleMessage(msg internal.Message) (err error) {
 	return nil
 }
 
-func (c *PullingConsumer) Close() error {
+func (c *PullConsumer) Close() error {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 
@@ -302,7 +284,7 @@ func (c *PullingConsumer) Close() error {
 }
 
 // checkStart ensures that the consumer is not already running and marks it as started.
-func (c *PullingConsumer) checkStart() error {
+func (c *PullConsumer) checkStart() error {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 

@@ -96,3 +96,41 @@ func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1
 
 	return &consumerConfig
 }
+
+func buildPullConsumerConfig(consumerName string, template *v1alpha1.ConsumerConfigTemplate, retryConfig *kncloudevents.RetryConfig) *nats.ConsumerConfig {
+	const jitter = time.Millisecond * 500
+
+	consumerConfig := nats.ConsumerConfig{
+		Durable:   consumerName,
+		AckPolicy: nats.AckExplicitPolicy,
+	}
+
+	if template != nil {
+		consumerConfig.AckWait = template.AckWait.Duration
+	}
+
+	if retryConfig != nil {
+		if retryConfig.RequestTimeout > 0 {
+			consumerConfig.AckWait = retryConfig.RequestTimeout + jitter
+		}
+
+		consumerConfig.MaxDeliver = retryConfig.RetryMax + 1
+	}
+
+	if template != nil {
+		consumerConfig.DeliverPolicy = utils.ConvertDeliverPolicy(template.DeliverPolicy, nats.DeliverAllPolicy)
+		consumerConfig.OptStartSeq = template.OptStartSeq
+		// ignoring template.AckWait and template.MaxDeliver
+		consumerConfig.FilterSubject = template.FilterSubject
+		consumerConfig.ReplayPolicy = utils.ConvertReplayPolicy(template.ReplayPolicy, nats.ReplayInstantPolicy)
+		consumerConfig.RateLimit = template.RateLimitBPS
+		consumerConfig.SampleFrequency = template.SampleFrequency
+		consumerConfig.MaxAckPending = template.MaxAckPending
+
+		if template.OptStartTime != nil {
+			consumerConfig.OptStartTime = &template.OptStartTime.Time
+		}
+	}
+
+	return &consumerConfig
+}

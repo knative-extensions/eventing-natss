@@ -17,6 +17,7 @@ limitations under the License.
 package utils
 
 import (
+	"github.com/nats-io/nats.go/jetstream"
 	"math"
 	"time"
 
@@ -26,6 +27,34 @@ import (
 	v1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/eventing/pkg/kncloudevents"
 )
+
+func ConvertJsDeliverPolicy(in v1alpha1.DeliverPolicy, def jetstream.DeliverPolicy) jetstream.DeliverPolicy {
+	switch in {
+	case v1alpha1.AllDeliverPolicy:
+		return jetstream.DeliverAllPolicy
+	case v1alpha1.LastDeliverPolicy:
+		return jetstream.DeliverLastPolicy
+	case v1alpha1.NewDeliverPolicy:
+		return jetstream.DeliverNewPolicy
+	case v1alpha1.ByStartSequenceDeliverPolicy:
+		return jetstream.DeliverByStartSequencePolicy
+	case v1alpha1.ByStartTimeDeliverPolicy:
+		return jetstream.DeliverByStartTimePolicy
+	}
+
+	return def
+}
+
+func ConvertJsReplayPolicy(in v1alpha1.ReplayPolicy, def jetstream.ReplayPolicy) jetstream.ReplayPolicy {
+	switch in {
+	case v1alpha1.InstantReplayPolicy:
+		return jetstream.ReplayInstantPolicy
+	case v1alpha1.OriginalReplayPolicy:
+		return jetstream.ReplayOriginalPolicy
+	}
+
+	return def
+}
 
 func ConvertDeliverPolicy(in v1alpha1.DeliverPolicy, def nats.DeliverPolicy) nats.DeliverPolicy {
 	switch in {

@@ -24,6 +24,8 @@ import (
 	nethttp "net/http"
 	"sync"
 
+	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/event"
@@ -222,9 +224,22 @@ func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfi
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
 
-		_, err := d.js.UpdateConsumer(config.StreamName, consumerConfig)
+		consInfo, err := d.js.ConsumerInfo(config.StreamName, consumerName)
+		if err != nil {
+			logger.Warnw("failed to get consumer to update", zap.Error(err),
+				zap.String("consumer", consumerName), zap.String("stream", config.StreamName))
+		}
+
+		var consumerConfig *nats.ConsumerConfig
+		// we do not allow update existing consumers from push consumer to pull
+		if isPushConsumer(consInfo) {
+			consumerConfig = buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
+		} else {
+			consumerConfig = buildPullConsumerConfig(consumerName, config.ConsumerConfigTemplate, sub.RetryConfig)
+		}
+
+		_, err = d.js.UpdateConsumer(config.StreamName, consumerConfig)
 		if err != nil {
 			logger.Errorw("failed to update queue subscription for consumer", zap.Error(err))
 			return err
@@ -232,6 +247,10 @@ func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfi
 	}
 
 	return nil
+}
+
+func isPushConsumer(info *nats.ConsumerInfo) bool {
+	return len(info.Config.DeliverGroup) > 0
 }
 
 func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Subscription, isLeader bool) (SubscriberStatusType, error) {
@@ -306,7 +325,15 @@ func (d *Dispatcher) getOrEnsureConsumer(ctx context.Context, config ChannelConf
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
+
+		var consumerConfig *nats.ConsumerConfig
+		switch config.ConsumerConfigTemplate.ConsumerType {
+		case v1alpha1.PullConsumer:
+			consumerConfig = buildPullConsumerConfig(consumerName, config.ConsumerConfigTemplate, sub.RetryConfig)
+		default:
+			//case v1alpha1.PushConsumer, for backward compatibility
+			consumerConfig = buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
+		}
 
 		// AddConsumer is idempotent so this will either create the consumer, update to match expected config, or no-op
 		info, err := d.js.AddConsumer(config.StreamName, consumerConfig)

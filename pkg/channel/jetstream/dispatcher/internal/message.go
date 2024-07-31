@@ -5,18 +5,18 @@ import (
 	"context"
 	"time"
 
-	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/binding/format"
+
+	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 )
 
 type Message interface {
 	binding.Message
 
-	NatsMessage() jetstream.Msg
+	NatsMessage() *nats.Msg
 	// Metadata returns [MsgMetadata] for a JetStream message
-	Metadata() (*jetstream.MsgMetadata, error)
+	Metadata() (*nats.MsgMetadata, error)
 	// Data returns the message body
 	Data() []byte
 	// Headers returns a map of headers for a message
@@ -30,27 +30,25 @@ type Message interface {
 }
 
 type msgImpl struct {
-	jetstream.Msg
+	*nats.Msg
 	ctx    context.Context
 	finish context.CancelFunc
 }
 
-func (m *msgImpl) NatsMessage() jetstream.Msg {
-	return m.Msg
+func (m *msgImpl) Headers() nats.Header {
+	return m.Msg.Header
 }
 
-func NewMessage(ctx context.Context, msg jetstream.Msg, ackWait time.Duration) Message {
-	ctx, finish := context.WithTimeout(ctx, ackWait)
-
-	return &msgImpl{
-		Msg:    msg,
-		ctx:    ctx,
-		finish: finish,
-	}
+func (m *msgImpl) Subject() string {
+	return m.Msg.Subject
 }
 
-func (m *msgImpl) Context() context.Context {
-	return m.ctx
+func (m *msgImpl) Reply() string {
+	return m.Msg.Reply
+}
+
+func (m *msgImpl) Data() []byte {
+	return m.Msg.Data
 }
 
 func (m *msgImpl) ReadEncoding() binding.Encoding {
@@ -58,14 +56,32 @@ func (m *msgImpl) ReadEncoding() binding.Encoding {
 }
 
 func (m *msgImpl) ReadStructured(ctx context.Context, writer binding.StructuredWriter) error {
-	return writer.SetStructuredEvent(ctx, format.JSON, bytes.NewReader(m.Msg.Data()))
+	return writer.SetStructuredEvent(ctx, format.JSON, bytes.NewReader(m.Data()))
 }
 
-func (m *msgImpl) ReadBinary(context.Context, binding.BinaryWriter) error {
+func (m *msgImpl) ReadBinary(ctx context.Context, writer binding.BinaryWriter) error {
 	return binding.ErrNotBinary
+}
+
+func (m *msgImpl) NatsMessage() *nats.Msg {
+	return m.Msg
+}
+
+func (m *msgImpl) Context() context.Context {
+	return m.ctx
 }
 
 func (m *msgImpl) Finish(_ error) error {
 	m.finish()
 	return nil
+}
+
+func NewMessage(ctx context.Context, msg *nats.Msg, ackWait time.Duration) Message {
+	ctx, finish := context.WithTimeout(ctx, ackWait)
+
+	return &msgImpl{
+		Msg:    msg,
+		ctx:    ctx,
+		finish: finish,
+	}
 }
