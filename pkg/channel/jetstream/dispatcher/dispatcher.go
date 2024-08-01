@@ -21,16 +21,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/nats-io/nats.go"
 	nethttp "net/http"
 	"sync"
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
+	ce "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/google/uuid"
-	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/types"
@@ -250,13 +251,14 @@ func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfi
 }
 
 func isPushConsumer(info *nats.ConsumerInfo) bool {
-	return len(info.Config.DeliverGroup) > 0
+	return len(info.Config.DeliverSubject) > 0
 }
 
 func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Subscription, isLeader bool) (SubscriberStatusType, error) {
 	logger := logging.FromContext(ctx)
 
 	info, err := d.getOrEnsureConsumer(ctx, config, sub, isLeader)
+	logger.Debugw("ConsumerInfo created", zap.Any("ConsumerInfo", info))
 	if err != nil {
 		if errors.Is(err, nats.ErrConsumerNotFound) {
 			//	this error can only occur if the dispatcher is not the leader
@@ -270,17 +272,6 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 
 	var consumer Consumer
 	if isPushConsumer(info) {
-		natsSub, err := d.js.PullSubscribe(".>", info.Config.Durable, nats.Bind(info.Stream, info.Name), nats.ManualAck())
-		if err != nil {
-			logger.Errorw("failed to pull subscribe to jetstream", zap.Error(err))
-			return SubscriberStatusTypeError, err
-		}
-		consumer, err = NewPullConsumer(ctx, natsSub, sub, d.dispatcher, d.reporter, config.Namespace)
-		if err != nil {
-			logger.Errorw("failed to create pull consumer", zap.Error(err))
-			return SubscriberStatusTypeError, err
-		}
-	} else {
 		pushConsumer := &PushConsumer{
 			sub:              sub,
 			dispatcher:       d.dispatcher,
@@ -298,6 +289,17 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 		}
 		pushConsumer.jsSub = jsSub
 		consumer = pushConsumer
+	} else {
+		natsSub, err := d.js.PullSubscribe(".>", info.Config.Durable, nats.Bind(info.Stream, info.Name), nats.ManualAck())
+		if err != nil {
+			logger.Errorw("failed to pull subscribe to jetstream", zap.Error(err))
+			return SubscriberStatusTypeError, err
+		}
+		consumer, err = NewPullConsumer(ctx, natsSub, sub, d.dispatcher, d.reporter, config.Namespace)
+		if err != nil {
+			logger.Errorw("failed to create pull consumer", zap.Error(err))
+			return SubscriberStatusTypeError, err
+		}
 	}
 
 	d.consumers[sub.UID] = consumer
@@ -347,9 +349,11 @@ func (d *Dispatcher) getOrEnsureConsumer(ctx context.Context, config ChannelConf
 		var consumerConfig *nats.ConsumerConfig
 		switch config.ConsumerConfigTemplate.ConsumerType {
 		case v1alpha1.PullConsumerType:
+			logger.Debugw("Create pull consumer configuration")
 			consumerConfig = buildPullConsumerConfig(consumerName, config.ConsumerConfigTemplate, sub.RetryConfig)
 		default:
 			//case v1alpha1.PushConsumer, for backward compatibility
+			logger.Debugw("Create push consumer configuration")
 			consumerConfig = buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
 		}
 
@@ -383,7 +387,7 @@ func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.Ch
 	message := binding.ToMessage(&event)
 
 	logger := logging.FromContext(ctx)
-	logger.Debugw("received message from HTTP receiver")
+	logger.Debugw("received message from HTTP receiver", zap.Any("event", event))
 
 	eventID := commonce.IDExtractorTransformer("")
 
@@ -391,6 +395,7 @@ func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.Ch
 		tracing.SerializeTraceTransformers(trace.FromContext(ctx).SpanContext())...,
 	)
 
+	ctx = ce.WithEncodingStructured(ctx)
 	writer := new(bytes.Buffer)
 	if _, err := cejs.WriteMsg(ctx, message, writer, transformers...); err != nil {
 		logger.Error("failed to write binding.Message to bytes.Buffer")

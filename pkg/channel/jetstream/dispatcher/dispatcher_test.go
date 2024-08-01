@@ -17,6 +17,7 @@ package dispatcher
 
 import (
 	"context"
+	"github.com/google/uuid"
 	nethttp "net/http"
 	"testing"
 	"time"
@@ -86,7 +87,11 @@ func TestDispatcher_Start(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	event := cloudevents.NewEvent()
+	event := cloudevents.NewEvent(cloudevents.VersionV1)
+	event.SetID(uuid.New().String())
+	event.SetType("testtype")
+	event.SetSource("testsource")
+	_ = event.SetData(cloudevents.ApplicationJSON, "{\"destination\":1}")
 
 	err = d.messageReceiver(ctx, channel.ChannelReference{
 		Namespace: testNS, Name: ncName,

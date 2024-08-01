@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -566,7 +567,7 @@ func TestDispatchMessage(t *testing.T) {
 				message,
 				destination,
 				ackWait,
-				msg,
+				internal.NewNatsMessageWrapper(msg),
 				WithReply(&replyDestination),
 				WithDeadLetterSink(&deadLetterSinkDestination),
 				WithRetryConfig(&retryConfig),
