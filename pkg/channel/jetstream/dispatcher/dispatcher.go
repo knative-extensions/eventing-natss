@@ -21,11 +21,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/nats-io/nats.go"
 	nethttp "net/http"
 	"sync"
 
-	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	"github.com/nats-io/nats.go"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	ce "github.com/cloudevents/sdk-go/v2"
@@ -235,7 +234,7 @@ func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfi
 		var consumerConfig *nats.ConsumerConfig
 		// we do not allow update existing consumers from push consumer to pull
 		if isPushConsumer(consInfo) {
-			consumerConfig = buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
+			consumerConfig = buildPushConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
 		} else {
 			consumerConfig = buildPullConsumerConfig(consumerName, config.ConsumerConfigTemplate, sub.RetryConfig)
 		}
@@ -342,20 +341,7 @@ func (d *Dispatcher) getOrEnsureConsumer(ctx context.Context, config ChannelConf
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-
-		if len(config.ConsumerConfigTemplate.ConsumerType) == 0 {
-			config.ConsumerConfigTemplate.ConsumerType = v1alpha1.PushConsumerType
-		}
-		var consumerConfig *nats.ConsumerConfig
-		switch config.ConsumerConfigTemplate.ConsumerType {
-		case v1alpha1.PullConsumerType:
-			logger.Debugw("Create pull consumer configuration")
-			consumerConfig = buildPullConsumerConfig(consumerName, config.ConsumerConfigTemplate, sub.RetryConfig)
-		default:
-			//case v1alpha1.PushConsumer, for backward compatibility
-			logger.Debugw("Create push consumer configuration")
-			consumerConfig = buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
-		}
+		consumerConfig := buildConsumerConfig(ctx, &config, consumerName, deliverSubject, sub.RetryConfig)
 
 		// AddConsumer is idempotent so this will either create the consumer, update to match expected config, or no-op
 		info, err := d.js.AddConsumer(config.StreamName, consumerConfig)

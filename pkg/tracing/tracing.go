@@ -3,8 +3,9 @@ package tracing
 import (
 	"context"
 	"encoding/json"
-	"github.com/nats-io/nats.go/jetstream"
 	"net/http"
+
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/nats-io/nats.go"
 
