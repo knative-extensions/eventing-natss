@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +27,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 
 	"github.com/nats-io/nats.go"
 

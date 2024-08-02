@@ -19,8 +19,9 @@ package dispatcher
 import (
 	"context"
 	"errors"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 	"sync"
+
+	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 
 	"knative.dev/eventing/pkg/kncloudevents"
 

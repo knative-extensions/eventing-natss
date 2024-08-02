@@ -17,9 +17,10 @@ limitations under the License.
 package utils
 
 import (
-	"github.com/nats-io/nats.go/jetstream"
 	"math"
 	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/nats-io/nats.go"
 	"github.com/rickb777/date/period"

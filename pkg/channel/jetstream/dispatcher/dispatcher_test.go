@@ -17,10 +17,11 @@ package dispatcher
 
 import (
 	"context"
-	"github.com/google/uuid"
 	nethttp "net/http"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 

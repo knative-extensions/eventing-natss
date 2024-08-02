@@ -2,9 +2,10 @@ package internal
 
 import (
 	"context"
+	"time"
+
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
-	"time"
 )
 
 type NatsMessageWrapper interface {

@@ -19,9 +19,10 @@ package dispatcher
 import (
 	"context"
 	"fmt"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 	"net/http"
 	"time"
+
+	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 
 	"knative.dev/pkg/apis"
 
