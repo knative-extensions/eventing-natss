@@ -299,6 +299,11 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 			logger.Errorw("failed to create pull consumer", zap.Error(err))
 			return SubscriberStatusTypeError, err
 		}
+		err = consumer.(*PullConsumer).Start()
+		if err != nil {
+			logger.Errorw("failed to start pull consumer", zap.Error(err))
+			return SubscriberStatusTypeError, err
+		}
 	}
 
 	d.consumers[sub.UID] = consumer

@@ -140,7 +140,6 @@ func (c *PullConsumer) Start() error {
 	if err := c.checkStart(); err != nil {
 		return err
 	}
-
 	defer close(c.closed)
 
 	ctx := logging.WithLogger(context.Background(), c.logger)
@@ -158,9 +157,9 @@ func (c *PullConsumer) Start() error {
 
 	for {
 		// TODO move 200 into subscription config
-		batch, err := c.natsConsumer.Fetch(FetchBatchSize, nats.MaxWait(200*time.Millisecond))
+		batch, err := c.natsConsumer.FetchBatch(FetchBatchSize, nats.MaxWait(200*time.Millisecond))
 		if err != nil {
-			return err
+			c.logger.Errorw("Failed to fetch messages", zap.Error(err), zap.String("consumer", c.sub.Name))
 		}
 
 		c.consumeMessages(ctx, batch, &wg)
@@ -172,8 +171,8 @@ func (c *PullConsumer) Start() error {
 //
 // This method returns once the MessageBatch has been consumed, or upon a call to Consumer.Close.
 // Returning as a result of Consumer.Close results in an io.EOF error.
-func (c *PullConsumer) consumeMessages(ctx context.Context, batch []*nats.Msg, wg *sync.WaitGroup) {
-	for _, natsMsg := range batch {
+func (c *PullConsumer) consumeMessages(ctx context.Context, batch nats.MessageBatch, wg *sync.WaitGroup) {
+	for natsMsg := range batch.Messages() {
 		wg.Add(1)
 
 		go func() {
