@@ -153,7 +153,7 @@ func (c *PullConsumer) Start() error {
 	defer cancel()
 
 	for {
-		batch, err := c.natsConsumer.FetchBatch(FetchBatchSize, nats.MaxWait(c.sub.PullSubscription.FetchMaxWait*time.Millisecond))
+		batch, err := c.natsConsumer.FetchBatch(FetchBatchSize, nats.MaxWait(c.sub.PullSubscription.FetchMaxWait))
 		if err != nil {
 			c.logger.Errorw("Failed to fetch messages", zap.Error(err), zap.String("consumer", c.sub.Name))
 		}
