@@ -64,7 +64,7 @@ func (c *PushConsumer) ConsumerType() ConsumerType {
 	return PushConsumerType
 }
 
-func (c *PushConsumer) UpdateSubscription(sub Subscription) {
+func (c *PushConsumer) UpdateSubscription(_ *ChannelConfig, sub Subscription) {
 	//// wait for any pending messages to be processed with the old subscription
 	//c.subMu.Lock()
 	//defer c.subMu.Unlock()

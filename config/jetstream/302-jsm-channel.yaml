@@ -93,9 +93,7 @@ spec:
                       type: string
                     fetchMaxWait:
                       description: Pull consumer. Time to wait for a batch of messages if there is not enough of messages on a stream
-                      type: integer
-                      format: int64
-                      minimum: 0
+                      type: string
                     fetchBatchSize:
                       description: Pull consumer. Batch of messages to pull from stream at once for processing
                       type: integer

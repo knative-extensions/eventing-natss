@@ -219,7 +219,7 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 
 func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfig, sub Subscription, isLeader bool) error {
 	logger := logging.FromContext(ctx)
-	d.consumers[sub.UID].UpdateSubscription(sub)
+	d.consumers[sub.UID].UpdateSubscription(&config, sub)
 	consumerName := d.consumerNameFunc(string(sub.UID))
 
 	if isLeader {
@@ -294,7 +294,7 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 			logger.Errorw("failed to pull subscribe to jetstream", zap.Error(err))
 			return SubscriberStatusTypeError, err
 		}
-		consumer, err = NewPullConsumer(ctx, natsSub, sub, d.dispatcher, d.reporter, config.Namespace)
+		consumer, err = NewPullConsumer(ctx, natsSub, sub, d.dispatcher, d.reporter, &config)
 		if err != nil {
 			logger.Errorw("failed to create pull consumer", zap.Error(err))
 			return SubscriberStatusTypeError, err

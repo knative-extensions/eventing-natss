@@ -314,7 +314,7 @@ type ConsumerConfigTemplate struct {
 	// Pulling Consumer Opts Below:
 	ConsumerType ConsumerType `json:"consumerType,omitempty"`
 
-	FetchMaxWait int `json:"fetchMaxWait,omitempty"`
+	FetchMaxWait metav1.Duration `json:"fetchMaxWait,omitempty"`
 
 	FetchBatchSize int `json:"fetchBatchSize,omitempty"`
 }

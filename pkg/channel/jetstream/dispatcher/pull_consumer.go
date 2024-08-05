@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"sync"
@@ -64,6 +65,8 @@ var (
 	// reduce the number of requests made to JetStream. Depending on the expected latency eventing
 	// subscribers, you may also want to increase NumBatchGoRoutines.
 	FetchBatchSize = 32
+
+	FetchMaxWaitDefault = 200 * time.Millisecond
 )
 
 func init() {
@@ -97,25 +100,19 @@ type PullConsumer struct {
 	closed      chan struct{}
 }
 
-func NewPullConsumer(
-	ctx context.Context,
-	consumer *nats.Subscription,
-	subscription Subscription,
-	dispatcher *kncloudevents.Dispatcher,
-	reporter eventingchannels.StatsReporter,
-	channelNamespace string,
-) (*PullConsumer, error) {
+func NewPullConsumer(ctx context.Context, consumer *nats.Subscription, subscription Subscription, dispatcher *kncloudevents.Dispatcher, reporter eventingchannels.StatsReporter, channelConfig *ChannelConfig) (*PullConsumer, error) {
 	consumerInfo, err := consumer.ConsumerInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get consumer info: %w", err)
 	}
 
 	logger := logging.FromContext(ctx)
+	updatePullSubscriptionConfig(channelConfig, &subscription)
 
 	return &PullConsumer{
 		dispatcher:       dispatcher,
 		reporter:         reporter,
-		channelNamespace: channelNamespace,
+		channelNamespace: channelConfig.Namespace,
 
 		natsConsumer:     consumer,
 		natsConsumerInfo: consumerInfo,
@@ -156,13 +153,18 @@ func (c *PullConsumer) Start() error {
 	defer cancel()
 
 	for {
-		// TODO move 200 into subscription config
-		batch, err := c.natsConsumer.FetchBatch(FetchBatchSize, nats.MaxWait(200*time.Millisecond))
+		batch, err := c.natsConsumer.FetchBatch(FetchBatchSize, nats.MaxWait(c.sub.PullSubscription.FetchMaxWait*time.Millisecond))
 		if err != nil {
 			c.logger.Errorw("Failed to fetch messages", zap.Error(err), zap.String("consumer", c.sub.Name))
 		}
 
-		c.consumeMessages(ctx, batch, &wg)
+		if err := c.consumeMessages(ctx, batch, &wg); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+
+			return err
+		}
 	}
 }
 
@@ -171,30 +173,56 @@ func (c *PullConsumer) Start() error {
 //
 // This method returns once the MessageBatch has been consumed, or upon a call to Consumer.Close.
 // Returning as a result of Consumer.Close results in an io.EOF error.
-func (c *PullConsumer) consumeMessages(ctx context.Context, batch nats.MessageBatch, wg *sync.WaitGroup) {
-	for natsMsg := range batch.Messages() {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-			ctx := logging.WithLogger(ctx, c.logger.With(zap.String("msg_id", natsMsg.Header.Get(nats.MsgIdHdr))))
-			msg := internal.NewMessage(ctx, natsMsg, c.natsConsumerInfo.Config.AckWait)
-
-			if err := c.handleMessage(msg); err != nil {
-				// handleMessage only errors if the message cannot be finished, any other error
-				// is consumed by msg.Finish(err)
-				logging.FromContext(ctx).Errorw("failed to finish message", zap.Error(err))
+func (c *PullConsumer) consumeMessages(ctx context.Context, batch nats.MessageBatch, wg *sync.WaitGroup) error {
+	for {
+		select {
+		case natsMsg, ok := <-batch.Messages():
+			if !ok {
+				return nil
 			}
-		}()
+
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+				ctx := logging.WithLogger(ctx, c.logger.With(zap.String("msg_id", natsMsg.Header.Get(nats.MsgIdHdr))))
+				msg := internal.NewMessage(ctx, natsMsg, c.natsConsumerInfo.Config.AckWait)
+
+				if err := c.handleMessage(msg); err != nil {
+					// handleMessage only errors if the message cannot be finished, any other error
+					// is consumed by msg.Finish(err)
+					logging.FromContext(ctx).Errorw("failed to finish message", zap.Error(err))
+				}
+			}()
+		case <-c.closing:
+			return io.EOF
+		}
 	}
 }
 
-func (c *PullConsumer) UpdateSubscription(sub Subscription) {
+func (c *PullConsumer) UpdateSubscription(config *ChannelConfig, sub Subscription) {
 	// wait for any pending messages to be processed with the old subscription
 	c.subMu.Lock()
 	defer c.subMu.Unlock()
 
 	c.sub = sub
+	updatePullSubscriptionConfig(config, &sub)
+}
+
+func updatePullSubscriptionConfig(config *ChannelConfig, sub *Subscription) {
+	if sub.PullSubscription == nil {
+		sub.PullSubscription = &PullSubscription{}
+	}
+
+	sub.PullSubscription.FetchBatchSize = config.ConsumerConfigTemplate.FetchBatchSize
+	if config.ConsumerConfigTemplate.FetchBatchSize == 0 {
+		sub.PullSubscription.FetchBatchSize = FetchBatchSize
+	}
+
+	sub.PullSubscription.FetchMaxWait = config.ConsumerConfigTemplate.FetchMaxWait.Duration
+	if config.ConsumerConfigTemplate.FetchMaxWait.Duration == 0 {
+		sub.PullSubscription.FetchMaxWait = FetchMaxWaitDefault
+	}
 }
 
 func (c *PullConsumer) handleMessage(msg internal.Message) (err error) {
