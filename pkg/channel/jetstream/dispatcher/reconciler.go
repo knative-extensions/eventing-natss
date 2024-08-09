@@ -297,7 +297,7 @@ func (r *Reconciler) newConfigFromChannel(nc *v1alpha1.NatsJetStreamChannel) Cha
 			//
 			// We could leverage JetStream's ability to redeliver messages to a consumer, but this would require
 			// not using DispatchMessageWithRetries, and translate the subscription's delivery configuration into
-			// the JetStream ConsumerConfig. We would then use dispatcher.Consumer's MsgHandler function to handle
+			// the JetStream ConsumerConfig. We would then use dispatcher.PushConsumer's MsgHandler function to handle
 			// whether to ack, nack or term the message.
 			if innerSub.RetryConfig != nil {
 				innerSub.RetryConfig.CheckRetry = kncloudevents.SelectiveRetry

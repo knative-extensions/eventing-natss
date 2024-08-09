@@ -34,6 +34,7 @@ func (in *ConsumerConfigTemplate) DeepCopyInto(out *ConsumerConfigTemplate) {
 		*out = (*in).DeepCopy()
 	}
 	out.AckWait = in.AckWait
+	out.FetchMaxWait = in.FetchMaxWait
 	return
 }
 

@@ -99,6 +99,13 @@ const (
 	OriginalReplayPolicy ReplayPolicy = "Original"
 )
 
+type ConsumerType string
+
+const (
+	PushConsumerType ConsumerType = "Push"
+	PullConsumerType ConsumerType = "Pull"
+)
+
 // +genclient
 // +genreconciler
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -303,6 +310,13 @@ type ConsumerConfigTemplate struct {
 	// limit is reached message delivery will be suspended.
 	// +optional
 	MaxAckPending int `json:"maxAckPending,omitempty"`
+
+	// Pulling Consumer Opts Below:
+	ConsumerType ConsumerType `json:"consumerType,omitempty"`
+
+	FetchMaxWait metav1.Duration `json:"fetchMaxWait,omitempty"`
+
+	FetchBatchSize int `json:"fetchBatchSize,omitempty"`
 }
 
 type JetStreamDispatcherDeploymentTemplate struct {

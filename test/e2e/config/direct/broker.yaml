@@ -23,5 +23,5 @@ spec:
   config:
     apiVersion: v1
     kind: ConfigMap
-    name: config-natss-channel
-    namespace: natss
+    name: config-natjsm-channel
+    namespace: knative-eventing
