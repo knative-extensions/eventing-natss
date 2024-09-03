@@ -1060,7 +1060,7 @@ k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.42.1-0.20240828134450-34f9cd384dea
+# knative.dev/eventing v0.42.1-0.20240902133926-07d379056bd8
 ## explicit; go 1.22.0
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
