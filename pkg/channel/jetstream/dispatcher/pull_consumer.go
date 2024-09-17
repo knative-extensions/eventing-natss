@@ -40,41 +40,21 @@ import (
 )
 
 const (
-	batchGoRoutinesEnv = "BATCH_GOROUTINES"
-	fetchBatchSizeEnv  = "FETCH_BATCH_SIZE"
+	fetchBatchSizeEnv = "FETCH_BATCH_SIZE"
 )
 
 var (
-	// NumBatchGoRoutines is the number of goroutines that will be used to consume messages from
-	// the queue, there are a number of factors you will want to tweak this number. This can be
-	// configured via the BATCH_GOROUTINES environment variable.
-	//
-	// If you have sufficient resources, it is better to have NumBatchGoRoutines equal to
-	// FetchBatchSize so that messages received by JetStream are immediately processed. This will
-	// give the upstream request the closest amount of time to respond to the consumer's configured
-	// AckWait. This is beneficial because if the eventing subscriber is a scale-to-zero service,
-	// you have more time for resources to spin up.
-	//
-	// If you have limited resources, you may want to reduce the number of goroutines.
-	NumBatchGoRoutines = 32
-
 	// FetchBatchSize is the number of messages that will be fetched from JetStream in a single
 	// request. This can be configured via the FETCH_BATCH_SIZE environment variable.
 	//
 	// If you expect to process a high-volume of messages, you may want to increase this number to
-	// reduce the number of requests made to JetStream. Depending on the expected latency eventing
-	// subscribers, you may also want to increase NumBatchGoRoutines.
+	// reduce the number of requests made to JetStream.
 	FetchBatchSize = 32
 
 	FetchMaxWaitDefault = 200 * time.Millisecond
 )
 
 func init() {
-	batchSize, err := strconv.Atoi(os.Getenv(batchGoRoutinesEnv))
-	if err == nil {
-		NumBatchGoRoutines = batchSize
-	}
-
 	fetchSize, err := strconv.Atoi(os.Getenv(fetchBatchSizeEnv))
 	if err == nil {
 		FetchBatchSize = fetchSize
