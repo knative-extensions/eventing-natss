@@ -367,8 +367,8 @@ golang.org/x/crypto/nacl/secretbox
 golang.org/x/crypto/ocsp
 golang.org/x/crypto/pbkdf2
 golang.org/x/crypto/salsa20/salsa
-# golang.org/x/mod v0.20.0
-## explicit; go 1.18
+# golang.org/x/mod v0.21.0
+## explicit; go 1.22.0
 golang.org/x/mod/internal/lazyregexp
 golang.org/x/mod/module
 golang.org/x/mod/semver
@@ -411,8 +411,8 @@ golang.org/x/text/unicode/norm
 # golang.org/x/time v0.6.0
 ## explicit; go 1.18
 golang.org/x/time/rate
-# golang.org/x/tools v0.24.0
-## explicit; go 1.19
+# golang.org/x/tools v0.25.0
+## explicit; go 1.22.0
 golang.org/x/tools/go/ast/astutil
 golang.org/x/tools/go/gcexportdata
 golang.org/x/tools/go/packages
@@ -445,7 +445,7 @@ google.golang.org/genproto/googleapis/api/httpbody
 # google.golang.org/genproto/googleapis/rpc v0.0.0-20240808171019-573a1156607a
 ## explicit; go 1.20
 google.golang.org/genproto/googleapis/rpc/status
-# google.golang.org/grpc v1.66.0
+# google.golang.org/grpc v1.66.2
 ## explicit; go 1.21
 google.golang.org/grpc
 google.golang.org/grpc/attributes
@@ -1064,7 +1064,7 @@ k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.42.1-0.20240911141024-c91a9d8a471d
+# knative.dev/eventing v0.42.1-0.20240918141338-17088813b4e0
 ## explicit; go 1.22.0
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
@@ -1115,37 +1115,10 @@ knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1
 knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1/fake
 knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta2
 knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta2/fake
-knative.dev/eventing/pkg/client/informers/externalversions
-knative.dev/eventing/pkg/client/informers/externalversions/eventing
-knative.dev/eventing/pkg/client/informers/externalversions/eventing/v1
-knative.dev/eventing/pkg/client/informers/externalversions/eventing/v1alpha1
-knative.dev/eventing/pkg/client/informers/externalversions/eventing/v1beta1
-knative.dev/eventing/pkg/client/informers/externalversions/eventing/v1beta2
-knative.dev/eventing/pkg/client/informers/externalversions/eventing/v1beta3
-knative.dev/eventing/pkg/client/informers/externalversions/flows
-knative.dev/eventing/pkg/client/informers/externalversions/flows/v1
-knative.dev/eventing/pkg/client/informers/externalversions/internalinterfaces
-knative.dev/eventing/pkg/client/informers/externalversions/messaging
-knative.dev/eventing/pkg/client/informers/externalversions/messaging/v1
-knative.dev/eventing/pkg/client/informers/externalversions/sinks
-knative.dev/eventing/pkg/client/informers/externalversions/sinks/v1alpha1
-knative.dev/eventing/pkg/client/informers/externalversions/sources
-knative.dev/eventing/pkg/client/informers/externalversions/sources/v1
-knative.dev/eventing/pkg/client/informers/externalversions/sources/v1beta2
 knative.dev/eventing/pkg/client/injection/client
 knative.dev/eventing/pkg/client/injection/client/fake
-knative.dev/eventing/pkg/client/injection/informers/eventing/v1alpha1/eventpolicy
-knative.dev/eventing/pkg/client/injection/informers/factory
-knative.dev/eventing/pkg/client/listers/eventing/v1
 knative.dev/eventing/pkg/client/listers/eventing/v1alpha1
-knative.dev/eventing/pkg/client/listers/eventing/v1beta1
 knative.dev/eventing/pkg/client/listers/eventing/v1beta2
-knative.dev/eventing/pkg/client/listers/eventing/v1beta3
-knative.dev/eventing/pkg/client/listers/flows/v1
-knative.dev/eventing/pkg/client/listers/messaging/v1
-knative.dev/eventing/pkg/client/listers/sinks/v1alpha1
-knative.dev/eventing/pkg/client/listers/sources/v1
-knative.dev/eventing/pkg/client/listers/sources/v1beta2
 knative.dev/eventing/pkg/crossnamespace
 knative.dev/eventing/pkg/eventfilter
 knative.dev/eventing/pkg/eventfilter/attributes
@@ -1170,7 +1143,7 @@ knative.dev/hack/schema/commands
 knative.dev/hack/schema/docs
 knative.dev/hack/schema/registry
 knative.dev/hack/schema/schema
-# knative.dev/pkg v0.0.0-20240912132815-3002873b449c
+# knative.dev/pkg v0.0.0-20240917091217-aaab500c26c4
 ## explicit; go 1.22.0
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
