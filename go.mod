@@ -22,11 +22,11 @@ require (
 	k8s.io/apimachinery v0.30.3
 	k8s.io/client-go v0.30.3
 	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
-	knative.dev/eventing v0.42.1-0.20240918141338-17088813b4e0
+	knative.dev/eventing v0.42.1-0.20240923135023-641cbb7dffe2
 	knative.dev/hack v0.0.0-20240909014011-fc6a8452af6d
 	knative.dev/hack/schema v0.0.0-20240909014011-fc6a8452af6d
-	knative.dev/pkg v0.0.0-20240917091217-aaab500c26c4
-	knative.dev/reconciler-test v0.0.0-20240911144508-6372b7a0c4b1
+	knative.dev/pkg v0.0.0-20240923063442-aabe552ba5e6
+	knative.dev/reconciler-test v0.0.0-20240924085229-13c0118a9d5c
 )
 
 require (
@@ -60,7 +60,7 @@ require (
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
-	github.com/gobuffalo/flect v1.0.2 // indirect
+	github.com/gobuffalo/flect v1.0.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
@@ -108,9 +108,9 @@ require (
 	golang.org/x/tools v0.25.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/api v0.183.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240808171019-573a1156607a // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240808171019-573a1156607a // indirect
-	google.golang.org/grpc v1.66.2 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240814211410-ddb44dafa142 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240814211410-ddb44dafa142 // indirect
+	google.golang.org/grpc v1.67.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
