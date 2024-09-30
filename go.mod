@@ -22,11 +22,11 @@ require (
 	k8s.io/apimachinery v0.30.3
 	k8s.io/client-go v0.30.3
 	k8s.io/utils v0.0.0-20240711033017-18e509b52bc8
-	knative.dev/eventing v0.42.1-0.20240923135023-641cbb7dffe2
+	knative.dev/eventing v0.42.1-0.20240926123447-e7fca7646f4a
 	knative.dev/hack v0.0.0-20240909014011-fc6a8452af6d
 	knative.dev/hack/schema v0.0.0-20240909014011-fc6a8452af6d
-	knative.dev/pkg v0.0.0-20240923063442-aabe552ba5e6
-	knative.dev/reconciler-test v0.0.0-20240924085229-13c0118a9d5c
+	knative.dev/pkg v0.0.0-20240930065954-503173341499
+	knative.dev/reconciler-test v0.0.0-20240926123451-87d857060042
 )
 
 require (
@@ -94,7 +94,7 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
-	go.uber.org/automaxprocs v1.5.3 // indirect
+	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.27.0 // indirect
 	golang.org/x/mod v0.21.0 // indirect
