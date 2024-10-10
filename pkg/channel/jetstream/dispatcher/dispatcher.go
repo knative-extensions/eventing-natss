@@ -24,11 +24,13 @@ import (
 	nethttp "net/http"
 	"sync"
 
+	"github.com/nats-io/nats.go"
+
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
+	ce "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/google/uuid"
-	"github.com/nats-io/nats.go"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/types"
@@ -66,7 +68,7 @@ type Dispatcher struct {
 
 	consumerUpdateLock sync.Mutex
 	channelSubscribers map[types.NamespacedName]sets.Set[string]
-	consumers          map[types.UID]*Consumer
+	consumers          map[types.UID]Consumer
 }
 
 func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, error) {
@@ -86,7 +88,7 @@ func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, e
 		consumerSubjectFunc: args.ConsumerSubjectFunc,
 
 		channelSubscribers: make(map[types.NamespacedName]sets.Set[string]),
-		consumers:          make(map[types.UID]*Consumer),
+		consumers:          make(map[types.UID]Consumer),
 	}
 
 	receiverFunc, err := eventingchannels.NewEventReceiver(
@@ -184,7 +186,7 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 		switch status {
 		case SubscriberStatusTypeCreated, SubscriberStatusTypeUpToDate:
 			nextSubs.Insert(uid)
-		case SubscriberStatusTypeSkipped, SubscriberStatusTypeError:
+		case SubscriberStatusTypeDeleted, SubscriberStatusTypeSkipped, SubscriberStatusTypeError:
 			nextSubs.Delete(uid)
 		}
 
@@ -217,14 +219,27 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 
 func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfig, sub Subscription, isLeader bool) error {
 	logger := logging.FromContext(ctx)
-	d.consumers[sub.UID].sub = sub
+	d.consumers[sub.UID].UpdateSubscription(&config, sub)
 	consumerName := d.consumerNameFunc(string(sub.UID))
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
 
-		_, err := d.js.UpdateConsumer(config.StreamName, consumerConfig)
+		consInfo, err := d.js.ConsumerInfo(config.StreamName, consumerName)
+		if err != nil {
+			logger.Warnw("failed to get consumer to update", zap.Error(err),
+				zap.String("consumer", consumerName), zap.String("stream", config.StreamName))
+		}
+
+		var consumerConfig *nats.ConsumerConfig
+		// we do not allow update existing consumers from push consumer to pull
+		if isPushConsumer(consInfo) {
+			consumerConfig = buildPushConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
+		} else {
+			consumerConfig = buildPullConsumerConfig(consumerName, config.ConsumerConfigTemplate, sub.RetryConfig)
+		}
+
+		_, err = d.js.UpdateConsumer(config.StreamName, consumerConfig)
 		if err != nil {
 			logger.Errorw("failed to update queue subscription for consumer", zap.Error(err))
 			return err
@@ -234,10 +249,15 @@ func (d *Dispatcher) updateSubscription(ctx context.Context, config ChannelConfi
 	return nil
 }
 
+func isPushConsumer(info *nats.ConsumerInfo) bool {
+	return len(info.Config.DeliverSubject) > 0
+}
+
 func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Subscription, isLeader bool) (SubscriberStatusType, error) {
 	logger := logging.FromContext(ctx)
 
 	info, err := d.getOrEnsureConsumer(ctx, config, sub, isLeader)
+	logger.Debugw("ConsumerInfo created", zap.Any("ConsumerInfo", info))
 	if err != nil {
 		if errors.Is(err, nats.ErrConsumerNotFound) {
 			//	this error can only occur if the dispatcher is not the leader
@@ -249,21 +269,41 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 		return SubscriberStatusTypeError, err
 	}
 
-	consumer := &Consumer{
-		sub:              sub,
-		dispatcher:       d.dispatcher,
-		reporter:         d.reporter,
-		channelNamespace: config.Namespace,
-		logger:           logger,
-		ctx:              ctx,
-		natsConsumerInfo: info,
-	}
-
-	consumer.jsSub, err = d.js.QueueSubscribe(info.Config.DeliverSubject, info.Config.DeliverGroup, consumer.MsgHandler,
-		nats.Bind(info.Stream, info.Name), nats.ManualAck())
-	if err != nil {
-		logger.Errorw("failed to create queue subscription for consumer")
-		return SubscriberStatusTypeError, err
+	var consumer Consumer
+	if isPushConsumer(info) {
+		pushConsumer := &PushConsumer{
+			sub:              sub,
+			dispatcher:       d.dispatcher,
+			reporter:         d.reporter,
+			channelNamespace: config.Namespace,
+			logger:           logger,
+			ctx:              ctx,
+			natsConsumerInfo: info,
+		}
+		jsSub, err := d.js.QueueSubscribe(info.Config.DeliverSubject, info.Config.DeliverGroup, pushConsumer.MsgHandler,
+			nats.Bind(info.Stream, info.Name), nats.ManualAck())
+		if err != nil {
+			logger.Errorw("failed to create queue subscription for consumer")
+			return SubscriberStatusTypeError, err
+		}
+		pushConsumer.jsSub = jsSub
+		consumer = pushConsumer
+	} else {
+		natsSub, err := d.js.PullSubscribe(".>", info.Config.Durable, nats.Bind(info.Stream, info.Name), nats.ManualAck())
+		if err != nil {
+			logger.Errorw("failed to pull subscribe to jetstream", zap.Error(err))
+			return SubscriberStatusTypeError, err
+		}
+		consumer, err = NewPullConsumer(ctx, natsSub, sub, d.dispatcher, d.reporter, &config)
+		if err != nil {
+			logger.Errorw("failed to create pull consumer", zap.Error(err))
+			return SubscriberStatusTypeError, err
+		}
+		err = consumer.(*PullConsumer).Start()
+		if err != nil {
+			logger.Errorw("failed to start pull consumer", zap.Error(err))
+			return SubscriberStatusTypeError, err
+		}
 	}
 
 	d.consumers[sub.UID] = consumer
@@ -306,7 +346,7 @@ func (d *Dispatcher) getOrEnsureConsumer(ctx context.Context, config ChannelConf
 
 	if isLeader {
 		deliverSubject := d.consumerSubjectFunc(config.Namespace, config.Name, string(sub.UID))
-		consumerConfig := buildConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, sub.RetryConfig)
+		consumerConfig := buildConsumerConfig(ctx, &config, consumerName, deliverSubject, sub.RetryConfig)
 
 		// AddConsumer is idempotent so this will either create the consumer, update to match expected config, or no-op
 		info, err := d.js.AddConsumer(config.StreamName, consumerConfig)
@@ -338,7 +378,7 @@ func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.Ch
 	message := binding.ToMessage(&event)
 
 	logger := logging.FromContext(ctx)
-	logger.Debugw("received message from HTTP receiver")
+	logger.Debugw("received message from HTTP receiver", zap.Any("event", event))
 
 	eventID := commonce.IDExtractorTransformer("")
 
@@ -346,6 +386,7 @@ func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.Ch
 		tracing.SerializeTraceTransformers(trace.FromContext(ctx).SpanContext())...,
 	)
 
+	ctx = ce.WithEncodingStructured(ctx)
 	writer := new(bytes.Buffer)
 	if _, err := cejs.WriteMsg(ctx, message, writer, transformers...); err != nil {
 		logger.Error("failed to write binding.Message to bytes.Buffer")

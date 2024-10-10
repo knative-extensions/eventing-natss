@@ -17,7 +17,10 @@ limitations under the License.
 package dispatcher
 
 import (
+	"context"
 	"time"
+
+	"knative.dev/pkg/logging"
 
 	"github.com/nats-io/nats.go"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
@@ -58,13 +61,72 @@ func buildStreamConfig(streamName, subject string, config *v1alpha1.StreamConfig
 
 }
 
-func buildConsumerConfig(consumerName, deliverSubject string, template *v1alpha1.ConsumerConfigTemplate, retryConfig *kncloudevents.RetryConfig) *nats.ConsumerConfig {
+func buildConsumerConfig(ctx context.Context, config *ChannelConfig, consumerName, deliverSubject string, retryConfig *kncloudevents.RetryConfig) *nats.ConsumerConfig {
+	logger := logging.FromContext(ctx)
+	if config.ConsumerConfigTemplate == nil {
+		config.ConsumerConfigTemplate = &v1alpha1.ConsumerConfigTemplate{}
+	} else if len(config.ConsumerConfigTemplate.ConsumerType) == 0 {
+		config.ConsumerConfigTemplate.ConsumerType = v1alpha1.PushConsumerType
+	}
+	var consumerConfig *nats.ConsumerConfig
+	switch config.ConsumerConfigTemplate.ConsumerType {
+	case v1alpha1.PullConsumerType:
+		logger.Debugw("Create pull consumer configuration")
+		consumerConfig = buildPullConsumerConfig(consumerName, config.ConsumerConfigTemplate, retryConfig)
+	default:
+		//case v1alpha1.PushConsumer, for backward compatibility
+		logger.Debugw("Create push consumer configuration")
+		consumerConfig = buildPushConsumerConfig(consumerName, deliverSubject, config.ConsumerConfigTemplate, retryConfig)
+	}
+	return consumerConfig
+}
+
+func buildPushConsumerConfig(consumerName, deliverSubject string, template *v1alpha1.ConsumerConfigTemplate, retryConfig *kncloudevents.RetryConfig) *nats.ConsumerConfig {
 	const jitter = time.Millisecond * 500
 	consumerConfig := nats.ConsumerConfig{
 		Durable:        consumerName,
 		DeliverGroup:   consumerName,
 		DeliverSubject: deliverSubject,
 		AckPolicy:      nats.AckExplicitPolicy,
+	}
+
+	if template != nil {
+		consumerConfig.AckWait = template.AckWait.Duration
+	}
+
+	if retryConfig != nil {
+		if retryConfig.RequestTimeout > 0 {
+			consumerConfig.AckWait = retryConfig.RequestTimeout + jitter
+		}
+
+		consumerConfig.MaxDeliver = retryConfig.RetryMax + 1
+	}
+
+	if template != nil {
+		consumerConfig.DeliverPolicy = utils.ConvertDeliverPolicy(template.DeliverPolicy, nats.DeliverAllPolicy)
+		consumerConfig.OptStartSeq = template.OptStartSeq
+		// ignoring template.AckWait and template.MaxDeliver
+		consumerConfig.FilterSubject = template.FilterSubject
+		consumerConfig.ReplayPolicy = utils.ConvertReplayPolicy(template.ReplayPolicy, nats.ReplayInstantPolicy)
+		consumerConfig.RateLimit = template.RateLimitBPS
+		consumerConfig.SampleFrequency = template.SampleFrequency
+		consumerConfig.MaxAckPending = template.MaxAckPending
+
+		if template.OptStartTime != nil {
+			consumerConfig.OptStartTime = &template.OptStartTime.Time
+		}
+	}
+
+	return &consumerConfig
+}
+
+func buildPullConsumerConfig(consumerName string, template *v1alpha1.ConsumerConfigTemplate, retryConfig *kncloudevents.RetryConfig) *nats.ConsumerConfig {
+	const jitter = time.Millisecond * 500
+
+	consumerConfig := nats.ConsumerConfig{
+		Name:      consumerName,
+		Durable:   consumerName,
+		AckPolicy: nats.AckExplicitPolicy,
 	}
 
 	if template != nil {
