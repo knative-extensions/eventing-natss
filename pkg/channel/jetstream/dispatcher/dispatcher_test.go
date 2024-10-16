@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 
 	"knative.dev/eventing/pkg/channel/fanout"
@@ -86,7 +88,11 @@ func TestDispatcher_Start(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	event := cloudevents.NewEvent()
+	event := cloudevents.NewEvent(cloudevents.VersionV1)
+	event.SetID(uuid.New().String())
+	event.SetType("testtype")
+	event.SetSource("testsource")
+	_ = event.SetData(cloudevents.ApplicationJSON, "{\"destination\":1}")
 
 	err = d.messageReceiver(ctx, channel.ChannelReference{
 		Namespace: testNS, Name: ncName,

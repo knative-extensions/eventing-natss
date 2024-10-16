@@ -88,6 +88,17 @@ spec:
                     sampleFrequency:
                       description: SampleFrequency sets the percentage of acknowledgements that should be sampled for observability. Valid values are in the range 0-100 and, for example, allows both formats of "30" and "30%".
                       type: string
+                    consumerType:
+                      description: Push or Pull based subscriptions
+                      type: string
+                    fetchMaxWait:
+                      description: Pull consumer. Time to wait for a batch of messages if there is not enough of messages on a stream
+                      type: string
+                    fetchBatchSize:
+                      description: Pull consumer. Batch of messages to pull from stream at once for processing
+                      type: integer
+                      format: int32
+                      minimum: 1
                 delivery:
                   description: DeliverySpec contains the default delivery spec for each subscription to this Channelable. Each subscription delivery spec, if any, overrides this global delivery spec.
                   type: object

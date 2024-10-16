@@ -17,6 +17,8 @@ limitations under the License.
 package dispatcher
 
 import (
+	"time"
+
 	"github.com/nats-io/nats.go"
 	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
@@ -66,6 +68,12 @@ func (cc ChannelConfig) SubscriptionsUIDs() []string {
 type Subscription struct {
 	UID types.UID
 	fanout.Subscription
+	PullSubscription *PullSubscription
+}
+
+type PullSubscription struct {
+	FetchMaxWait   time.Duration
+	FetchBatchSize int
 }
 
 type envConfig struct {

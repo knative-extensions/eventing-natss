@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-nats
+  namespace: knative-eventing
+data:
+  eventing-nats: |
+    url: nats://nats.nats-io.svc.cluster.local
+    connOpts:
+      retryOnFailedConnect: true
+      maxReconnects: 5
+      reconnectWaitMilliseconds: 2000
+      reconnectJitterMilliseconds: 100
+      reconnectJitterTLSMilliseconds: 1000
