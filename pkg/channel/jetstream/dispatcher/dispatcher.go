@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
+	ce "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/google/uuid"
@@ -346,6 +347,7 @@ func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.Ch
 		tracing.SerializeTraceTransformers(trace.FromContext(ctx).SpanContext())...,
 	)
 
+	ctx = ce.WithEncodingStructured(ctx)
 	writer := new(bytes.Buffer)
 	if _, err := cejs.WriteMsg(ctx, message, writer, transformers...); err != nil {
 		logger.Error("failed to write binding.Message to bytes.Buffer")
