@@ -90,14 +90,16 @@ jobs:
         # Create a cluster!
         kind create cluster --config kind.yaml
 
-    - name: Install natss
+    - name: Install nats
       run: |
         set -x
 
-        kubectl create namespace natss
-        kubectl apply -n natss -f ./config/broker/natss.yaml
-        # Create a ConfigMap that we use to instruct Broker to create natss channels.
-        kubectl apply -n natss -f ./config/broker/config-br-default-channel-natss.yaml
+        kubectl create namespace nats
+        kubectl apply -n nats-io -f ./config/broker/natsjsm.yaml
+        # Create a ConfigMap that we use to instruct Broker to create nats channels.
+        kubectl create namespace knative-eventing
+        kubectl apply -n knative-eventing -f ./config/broker/config-br-default-channel-jsm.yaml
+        kubectl apply -n knative-eventing -f ./config/broker/config-nats.yaml
 
     - name: Install Knative Eventing
       run: |
@@ -113,8 +115,9 @@ jobs:
         set -x
         # TODO: this should use the release script and then apply the newly created release yaml in the future.
 
-        # Install the natss channel
-        ko apply -f ./config/
+        # Install the nats channel
+        ko apply -f ./config/webhook
+        ko apply -f ./config/jetstream
 
     - name: Wait for Ready
       run: |
@@ -172,7 +175,7 @@ jobs:
         SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         SLACK_CHANNEL: 'eventing-delivery'
         MSG_MINIMAL: 'true'
-        SLACK_TITLE: Periodic e2e for Natss on kind on (${{ matrix.k8s-version }}, ${{ matrix.eventing-version }}) failed.
+        SLACK_TITLE: Periodic e2e for Nats on kind on (${{ matrix.k8s-version }}, ${{ matrix.eventing-version }}) failed.
         SLACK_MESSAGE: |
           For detailed logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 

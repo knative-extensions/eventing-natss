@@ -16,7 +16,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: config-natjsm-channel
-  namespace: nats
+  namespace: knative-eventing
   labels:
     eventing.knative.dev/release: devel
 data:

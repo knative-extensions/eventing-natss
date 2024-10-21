@@ -20,12 +20,42 @@ import (
 	"math"
 	"time"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/nats-io/nats.go"
 	"github.com/rickb777/date/period"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	v1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/eventing/pkg/kncloudevents"
 )
+
+func ConvertJsDeliverPolicy(in v1alpha1.DeliverPolicy, def jetstream.DeliverPolicy) jetstream.DeliverPolicy {
+	switch in {
+	case v1alpha1.AllDeliverPolicy:
+		return jetstream.DeliverAllPolicy
+	case v1alpha1.LastDeliverPolicy:
+		return jetstream.DeliverLastPolicy
+	case v1alpha1.NewDeliverPolicy:
+		return jetstream.DeliverNewPolicy
+	case v1alpha1.ByStartSequenceDeliverPolicy:
+		return jetstream.DeliverByStartSequencePolicy
+	case v1alpha1.ByStartTimeDeliverPolicy:
+		return jetstream.DeliverByStartTimePolicy
+	}
+
+	return def
+}
+
+func ConvertJsReplayPolicy(in v1alpha1.ReplayPolicy, def jetstream.ReplayPolicy) jetstream.ReplayPolicy {
+	switch in {
+	case v1alpha1.InstantReplayPolicy:
+		return jetstream.ReplayInstantPolicy
+	case v1alpha1.OriginalReplayPolicy:
+		return jetstream.ReplayOriginalPolicy
+	}
+
+	return def
+}
 
 func ConvertDeliverPolicy(in v1alpha1.DeliverPolicy, def nats.DeliverPolicy) nats.DeliverPolicy {
 	switch in {
@@ -55,21 +85,21 @@ func ConvertReplayPolicy(in v1alpha1.ReplayPolicy, def nats.ReplayPolicy) nats.R
 	return def
 }
 
-func CalcRequestTimeout(msg *nats.Msg, ackWait time.Duration) time.Duration {
+func CalcRequestTimeout(numDelivered int, ackWait time.Duration) time.Duration {
 	const jitter = time.Millisecond * 200
 
 	// if previous deliveries were explicitly nacked earlier than the deadline, then our actual deadline will be earlier
 	// than the deadline above
 	ackDeadlineFromNow := ackWait - jitter
 
-	meta, err := msg.Metadata()
-	if err != nil {
-		return ackDeadlineFromNow
-	}
+	//meta, err := msg.Metadata()
+	//if err != nil {
+	//	return ackDeadlineFromNow
+	//}
 
 	// if each delivery has timed out, then multiplying the number of deliveries by the ack wait will give us the
 	// duration from publish which this attempt will be ack-waited
-	ackDurationFromPublish := time.Duration(meta.NumDelivered) * ackWait
+	ackDurationFromPublish := time.Duration(numDelivered) * ackWait
 
 	// the deadline is the published timestamp plus our duration calculated above
 	deadline := ackDurationFromPublish - jitter

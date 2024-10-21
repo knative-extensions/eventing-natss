@@ -16,7 +16,7 @@ kind: Namespace
 metadata:
   labels:
     kubernetes.io/metadata.name: nats
-  name: nats
+  name: nats-io
 
 ---
 
@@ -26,7 +26,7 @@ metadata:
   labels:
     app: nats-jetstream
   name: nats-jetstream
-  namespace: nats
+  namespace: nats-io
 data:
   gnatsd.conf: |
     # configuration file used to override default NATS server settings
@@ -47,8 +47,8 @@ data:
 apiVersion: v1
 kind: Service
 metadata:
-  name: jetstream
-  namespace: nats
+  name: nats
+  namespace: nats-io
   labels:
     app: nats-jetstream
 spec:
@@ -68,7 +68,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: nats-jetstream
-  namespace: nats
+  namespace: nats-io
   labels:
     app: nats-jetstream
 spec:

@@ -22,10 +22,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/nats-io/nats.go"
+
 	"knative.dev/pkg/apis"
 
 	"github.com/cloudevents/sdk-go/v2/protocol"
-	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	"knative.dev/eventing/pkg/kncloudevents"
 	"knative.dev/pkg/logging"
@@ -149,12 +150,10 @@ func send(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message bin
 	var noRetires = kncloudevents.NoRetries()
 	var lastTry bool
 
-	meta, err := msg.Metadata()
-	retryNumber := 1
+	retryNumber, err := numDelivered(msg)
 	if err != nil {
+		retryNumber = 1
 		logger.Errorw("failed to get nats message metadata, assuming it is 1", zap.Error(err))
-	} else {
-		retryNumber = int(meta.NumDelivered)
 	}
 
 	if retryNumber <= config.retryConfig.RetryMax {
@@ -172,7 +171,7 @@ func send(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message bin
 	}
 	additionalHeadersForDestination.Set("Prefer", "reply")
 
-	noRetires.RequestTimeout = jsutils.CalcRequestTimeout(msg, ackWait)
+	noRetires.RequestTimeout = jsutils.CalcRequestTimeout(retryNumber, ackWait)
 
 	ctx, responseMessage, dispatchExecutionInfo, err := executeRequest(dispatcher, ctx, destination, message, additionalHeadersForDestination, &noRetires, config.oidcServiceAccount, config.transformers)
 	processDispatchResult(ctx, msg, config.retryConfig, retryNumber, dispatchExecutionInfo, err)
@@ -242,6 +241,14 @@ func send(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message bin
 	}
 
 	return dispatchExecutionInfo, nil
+}
+
+func numDelivered(msg *nats.Msg) (int, error) {
+	meta, err := msg.Metadata()
+	if err != nil {
+		return 0, err
+	}
+	return int(meta.NumDelivered), nil
 }
 
 func processDispatchResult(ctx context.Context, msg *nats.Msg, retryConfig *kncloudevents.RetryConfig, retryNumber int, dispatchExecutionInfo *kncloudevents.DispatchInfo, err error) {
