@@ -26,13 +26,14 @@ import (
 	"sync"
 	"time"
 
+	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
+	"github.com/cloudevents/sdk-go/v2/binding"
+
 	"go.opencensus.io/trace"
 	"knative.dev/eventing-natss/pkg/tracing"
 
-	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
-	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
 	"knative.dev/eventing/pkg/kncloudevents"
@@ -166,9 +167,9 @@ func (c *PullConsumer) consumeMessages(ctx context.Context, batch nats.MessageBa
 			go func() {
 				defer wg.Done()
 				ctx := logging.WithLogger(ctx, c.logger.With(zap.String("msg_id", natsMsg.Header.Get(nats.MsgIdHdr))))
-				msg := internal.NewMessage(ctx, natsMsg, c.natsConsumerInfo.Config.AckWait)
+				//msg := internal.NewMessage(ctx, natsMsg, c.natsConsumerInfo.Config.AckWait)
 
-				if err := c.handleMessage(msg); err != nil {
+				if err := c.handleMessage(ctx, natsMsg); err != nil {
 					// handleMessage only errors if the message cannot be finished, any other error
 					// is consumed by msg.Finish(err)
 					logging.FromContext(ctx).Errorw("failed to finish message", zap.Error(err))
@@ -205,12 +206,13 @@ func updatePullSubscriptionConfig(config *ChannelConfig, sub *Subscription) {
 	}
 }
 
-func (c *PullConsumer) handleMessage(msg internal.Message) (err error) {
+func (c *PullConsumer) handleMessage(ctx context.Context, msg *nats.Msg) (err error) {
 	// ensure that c.sub is not modified while we are handling a message
 	c.subMu.RLock()
 	defer c.subMu.RUnlock()
 
-	ctx := msg.Context()
+	ctx, finish := context.WithTimeout(ctx, c.natsConsumerInfo.Config.AckWait)
+	defer finish()
 
 	logger := logging.FromContext(ctx)
 
@@ -223,11 +225,13 @@ func (c *PullConsumer) handleMessage(msg internal.Message) (err error) {
 		logger.Debugw("received message from JetStream consumer", debugKVs...)
 	}
 
-	if msg.ReadEncoding() == binding.EncodingUnknown {
-		return errors.New("received a message with unknown encoding")
+	message := cejs.NewMessage(msg)
+	if message.ReadEncoding() == binding.EncodingUnknown {
+		logger.Errorw("received a message with unknown encoding")
+		return
 	}
 
-	event := tracing.ConvertNatsMsgToEvent(c.logger.Desugar(), msg.NatsMessage())
+	event := tracing.ConvertNatsMsgToEvent(c.logger.Desugar(), msg)
 	additionalHeaders := tracing.ConvertEventToHttpHeader(event)
 
 	sc, ok := tracing.ParseSpanContext(event)
@@ -246,10 +250,10 @@ func (c *PullConsumer) handleMessage(msg internal.Message) (err error) {
 	dispatchExecutionInfo, err := SendMessage(
 		c.dispatcher,
 		ctx,
-		msg,
+		message,
 		c.sub.Subscriber,
 		c.natsConsumerInfo.Config.AckWait,
-		internal.NewNatsMessageWrapper(msg.NatsMessage()),
+		msg,
 		WithReply(c.sub.Reply),
 		WithDeadLetterSink(c.sub.DeadLetter),
 		WithRetryConfig(c.sub.RetryConfig),

@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"time"
 
-	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
+	"github.com/nats-io/nats.go"
 
 	"knative.dev/pkg/apis"
 
@@ -110,7 +110,7 @@ type senderConfig struct {
 	oidcServiceAccount *types.NamespacedName
 }
 
-func SendMessage(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message binding.Message, destination duckv1.Addressable, ackWait time.Duration, msg internal.NatsMessageWrapper, options ...SendOption) (*kncloudevents.DispatchInfo, error) {
+func SendMessage(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message binding.Message, destination duckv1.Addressable, ackWait time.Duration, msg *nats.Msg, options ...SendOption) (*kncloudevents.DispatchInfo, error) {
 	config := &senderConfig{
 		additionalHeaders: make(http.Header),
 	}
@@ -125,7 +125,7 @@ func SendMessage(dispatcher *kncloudevents.Dispatcher, ctx context.Context, mess
 	return send(dispatcher, ctx, message, destination, ackWait, msg, config)
 }
 
-func send(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message binding.Message, destination duckv1.Addressable, ackWait time.Duration, msg internal.NatsMessageWrapper, config *senderConfig) (*kncloudevents.DispatchInfo, error) {
+func send(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message binding.Message, destination duckv1.Addressable, ackWait time.Duration, msg *nats.Msg, config *senderConfig) (*kncloudevents.DispatchInfo, error) {
 	logger := logging.FromContext(ctx)
 	dispatchExecutionInfo := &kncloudevents.DispatchInfo{}
 
@@ -150,7 +150,7 @@ func send(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message bin
 	var noRetires = kncloudevents.NoRetries()
 	var lastTry bool
 
-	retryNumber, err := msg.NumDelivered()
+	retryNumber, err := numDelivered(msg)
 	if err != nil {
 		retryNumber = 1
 		logger.Errorw("failed to get nats message metadata, assuming it is 1", zap.Error(err))
@@ -243,7 +243,15 @@ func send(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message bin
 	return dispatchExecutionInfo, nil
 }
 
-func processDispatchResult(ctx context.Context, msg internal.NatsMessageWrapper, retryConfig *kncloudevents.RetryConfig, retryNumber int, dispatchExecutionInfo *kncloudevents.DispatchInfo, err error) {
+func numDelivered(msg *nats.Msg) (int, error) {
+	meta, err := msg.Metadata()
+	if err != nil {
+		return 0, err
+	}
+	return int(meta.NumDelivered), nil
+}
+
+func processDispatchResult(ctx context.Context, msg *nats.Msg, retryConfig *kncloudevents.RetryConfig, retryNumber int, dispatchExecutionInfo *kncloudevents.DispatchInfo, err error) {
 	logger := logging.FromContext(ctx)
 	result := protocol.ResultACK
 
@@ -263,15 +271,15 @@ func processDispatchResult(ctx context.Context, msg internal.NatsMessageWrapper,
 
 	switch {
 	case protocol.IsACK(result):
-		if err := msg.Ack(ctx); err != nil {
+		if err := msg.Ack(nats.Context(ctx)); err != nil {
 			logger.Error("failed to Ack message after successful delivery to subscriber", zap.Error(err))
 		}
 	case protocol.IsNACK(result):
-		if err := msg.NakWithDelay(jsutils.CalculateNakDelayForRetryNumber(retryNumber, retryConfig), ctx); err != nil {
+		if err := msg.NakWithDelay(jsutils.CalculateNakDelayForRetryNumber(retryNumber, retryConfig), nats.Context(ctx)); err != nil {
 			logger.Error("failed to Nack message after failed delivery to subscriber", zap.Error(err))
 		}
 	default:
-		if err := msg.Term(ctx); err != nil {
+		if err := msg.Term(nats.Context(ctx)); err != nil {
 			logger.Error("failed to Term message after failed delivery to subscriber", zap.Error(err))
 		}
 	}

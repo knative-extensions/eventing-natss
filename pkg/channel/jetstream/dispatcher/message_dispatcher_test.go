@@ -28,8 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
-
 	"github.com/nats-io/nats.go"
 
 	"github.com/nats-io/nats-server/v2/server"
@@ -568,7 +566,7 @@ func TestDispatchMessage(t *testing.T) {
 				message,
 				destination,
 				ackWait,
-				internal.NewNatsMessageWrapper(msg),
+				msg,
 				WithReply(&replyDestination),
 				WithDeadLetterSink(&deadLetterSinkDestination),
 				WithRetryConfig(&retryConfig),

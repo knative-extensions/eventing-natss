@@ -21,8 +21,6 @@ import (
 	"errors"
 	"sync"
 
-	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/internal"
-
 	"knative.dev/eventing/pkg/kncloudevents"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
@@ -137,7 +135,7 @@ func (c *PushConsumer) doHandle(ctx context.Context, msg *nats.Msg) {
 		message,
 		c.sub.Subscriber,
 		c.natsConsumerInfo.Config.AckWait,
-		internal.NewNatsMessageWrapper(msg),
+		msg,
 		WithReply(c.sub.Reply),
 		WithDeadLetterSink(c.sub.DeadLetter),
 		WithRetryConfig(c.sub.RetryConfig),
