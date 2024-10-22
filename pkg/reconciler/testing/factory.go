@@ -20,13 +20,13 @@ import (
 	"context"
 	"testing"
 
+	clientgotesting "k8s.io/client-go/testing"
+	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
-	clientgotesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
-
-	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
 
 	fakeeventingclient "knative.dev/eventing/pkg/client/injection/client/fake"
 

@@ -26,15 +26,13 @@ import (
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	rbacv1listers "k8s.io/client-go/listers/rbac/v1"
 	"k8s.io/client-go/tools/cache"
+	fakenatsslientset "knative.dev/eventing-natss/pkg/client/clientset/versioned/fake"
 
 	fakeeventsclientset "knative.dev/eventing/pkg/client/clientset/versioned/fake"
 	"knative.dev/pkg/reconciler/testing"
 
 	natssv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	natssv1beta1 "knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
-	fakenatsslientset "knative.dev/eventing-natss/pkg/client/clientset/versioned/fake"
 	jetstreamlisters "knative.dev/eventing-natss/pkg/client/listers/messaging/v1alpha1"
-	natsslisters "knative.dev/eventing-natss/pkg/client/listers/messaging/v1beta1"
 )
 
 var clientSetSchemes = []func(*runtime.Scheme) error{
@@ -104,10 +102,6 @@ func (l *Listers) GetEndpointsLister() corev1listers.EndpointsLister {
 
 func (l *Listers) GetRoleBindingLister() rbacv1listers.RoleBindingLister {
 	return rbacv1listers.NewRoleBindingLister(l.indexerFor(&rbacv1.RoleBinding{}))
-}
-
-func (l *Listers) GetNatssChannelLister() natsslisters.NatssChannelLister {
-	return natsslisters.NewNatssChannelLister(l.indexerFor(&natssv1beta1.NatssChannel{}))
 }
 
 func (l *Listers) GetDeploymentLister() appsv1listers.DeploymentLister {

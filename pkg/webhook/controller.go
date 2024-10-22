@@ -21,7 +21,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/webhook/resourcesemantics"
@@ -31,8 +30,6 @@ import (
 
 var ourTypes = map[schema.GroupVersionKind]resourcesemantics.GenericCRD{
 	// For group messaging.knative.dev.
-	// v1beta1
-	v1beta1.SchemeGroupVersion.WithKind("NatssChannel"): &v1beta1.NatssChannel{},
 	// v1alpha1
 	v1alpha1.SchemeGroupVersion.WithKind("NatsJetStreamChannel"): &v1alpha1.NatsJetStreamChannel{},
 }
