@@ -37,7 +37,6 @@ import (
 	. "knative.dev/pkg/reconciler/testing"
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
 	"knative.dev/eventing-natss/pkg/channel/jetstream/controller/resources"
 	"knative.dev/eventing-natss/pkg/client/clientset/versioned/scheme"
 	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
@@ -47,7 +46,6 @@ import (
 
 func init() {
 	// Add types to scheme
-	_ = v1beta1.AddToScheme(scheme.Scheme)
 	_ = duckv1.AddToScheme(scheme.Scheme)
 }
 

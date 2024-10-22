@@ -1,7 +1,7 @@
 # NATS Streaming Channels
 
-NATS Streaming channels are beta-quality Channels that are backed by
-[NATS Streaming](https://github.com/nats-io/nats-streaming-server).
+JetStream channels are alpha-quality Channels that are backed by
+[JetStream](https://docs.nats.io/nats-concepts/jetstream).
 
 They offer:
 
@@ -22,67 +22,39 @@ They do not offer:
 ## Deployment steps
 
 1. Setup [Knative Eventing](http://knative.dev/docs/install).
-1. If not done already, install a [NATS Streaming](./broker/README.md)
-1. Apply the NATSS configuration (from project root):
+2. If not done already, install a [JetStream Broker](./broker/README.md)
+3. Apply the NATSS configuration (from project root):
 
    ```shell
    ko apply -f ./config
    ```
 
-1. Create NATSS channels:
+4. Create JetStream channels:
 
    ```yaml
-   apiVersion: messaging.knative.dev/v1beta1
-   kind: NatssChannel
-   metadata:
-     name: foo
+    apiVersion: messaging.knative.dev/v1alpha1
+    kind: NatsJetStreamChannel
+    metadata:
+        name: channel-defaults
+        namespace: knative-eventing
    ```
 
 ## Components
 
 The major components are:
 
-- NATS Streaming
-- NATSS Channel Controller
-- NATSS Channel Dispatcher
+- JetStream
+- JetStream Channel Controller
+- JetStream Channel Dispatcher
 
-The NATSS Channel Controller is located in one Pod.
-
-```shell
-kubectl get deployment -n knative-eventing natss-ch-controller
-```
-
-The NATSS Channel Dispatcher receives and distributes all events. There is a
-single Dispatcher for all NATSS Channels.
+The JetStream Channel Controller is located in one Pod.
 
 ```shell
-kubectl get deployment -n knative-eventing natss-ch-dispatcher
+kubectl get deployment -n knative-eventing jetstream-ch-controller
 ```
+
+The JetStream Channel Dispatcher receives and distributes all events. There is a
+single Dispatcher for all JetStream Channels.
 
 By default the components are configured to connect to NATS at
-`nats://nats-streaming.natss.svc:4222` with NATS Streaming cluster ID
-`knative-nats-streaming`. This may be overridden by configuring both the
-`natss-ch-controller` and `natss-ch-dispatcher` deployments with the following
-environment variables:
-
-```yaml
-env:
-  - name: DEFAULT_NATSS_URL
-    value: nats://natss.custom-namespace.svc.cluster.local:4222
-  - name: DEFAULT_CLUSTER_ID
-    value: custom-cluster-id
-  - name: SYSTEM_NAMESPACE
-    valueFrom:
-      fieldRef:
-        fieldPath: metadata.namespace
-```
-
-NATS dispatchers subscriptions can be configured by the following environment variables:
-
-```yaml
-env:
-  - name: ACK_WAIT_MINUTES
-    value: "1"
-  - name: MAX_INFLIGHT
-    value: "1024"
-```
+`nats://nats.nats-io.svc.cluster.local:4222`.

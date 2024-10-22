@@ -26,25 +26,17 @@ import (
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
 	messagingv1alpha1 "knative.dev/eventing-natss/pkg/client/clientset/versioned/typed/messaging/v1alpha1"
-	messagingv1beta1 "knative.dev/eventing-natss/pkg/client/clientset/versioned/typed/messaging/v1beta1"
 )
 
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
-	MessagingV1beta1() messagingv1beta1.MessagingV1beta1Interface
 	MessagingV1alpha1() messagingv1alpha1.MessagingV1alpha1Interface
 }
 
 // Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	messagingV1beta1  *messagingv1beta1.MessagingV1beta1Client
 	messagingV1alpha1 *messagingv1alpha1.MessagingV1alpha1Client
-}
-
-// MessagingV1beta1 retrieves the MessagingV1beta1Client
-func (c *Clientset) MessagingV1beta1() messagingv1beta1.MessagingV1beta1Interface {
-	return c.messagingV1beta1
 }
 
 // MessagingV1alpha1 retrieves the MessagingV1alpha1Client
@@ -96,10 +88,6 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 
 	var cs Clientset
 	var err error
-	cs.messagingV1beta1, err = messagingv1beta1.NewForConfigAndClient(&configShallowCopy, httpClient)
-	if err != nil {
-		return nil, err
-	}
 	cs.messagingV1alpha1, err = messagingv1alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
 		return nil, err
@@ -125,7 +113,6 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
-	cs.messagingV1beta1 = messagingv1beta1.New(c)
 	cs.messagingV1alpha1 = messagingv1alpha1.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)

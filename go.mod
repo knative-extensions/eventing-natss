@@ -4,7 +4,6 @@ go 1.22.0
 
 require (
 	github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2 v2.15.2
-	github.com/cloudevents/sdk-go/protocol/stan/v2 v2.13.0
 	github.com/cloudevents/sdk-go/v2 v2.15.2
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.6.0
@@ -14,8 +13,7 @@ require (
 	github.com/nats-io/nats-server/v2 v2.10.18
 	github.com/nats-io/nats.go v1.36.0
 	github.com/nats-io/nkeys v0.4.7
-	github.com/nats-io/stan.go v0.9.0
-	github.com/pkg/errors v0.9.1
+	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.24.0
 	go.uber.org/zap v1.27.0
 	k8s.io/api v0.30.3
@@ -67,8 +65,6 @@ require (
 	github.com/google/gnostic-models v0.6.8 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.21.0 // indirect
-	github.com/hashicorp/go-msgpack v0.5.5 // indirect
-	github.com/hashicorp/raft v1.5.0 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect

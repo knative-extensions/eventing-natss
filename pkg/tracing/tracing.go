@@ -13,7 +13,6 @@ import (
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/binding/transformer"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/nats-io/stan.go"
 	"go.opencensus.io/plugin/ochttp/propagation/tracecontext"
 	"go.opencensus.io/trace"
 	"go.uber.org/zap"
@@ -76,19 +75,6 @@ func ConvertEventToHttpHeader(message *event.Event) http.Header {
 		additionalHeaders.Add(traceStateHeader, ts)
 	}
 	return additionalHeaders
-}
-
-func ConvertNatssMsgToEvent(logger *zap.Logger, msg *stan.Msg) *event.Event {
-	message := cloudevents.NewEvent()
-	if msg == nil || msg.Data == nil {
-		return &message
-	}
-	if err := json.Unmarshal(msg.Data, &message); err != nil {
-		logger.Error("could not create an event from stan msg", zap.Error(err))
-		return &message
-	}
-
-	return &message
 }
 
 func ConvertNatsMsgToEvent(logger *zap.Logger, msg *nats.Msg) *event.Event {

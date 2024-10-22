@@ -20,7 +20,6 @@ import (
 	"log"
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	"knative.dev/eventing-natss/pkg/apis/messaging/v1beta1"
 
 	"knative.dev/hack/schema/commands"
 	"knative.dev/hack/schema/registry"
@@ -29,7 +28,6 @@ import (
 // schema is a tool to dump the schema for Eventing resources.
 func main() {
 	registry.Register(&v1alpha1.NatsJetStreamChannel{})
-	registry.Register(&v1beta1.NatssChannel{})
 
 	if err := commands.New("knative.dev/eventing-natss").Execute(); err != nil {
 		log.Fatal("Error during command execution: ", err)
