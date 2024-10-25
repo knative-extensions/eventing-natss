@@ -1059,7 +1059,7 @@ k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.43.0
+# knative.dev/eventing v0.43.1-0.20241025105802-65aeab55d676
 ## explicit; go 1.22.0
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
@@ -1113,7 +1113,7 @@ knative.dev/eventing/pkg/client/clientset/versioned/typed/sources/v1beta2/fake
 knative.dev/eventing/pkg/client/injection/client
 knative.dev/eventing/pkg/client/injection/client/fake
 knative.dev/eventing/pkg/client/listers/eventing/v1alpha1
-knative.dev/eventing/pkg/client/listers/eventing/v1beta2
+knative.dev/eventing/pkg/client/listers/eventing/v1beta3
 knative.dev/eventing/pkg/crossnamespace
 knative.dev/eventing/pkg/eventfilter
 knative.dev/eventing/pkg/eventfilter/attributes
@@ -1129,16 +1129,16 @@ knative.dev/eventing/test/lib/sender
 knative.dev/eventing/test/test_images
 knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20241010131451-05b2fb30cb4d
+# knative.dev/hack v0.0.0-20241025103803-ef6e7e983a60
 ## explicit; go 1.21
 knative.dev/hack
-# knative.dev/hack/schema v0.0.0-20241010131451-05b2fb30cb4d
+# knative.dev/hack/schema v0.0.0-20241025103803-ef6e7e983a60
 ## explicit; go 1.21
 knative.dev/hack/schema/commands
 knative.dev/hack/schema/docs
 knative.dev/hack/schema/registry
 knative.dev/hack/schema/schema
-# knative.dev/pkg v0.0.0-20241021183759-9b9d535af5ad
+# knative.dev/pkg v0.0.0-20241024133302-6af2bf9747e9
 ## explicit; go 1.22.0
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
@@ -1215,7 +1215,7 @@ knative.dev/pkg/webhook/json
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20241015093232-09111f0f1364
+# knative.dev/reconciler-test v0.0.0-20241024141702-aae114c1c0e3
 ## explicit; go 1.22.0
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
