@@ -1059,7 +1059,7 @@ k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/strings/slices
 k8s.io/utils/trace
-# knative.dev/eventing v0.43.1-0.20241025105802-65aeab55d676
+# knative.dev/eventing v0.43.1-0.20241028083747-ef6b31a697e7
 ## explicit; go 1.22.0
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/config
@@ -1138,7 +1138,7 @@ knative.dev/hack/schema/commands
 knative.dev/hack/schema/docs
 knative.dev/hack/schema/registry
 knative.dev/hack/schema/schema
-# knative.dev/pkg v0.0.0-20241024133302-6af2bf9747e9
+# knative.dev/pkg v0.0.0-20241026180704-25f6002b00f3
 ## explicit; go 1.22.0
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
