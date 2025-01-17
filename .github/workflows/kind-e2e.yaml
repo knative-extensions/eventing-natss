@@ -15,7 +15,7 @@ jobs:
       fail-fast: false # Keep running if one leg fails.
       matrix:
         k8s-version:
-        - v1.29.2
+        - v1.32.0
 
         eventing-version:
         - knative-v1.15.0
@@ -24,7 +24,7 @@ jobs:
         # This is attempting to make it a bit clearer what's being tested.
         # See: https://github.com/kubernetes-sigs/kind/releases/tag/v0.9.0
         include:
-        - k8s-version: v1.29.2
+        - k8s-version: v1.32.0
           kind-version: v0.22.0
           kind-image-sha: sha256:51a1434a5397193442f0be2a297b488b6c919ce8a3931be0ce822606ea5ca245
     env:
