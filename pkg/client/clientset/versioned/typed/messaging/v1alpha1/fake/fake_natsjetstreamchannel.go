@@ -41,22 +41,24 @@ var natsjetstreamchannelsKind = v1alpha1.SchemeGroupVersion.WithKind("NatsJetStr
 
 // Get takes name of the natsJetStreamChannel, and returns the corresponding natsJetStreamChannel object, and an error if there is any.
 func (c *FakeNatsJetStreamChannels) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1alpha1.NatsJetStreamChannel, err error) {
+	emptyResult := &v1alpha1.NatsJetStreamChannel{}
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(natsjetstreamchannelsResource, c.ns, name), &v1alpha1.NatsJetStreamChannel{})
+		Invokes(testing.NewGetActionWithOptions(natsjetstreamchannelsResource, c.ns, name, options), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1alpha1.NatsJetStreamChannel), err
 }
 
 // List takes label and field selectors, and returns the list of NatsJetStreamChannels that match those selectors.
 func (c *FakeNatsJetStreamChannels) List(ctx context.Context, opts v1.ListOptions) (result *v1alpha1.NatsJetStreamChannelList, err error) {
+	emptyResult := &v1alpha1.NatsJetStreamChannelList{}
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(natsjetstreamchannelsResource, natsjetstreamchannelsKind, c.ns, opts), &v1alpha1.NatsJetStreamChannelList{})
+		Invokes(testing.NewListActionWithOptions(natsjetstreamchannelsResource, natsjetstreamchannelsKind, c.ns, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 
 	label, _, _ := testing.ExtractFromListOptions(opts)
@@ -75,40 +77,43 @@ func (c *FakeNatsJetStreamChannels) List(ctx context.Context, opts v1.ListOption
 // Watch returns a watch.Interface that watches the requested natsJetStreamChannels.
 func (c *FakeNatsJetStreamChannels) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(natsjetstreamchannelsResource, c.ns, opts))
+		InvokesWatch(testing.NewWatchActionWithOptions(natsjetstreamchannelsResource, c.ns, opts))
 
 }
 
 // Create takes the representation of a natsJetStreamChannel and creates it.  Returns the server's representation of the natsJetStreamChannel, and an error, if there is any.
 func (c *FakeNatsJetStreamChannels) Create(ctx context.Context, natsJetStreamChannel *v1alpha1.NatsJetStreamChannel, opts v1.CreateOptions) (result *v1alpha1.NatsJetStreamChannel, err error) {
+	emptyResult := &v1alpha1.NatsJetStreamChannel{}
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(natsjetstreamchannelsResource, c.ns, natsJetStreamChannel), &v1alpha1.NatsJetStreamChannel{})
+		Invokes(testing.NewCreateActionWithOptions(natsjetstreamchannelsResource, c.ns, natsJetStreamChannel, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1alpha1.NatsJetStreamChannel), err
 }
 
 // Update takes the representation of a natsJetStreamChannel and updates it. Returns the server's representation of the natsJetStreamChannel, and an error, if there is any.
 func (c *FakeNatsJetStreamChannels) Update(ctx context.Context, natsJetStreamChannel *v1alpha1.NatsJetStreamChannel, opts v1.UpdateOptions) (result *v1alpha1.NatsJetStreamChannel, err error) {
+	emptyResult := &v1alpha1.NatsJetStreamChannel{}
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(natsjetstreamchannelsResource, c.ns, natsJetStreamChannel), &v1alpha1.NatsJetStreamChannel{})
+		Invokes(testing.NewUpdateActionWithOptions(natsjetstreamchannelsResource, c.ns, natsJetStreamChannel, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1alpha1.NatsJetStreamChannel), err
 }
 
 // UpdateStatus was generated because the type contains a Status member.
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-func (c *FakeNatsJetStreamChannels) UpdateStatus(ctx context.Context, natsJetStreamChannel *v1alpha1.NatsJetStreamChannel, opts v1.UpdateOptions) (*v1alpha1.NatsJetStreamChannel, error) {
+func (c *FakeNatsJetStreamChannels) UpdateStatus(ctx context.Context, natsJetStreamChannel *v1alpha1.NatsJetStreamChannel, opts v1.UpdateOptions) (result *v1alpha1.NatsJetStreamChannel, err error) {
+	emptyResult := &v1alpha1.NatsJetStreamChannel{}
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(natsjetstreamchannelsResource, "status", c.ns, natsJetStreamChannel), &v1alpha1.NatsJetStreamChannel{})
+		Invokes(testing.NewUpdateSubresourceActionWithOptions(natsjetstreamchannelsResource, "status", c.ns, natsJetStreamChannel, opts), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1alpha1.NatsJetStreamChannel), err
 }
@@ -123,7 +128,7 @@ func (c *FakeNatsJetStreamChannels) Delete(ctx context.Context, name string, opt
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeNatsJetStreamChannels) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(natsjetstreamchannelsResource, c.ns, listOpts)
+	action := testing.NewDeleteCollectionActionWithOptions(natsjetstreamchannelsResource, c.ns, opts, listOpts)
 
 	_, err := c.Fake.Invokes(action, &v1alpha1.NatsJetStreamChannelList{})
 	return err
@@ -131,11 +136,12 @@ func (c *FakeNatsJetStreamChannels) DeleteCollection(ctx context.Context, opts v
 
 // Patch applies the patch and returns the patched natsJetStreamChannel.
 func (c *FakeNatsJetStreamChannels) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1alpha1.NatsJetStreamChannel, err error) {
+	emptyResult := &v1alpha1.NatsJetStreamChannel{}
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(natsjetstreamchannelsResource, c.ns, name, pt, data, subresources...), &v1alpha1.NatsJetStreamChannel{})
+		Invokes(testing.NewPatchSubresourceActionWithOptions(natsjetstreamchannelsResource, c.ns, name, pt, data, opts, subresources...), emptyResult)
 
 	if obj == nil {
-		return nil, err
+		return emptyResult, err
 	}
 	return obj.(*v1alpha1.NatsJetStreamChannel), err
 }
