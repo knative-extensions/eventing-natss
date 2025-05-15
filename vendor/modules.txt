@@ -352,7 +352,7 @@ go.uber.org/zap/internal/stacktrace
 go.uber.org/zap/internal/ztest
 go.uber.org/zap/zapcore
 go.uber.org/zap/zaptest
-# golang.org/x/crypto v0.37.0
+# golang.org/x/crypto v0.38.0
 ## explicit; go 1.23.0
 golang.org/x/crypto/bcrypt
 golang.org/x/crypto/blake2b
@@ -375,7 +375,7 @@ golang.org/x/crypto/salsa20/salsa
 golang.org/x/mod/internal/lazyregexp
 golang.org/x/mod/module
 golang.org/x/mod/semver
-# golang.org/x/net v0.39.0
+# golang.org/x/net v0.40.0
 ## explicit; go 1.23.0
 golang.org/x/net/http/httpguts
 golang.org/x/net/http2
@@ -389,11 +389,11 @@ golang.org/x/net/trace
 ## explicit; go 1.18
 golang.org/x/oauth2
 golang.org/x/oauth2/internal
-# golang.org/x/sync v0.13.0
+# golang.org/x/sync v0.14.0
 ## explicit; go 1.23.0
 golang.org/x/sync/errgroup
 golang.org/x/sync/semaphore
-# golang.org/x/sys v0.32.0
+# golang.org/x/sys v0.33.0
 ## explicit; go 1.23.0
 golang.org/x/sys/cpu
 golang.org/x/sys/plan9
@@ -403,10 +403,10 @@ golang.org/x/sys/windows/registry
 golang.org/x/sys/windows/svc
 golang.org/x/sys/windows/svc/eventlog
 golang.org/x/sys/windows/svc/mgr
-# golang.org/x/term v0.31.0
+# golang.org/x/term v0.32.0
 ## explicit; go 1.23.0
 golang.org/x/term
-# golang.org/x/text v0.24.0
+# golang.org/x/text v0.25.0
 ## explicit; go 1.23.0
 golang.org/x/text/cases
 golang.org/x/text/internal
@@ -421,7 +421,7 @@ golang.org/x/text/unicode/norm
 # golang.org/x/time v0.10.0
 ## explicit; go 1.18
 golang.org/x/time/rate
-# golang.org/x/tools v0.32.0
+# golang.org/x/tools v0.33.0
 ## explicit; go 1.23.0
 golang.org/x/tools/go/ast/astutil
 golang.org/x/tools/go/gcexportdata
@@ -1109,7 +1109,7 @@ k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/trace
-# knative.dev/eventing v0.45.1-0.20250429155006-912068554d82
+# knative.dev/eventing v0.45.1-0.20250514154546-3788fccf0466
 ## explicit; go 1.23.0
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/common/integration/v1alpha1
@@ -1183,16 +1183,16 @@ knative.dev/eventing/test/lib/sender
 knative.dev/eventing/test/test_images
 knative.dev/eventing/test/test_images/event-sender
 knative.dev/eventing/test/test_images/print
-# knative.dev/hack v0.0.0-20250424013725-c4037b0fe56b
+# knative.dev/hack v0.0.0-20250514121446-f525e187efdc
 ## explicit; go 1.21
 knative.dev/hack
-# knative.dev/hack/schema v0.0.0-20250424013725-c4037b0fe56b
+# knative.dev/hack/schema v0.0.0-20250514121446-f525e187efdc
 ## explicit; go 1.21
 knative.dev/hack/schema/commands
 knative.dev/hack/schema/docs
 knative.dev/hack/schema/registry
 knative.dev/hack/schema/schema
-# knative.dev/pkg v0.0.0-20250424013628-d5e74d29daa3
+# knative.dev/pkg v0.0.0-20250515022847-873230f3a48e
 ## explicit; go 1.23.0
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
@@ -1276,7 +1276,7 @@ knative.dev/pkg/webhook/json
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20250423131628-44221c83f1b1
+# knative.dev/reconciler-test v0.0.0-20250430133707-10479dd8e9bb
 ## explicit; go 1.23.0
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
