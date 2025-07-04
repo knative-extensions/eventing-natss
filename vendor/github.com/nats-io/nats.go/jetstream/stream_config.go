@@ -15,12 +15,10 @@ package jetstream
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 type (
@@ -192,9 +190,17 @@ type (
 		// v2.10.0 or later.
 		Metadata map[string]string `json:"metadata,omitempty"`
 
-		// Template identifies the template that manages the Stream. DEPRECATED:
-		// This feature is no longer supported.
+		// Template identifies the template that manages the Stream.
+		// Deprecated: This feature is no longer supported.
 		Template string `json:"template_owner,omitempty"`
+
+		// AllowMsgTTL allows header initiated per-message TTLs.
+		// This feature requires nats-server v2.11.0 or later.
+		AllowMsgTTL bool `json:"allow_msg_ttl"`
+
+		// Enables and sets a duration for adding server markers for delete, purge and max age limits.
+		// This feature requires nats-server v2.11.0 or later.
+		SubjectDeleteMarkerTTL time.Duration `json:"subject_delete_marker_ttl,omitempty"`
 	}
 
 	// StreamSourceInfo shows information about an upstream stream
@@ -519,12 +525,11 @@ const (
 )
 
 func (st StorageType) String() string {
-	caser := cases.Title(language.AmericanEnglish)
 	switch st {
 	case MemoryStorage:
-		return caser.String(memoryStorageString)
+		return "Memory"
 	case FileStorage:
-		return caser.String(fileStorageString)
+		return "File"
 	default:
 		return "Unknown Storage Type"
 	}
@@ -584,7 +589,7 @@ func (alg StoreCompression) MarshalJSON() ([]byte, error) {
 	case NoCompression:
 		str = "none"
 	default:
-		return nil, fmt.Errorf("unknown compression algorithm")
+		return nil, errors.New("unknown compression algorithm")
 	}
 	return json.Marshal(str)
 }
@@ -600,7 +605,7 @@ func (alg *StoreCompression) UnmarshalJSON(b []byte) error {
 	case "none":
 		*alg = NoCompression
 	default:
-		return fmt.Errorf("unknown compression algorithm")
+		return errors.New("unknown compression algorithm")
 	}
 	return nil
 }

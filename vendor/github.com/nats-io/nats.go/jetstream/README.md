@@ -1,39 +1,39 @@
-# JetStream Simplified Client
+
+# JetStream Simplified Client [![JetStream API Reference](https://pkg.go.dev/badge/github.com/nats-io/nats.go/jetstream.svg)](https://pkg.go.dev/github.com/nats-io/nats.go/jetstream)
 
 This doc covers the basic usage of the `jetstream` package in `nats.go` client.
 
-- [JetStream Simplified Client](#jetstream-simplified-client)
-  - [Overview](#overview)
-  - [Basic usage](#basic-usage)
-  - [Streams](#streams)
-    - [Stream management (CRUD)](#stream-management-crud)
-    - [Listing streams and stream names](#listing-streams-and-stream-names)
-    - [Stream-specific operations](#stream-specific-operations)
-  - [Consumers](#consumers)
-    - [Consumers management](#consumers-management)
-    - [Listing consumers and consumer
-      names](#listing-consumers-and-consumer-names)
-    - [Ordered consumers](#ordered-consumers)
-    - [Receiving messages from the
-      consumer](#receiving-messages-from-the-consumer)
-      - [Single fetch](#single-fetch)
-      - [Continuous polling](#continuous-polling)
-        - [Using `Consume()` receive messages in a
-          callback](#using-consume-receive-messages-in-a-callback)
-        - [Using `Messages()` to iterate over incoming
-          messages](#using-messages-to-iterate-over-incoming-messages)
-  - [Publishing on stream](#publishing-on-stream)
-    - [Synchronous publish](#synchronous-publish)
-    - [Async publish](#async-publish)
-  - [KeyValue Store](#keyvalue-store)
-    - [Basic usage of KV bucket](#basic-usage-of-kv-bucket)
-    - [Watching for changes on a bucket](#watching-for-changes-on-a-bucket)
-    - [Additional operations on a bucket](#additional-operations-on-a-bucket)
-  - [Object Store](#object-store)
-    - [Basic usage of Object Store](#basic-usage-of-object-store)
-    - [Watching for changes on a store](#watching-for-changes-on-a-store)
-    - [Additional operations on a store](#additional-operations-on-a-store)
-  - [Examples](#examples)
+- [Overview](#overview)
+- [Basic usage](#basic-usage)
+- [Streams](#streams)
+- [Stream management (CRUD)](#stream-management-crud)
+- [Listing streams and stream names](#listing-streams-and-stream-names)
+- [Stream-specific operations](#stream-specific-operations)
+- [Consumers](#consumers)
+- [Consumers management](#consumers-management)
+- [Listing consumers and consumer
+    names](#listing-consumers-and-consumer-names)
+- [Ordered consumers](#ordered-consumers)
+- [Receiving messages from the
+    consumer](#receiving-messages-from-the-consumer)
+  - [Single fetch](#single-fetch)
+  - [Continuous polling](#continuous-polling)
+  - [Using `Consume()` receive messages in a
+        callback](#using-consume-receive-messages-in-a-callback)
+  - [Using `Messages()` to iterate over incoming
+        messages](#using-messages-to-iterate-over-incoming-messages)
+- [Publishing on stream](#publishing-on-stream)
+- [Synchronous publish](#synchronous-publish)
+- [Async publish](#async-publish)
+- [KeyValue Store](#keyvalue-store)
+- [Basic usage of KV bucket](#basic-usage-of-kv-bucket)
+- [Watching for changes on a bucket](#watching-for-changes-on-a-bucket)
+- [Additional operations on a bucket](#additional-operations-on-a-bucket)
+- [Object Store](#object-store)
+- [Basic usage of Object Store](#basic-usage-of-object-store)
+- [Watching for changes on a store](#watching-for-changes-on-a-store)
+- [Additional operations on a store](#additional-operations-on-a-store)
+- [Examples](#examples)
 
 ## Overview
 
@@ -117,15 +117,15 @@ func main() {
     if err != nil {
         // handle error
     }
-	
+
     for msg := range msgs.Messages() {
         msg.Ack()
         fmt.Printf("Received a JetStream message via fetch: %s\n", string(msg.Data()))
         messageCounter++
     }
-	
+
     fmt.Printf("received %d messages\n", messageCounter)
-	
+
     if msgs.Error() != nil {
         fmt.Println("Error during Fetch(): ", msgs.Error())
     }
@@ -399,7 +399,7 @@ of messages/bytes. By default, `Fetch()` will wait 30 seconds before timing out
 // receive up to 10 messages from the stream
 msgs, err := c.Fetch(10)
 if err != nil {
-	// handle error
+    // handle error
 }
 
 for msg := range msgs.Messages() {
@@ -482,7 +482,13 @@ the behavior of a single pull request:
 
 - `PullMaxMessages(int)` - up to provided number of messages will be buffered
 - `PullMaxBytes(int)` - up to provided number of bytes will be buffered. This
-setting and `PullMaxMessages` are mutually exclusive
+  setting and `PullMaxMessages` are mutually exclusive.
+  The value should be set to a high enough value to accommodate the largest
+  message expected from the server. Note that it may not be sufficient to set
+  this value to the maximum message size, as this setting controls the client
+  buffer size, not the max bytes requested from the server within a single pull
+  request. If the value is set too low, the consumer will stall and not be able
+  to consume messages.
 - `PullExpiry(time.Duration)` - timeout on a single pull request to the server
 type PullThresholdMessages int
 - `PullThresholdMessages(int)` - amount of messages which triggers refilling the
@@ -494,6 +500,13 @@ request. An error will be triggered if at least 2 heartbeats are missed
 - `WithConsumeErrHandler(func (ConsumeContext, error))` - when used, sets a
   custom error handler on `Consume()`, allowing e.g. tracking missing
   heartbeats.
+- `PullMaxMessagesWithBytesLimit` - up to the provided number of messages will
+  be buffered and a single fetch size will be limited to the provided value.
+  This is an advanced option and should be used with caution. Most of the time,
+  `PullMaxMessages` or `PullMaxBytes` should be used instead. Note that he byte
+  limit should never be set to a value lower than the maximum message size that
+  can be expected from the server. If the byte limit is lower than the maximum
+  message size, the consumer will stall and not be able to consume messages.
 
 > __NOTE__: `Stop()` should always be called on `ConsumeContext` to avoid
 > leaking goroutines.
@@ -526,7 +539,13 @@ iter, _ := cons.Messages(jetstream.PullMaxMessages(10), jetstream.PullMaxBytes(1
 
 - `PullMaxMessages(int)` - up to provided number of messages will be buffered
 - `PullMaxBytes(int)` - up to provided number of bytes will be buffered. This
-setting and `PullMaxMessages` are mutually exclusive
+  setting and `PullMaxMessages` are mutually exclusive.
+  The value should be set to a high enough value to accommodate the largest
+  message expected from the server. Note that it may not be sufficient to set
+  this value to the maximum message size, as this setting controls the client
+  buffer size, not the max bytes requested from the server within a single pull
+  request. If the value is set too low, the consumer will stall and not be able
+  to consume messages.
 - `PullExpiry(time.Duration)` - timeout on a single pull request to the server
 type PullThresholdMessages int
 - `PullThresholdMessages(int)` - amount of messages which triggers refilling the
@@ -536,6 +555,13 @@ type PullThresholdMessages int
 - `PullHeartbeat(time.Duration)` - idle heartbeat duration for a single pull
 request. An error will be triggered if at least 2 heartbeats are missed (unless
 `WithMessagesErrOnMissingHeartbeat(false)` is used)
+- `PullMaxMessagesWithBytesLimit` - up to the provided number of messages will
+  be buffered and a single fetch size will be limited to the provided value.
+  This is an advanced option and should be used with caution. Most of the time,
+  `PullMaxMessages` or `PullMaxBytes` should be used instead. Note that he byte
+  limit should never be set to a value lower than the maximum message size that
+  can be expected from the server. If the byte limit is lower than the maximum
+  message size, the consumer will stall and not be able to consume messages.
 
 ##### Using `Messages()` to fetch single messages one by one
 
@@ -761,7 +787,7 @@ fmt.Printf("%s @ %d -> %q\n", entry.Key(), entry.Revision(), string(entry.Value(
 In addition to basic CRUD operations and watching for changes, KV buckets
 support several additional operations:
 
-- `ListKeys` will return all keys in a bucket"
+- `ListKeys` will return all keys in a bucket
 
 ```go
 js, _ := jetstream.New(nc)

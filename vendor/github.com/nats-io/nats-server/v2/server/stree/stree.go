@@ -1,4 +1,4 @@
-// Copyright 2023-2024 The NATS Authors
+// Copyright 2023-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,7 +15,7 @@ package stree
 
 import (
 	"bytes"
-	"sort"
+	"slices"
 )
 
 // SubjectTree is an adaptive radix trie (ART) for storing subject information on literal subjects.
@@ -52,6 +52,11 @@ func (t *SubjectTree[T]) Empty() *SubjectTree[T] {
 // Insert a value into the tree. Will return if the value was updated and if so the old value.
 func (t *SubjectTree[T]) Insert(subject []byte, value T) (*T, bool) {
 	if t == nil {
+		return nil, false
+	}
+
+	// Make sure we never insert anything with a noPivot byte.
+	if bytes.IndexByte(subject, noPivot) >= 0 {
 		return nil, false
 	}
 
@@ -119,13 +124,22 @@ func (t *SubjectTree[T]) Match(filter []byte, cb func(subject []byte, val *T)) {
 	t.match(t.root, parts, _pre[:0], cb)
 }
 
-// Iter will walk all entries in the SubjectTree lexographically. The callback can return false to terminate the walk.
-func (t *SubjectTree[T]) Iter(cb func(subject []byte, val *T) bool) {
+// IterOrdered will walk all entries in the SubjectTree lexicographically. The callback can return false to terminate the walk.
+func (t *SubjectTree[T]) IterOrdered(cb func(subject []byte, val *T) bool) {
 	if t == nil || t.root == nil {
 		return
 	}
 	var _pre [256]byte
-	t.iter(t.root, _pre[:0], cb)
+	t.iter(t.root, _pre[:0], true, cb)
+}
+
+// IterFast will walk all entries in the SubjectTree with no guarantees of ordering. The callback can return false to terminate the walk.
+func (t *SubjectTree[T]) IterFast(cb func(subject []byte, val *T) bool) {
+	if t == nil || t.root == nil {
+		return
+	}
+	var _pre [256]byte
+	t.iter(t.root, _pre[:0], false, cb)
 }
 
 // Internal methods
@@ -151,7 +165,7 @@ func (t *SubjectTree[T]) insert(np *node, subject []byte, value T, si int) (*T, 
 		ln.setSuffix(ln.suffix[cpi:])
 		si += cpi
 		// Make sure we have different pivot, normally this will be the case unless we have overflowing prefixes.
-		if p := pivot(ln.suffix, 0); si < len(subject) && p == subject[si] {
+		if p := pivot(ln.suffix, 0); cpi > 0 && si < len(subject) && p == subject[si] {
 			// We need to split the original leaf. Recursively call into insert.
 			t.insert(np, subject, value, si)
 			// Now add the update version of *np as a child to the new node4.
@@ -230,6 +244,10 @@ func (t *SubjectTree[T]) delete(np *node, subject []byte, si int) (*T, bool) {
 	}
 	// Not a leaf node.
 	if bn := n.base(); len(bn.prefix) > 0 {
+		// subject could be shorter and would panic on bad index into subject slice.
+		if len(subject) < si+len(bn.prefix) {
+			return nil, false
+		}
 		if !bytes.Equal(subject[si:si+len(bn.prefix)], bn.prefix) {
 			return nil, false
 		}
@@ -278,7 +296,7 @@ func (t *SubjectTree[T]) delete(np *node, subject []byte, si int) (*T, bool) {
 func (t *SubjectTree[T]) match(n node, parts [][]byte, pre []byte, cb func(subject []byte, val *T)) {
 	// Capture if we are sitting on a terminal fwc.
 	var hasFWC bool
-	if lp := len(parts); lp > 0 && parts[lp-1][0] == fwc {
+	if lp := len(parts); lp > 0 && len(parts[lp-1]) > 0 && parts[lp-1][0] == fwc {
 		hasFWC = true
 	}
 
@@ -363,8 +381,8 @@ func (t *SubjectTree[T]) match(n node, parts [][]byte, pre []byte, cb func(subje
 	}
 }
 
-// Interal iter function to walk nodes in lexigraphical order.
-func (t *SubjectTree[T]) iter(n node, pre []byte, cb func(subject []byte, val *T) bool) bool {
+// Internal iter function to walk nodes in lexicographical order.
+func (t *SubjectTree[T]) iter(n node, pre []byte, ordered bool, cb func(subject []byte, val *T) bool) bool {
 	if n.isLeaf() {
 		ln := n.(*leaf[T])
 		return cb(append(pre, ln.suffix...), &ln.value)
@@ -373,6 +391,19 @@ func (t *SubjectTree[T]) iter(n node, pre []byte, cb func(subject []byte, val *T
 	bn := n.base()
 	// Note that this append may reallocate, but it doesn't modify "pre" at the "iter" callsite.
 	pre = append(pre, bn.prefix...)
+	// Not everything requires lexicographical sorting, so support a fast path for iterating in
+	// whatever order the stree has things stored instead.
+	if !ordered {
+		for _, cn := range n.children() {
+			if cn == nil {
+				continue
+			}
+			if !t.iter(cn, pre, false, cb) {
+				return false
+			}
+		}
+		return true
+	}
 	// Collect nodes since unsorted.
 	var _nodes [256]node
 	nodes := _nodes[:0]
@@ -382,12 +413,38 @@ func (t *SubjectTree[T]) iter(n node, pre []byte, cb func(subject []byte, val *T
 		}
 	}
 	// Now sort.
-	sort.SliceStable(nodes, func(i, j int) bool { return bytes.Compare(nodes[i].path(), nodes[j].path()) < 0 })
+	slices.SortStableFunc(nodes, func(a, b node) int { return bytes.Compare(a.path(), b.path()) })
 	// Now walk the nodes in order and call into next iter.
 	for i := range nodes {
-		if !t.iter(nodes[i], pre, cb) {
+		if !t.iter(nodes[i], pre, true, cb) {
 			return false
 		}
 	}
 	return true
+}
+
+// LazyIntersect iterates the smaller of the two provided subject trees and
+// looks for matching entries in the other. It is lazy in that it does not
+// aggressively optimize against repeated walks, but is considerably faster
+// in most cases than intersecting against a potentially large sublist.
+func LazyIntersect[TL, TR any](tl *SubjectTree[TL], tr *SubjectTree[TR], cb func([]byte, *TL, *TR)) {
+	if tl == nil || tr == nil || tl.root == nil || tr.root == nil {
+		return
+	}
+	// Iterate over the smaller tree to reduce the number of rounds.
+	if tl.Size() <= tr.Size() {
+		tl.IterFast(func(key []byte, v1 *TL) bool {
+			if v2, ok := tr.Find(key); ok {
+				cb(key, v1, v2)
+			}
+			return true
+		})
+	} else {
+		tr.IterFast(func(key []byte, v2 *TR) bool {
+			if v1, ok := tl.Find(key); ok {
+				cb(key, v1, v2)
+			}
+			return true
+		})
+	}
 }

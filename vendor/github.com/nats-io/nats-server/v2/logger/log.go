@@ -1,4 +1,4 @@
-// Copyright 2012-2019 The NATS Authors
+// Copyright 2012-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -24,6 +24,9 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+// Default file permissions for log files.
+const defaultLogPerms = os.FileMode(0640)
 
 // Logger is the server logger
 type Logger struct {
@@ -142,7 +145,7 @@ type fileLogger struct {
 
 func newFileLogger(filename, pidPrefix string, time bool) (*fileLogger, error) {
 	fileflags := os.O_WRONLY | os.O_APPEND | os.O_CREATE
-	f, err := os.OpenFile(filename, fileflags, 0660)
+	f, err := os.OpenFile(filename, fileflags, defaultLogPerms)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +263,7 @@ func (l *fileLogger) Write(b []byte) (int, error) {
 				now.Second(), now.Nanosecond())
 			os.Rename(fname, bak)
 			fileflags := os.O_WRONLY | os.O_APPEND | os.O_CREATE
-			f, err := os.OpenFile(fname, fileflags, 0660)
+			f, err := os.OpenFile(fname, fileflags, defaultLogPerms)
 			if err != nil {
 				l.Unlock()
 				panic(fmt.Sprintf("Unable to re-open the logfile %q after rotation: %v", fname, err))

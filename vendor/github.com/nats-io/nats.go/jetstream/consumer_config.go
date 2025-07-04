@@ -75,6 +75,27 @@ type (
 
 		// TimeStamp indicates when the info was gathered by the server.
 		TimeStamp time.Time `json:"ts"`
+
+		// PriorityGroups contains the information about the currently defined priority groups
+		PriorityGroups []PriorityGroupState `json:"priority_groups,omitempty"`
+
+		// Paused indicates whether the consumer is paused.
+		Paused bool `json:"paused,omitempty"`
+
+		// PauseRemaining contains the amount of time left until the consumer
+		// unpauses. It will only be non-zero if the consumer is currently paused.
+		PauseRemaining time.Duration `json:"pause_remaining,omitempty"`
+	}
+
+	PriorityGroupState struct {
+		// Group this status is for.
+		Group string `json:"group"`
+
+		// PinnedClientID is the generated ID of the pinned client.
+		PinnedClientID string `json:"pinned_client_id,omitempty"`
+
+		// PinnedTS is the timestamp when the client was pinned.
+		PinnedTS time.Time `json:"pinned_ts,omitempty"`
 	}
 
 	// ConsumerConfig is the configuration of a JetStream consumer.
@@ -217,6 +238,21 @@ type (
 		// associating metadata on the consumer. This feature requires
 		// nats-server v2.10.0 or later.
 		Metadata map[string]string `json:"metadata,omitempty"`
+
+		// PauseUntil is for suspending the consumer until the deadline.
+		PauseUntil *time.Time `json:"pause_until,omitempty"`
+
+		// PriorityPolicy represents he priority policy the consumer is set to.
+		// Requires nats-server v2.11.0 or later.
+		PriorityPolicy PriorityPolicy `json:"priority_policy,omitempty"`
+
+		// PinnedTTL represents the time after which the client will be unpinned
+		// if no new pull requests are sent.Used with PriorityPolicyPinned.
+		// Requires nats-server v2.11.0 or later.
+		PinnedTTL time.Duration `json:"priority_timeout,omitempty"`
+
+		// PriorityGroups is a list of priority groups this consumer supports.
+		PriorityGroups []string `json:"priority_groups,omitempty"`
 	}
 
 	// OrderedConsumerConfig is the configuration of an ordered JetStream
@@ -253,7 +289,7 @@ type (
 
 		// InactiveThreshold is a duration which instructs the server to clean
 		// up the consumer if it has been inactive for the specified duration.
-		// Defaults to 5s.
+		// Defaults to 5m.
 		InactiveThreshold time.Duration `json:"inactive_threshold,omitempty"`
 
 		// HeadersOnly indicates whether only headers of messages should be sent
@@ -263,6 +299,11 @@ type (
 		// Maximum number of attempts for the consumer to be recreated in a
 		// single recreation cycle. Defaults to unlimited.
 		MaxResetAttempts int
+
+		// Metadata is a set of application-defined key-value pairs for
+		// associating metadata on the consumer. This feature requires
+		// nats-server v2.10.0 or later.
+		Metadata map[string]string `json:"metadata,omitempty"`
 	}
 
 	// DeliverPolicy determines from which point to start delivering messages.
@@ -283,7 +324,50 @@ type (
 		Stream   uint64     `json:"stream_seq"`
 		Last     *time.Time `json:"last_active,omitempty"`
 	}
+
+	// PriorityPolicy determines the priority policy the consumer is set to.
+	PriorityPolicy int
 )
+
+const (
+	// PriorityPolicyNone is the default priority policy.
+	PriorityPolicyNone PriorityPolicy = iota
+
+	// PriorityPolicyPinned is the priority policy that pins a consumer to a
+	// specific client.
+	PriorityPolicyPinned
+
+	// PriorityPolicyOverflow is the priority policy that allows for
+	// restricting when a consumer will receive messages based on the number of
+	// pending messages or acks.
+	PriorityPolicyOverflow
+)
+
+func (p *PriorityPolicy) UnmarshalJSON(data []byte) error {
+	switch string(data) {
+	case jsonString(""):
+		*p = PriorityPolicyNone
+	case jsonString("pinned_client"):
+		*p = PriorityPolicyPinned
+	case jsonString("overflow"):
+		*p = PriorityPolicyOverflow
+	default:
+		return fmt.Errorf("nats: can not unmarshal %q", data)
+	}
+	return nil
+}
+
+func (p PriorityPolicy) MarshalJSON() ([]byte, error) {
+	switch p {
+	case PriorityPolicyNone:
+		return json.Marshal("")
+	case PriorityPolicyPinned:
+		return json.Marshal("pinned_client")
+	case PriorityPolicyOverflow:
+		return json.Marshal("overflow")
+	}
+	return nil, fmt.Errorf("nats: unknown priority policy %v", p)
+}
 
 const (
 	// DeliverAllPolicy starts delivering messages from the very beginning of a
