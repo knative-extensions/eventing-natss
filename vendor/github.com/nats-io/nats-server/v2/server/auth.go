@@ -1,4 +1,4 @@
-// Copyright 2012-2024 The NATS Authors
+// Copyright 2012-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -417,6 +417,10 @@ func (c *client) matchesPinnedCert(tlsPinnedCerts PinnedCertSet) bool {
 	return true
 }
 
+var (
+	mustacheRE = regexp.MustCompile(`{{2}([^}]+)}{2}`)
+)
+
 func processUserPermissionsTemplate(lim jwt.UserPermissionLimits, ujwt *jwt.UserClaims, acc *Account) (jwt.UserPermissionLimits, error) {
 	nArrayCartesianProduct := func(a ...[]string) [][]string {
 		c := 1
@@ -448,16 +452,26 @@ func processUserPermissionsTemplate(lim jwt.UserPermissionLimits, ujwt *jwt.User
 		}
 		return p
 	}
+	isTag := func(op string) []string {
+		if strings.EqualFold("tag(", op[:4]) && strings.HasSuffix(op, ")") {
+			v := strings.TrimPrefix(op, "tag(")
+			v = strings.TrimSuffix(v, ")")
+			return []string{"tag", v}
+		} else if strings.EqualFold("account-tag(", op[:12]) && strings.HasSuffix(op, ")") {
+			v := strings.TrimPrefix(op, "account-tag(")
+			v = strings.TrimSuffix(v, ")")
+			return []string{"account-tag", v}
+		}
+		return nil
+	}
 	applyTemplate := func(list jwt.StringList, failOnBadSubject bool) (jwt.StringList, error) {
 		found := false
 	FOR_FIND:
 		for i := 0; i < len(list); i++ {
 			// check if templates are present
-			for _, tk := range strings.Split(list[i], tsep) {
-				if strings.HasPrefix(tk, "{{") && strings.HasSuffix(tk, "}}") {
-					found = true
-					break FOR_FIND
-				}
+			if mustacheRE.MatchString(list[i]) {
+				found = true
+				break FOR_FIND
 			}
 		}
 		if !found {
@@ -466,94 +480,78 @@ func processUserPermissionsTemplate(lim jwt.UserPermissionLimits, ujwt *jwt.User
 		// process the templates
 		emittedList := make([]string, 0, len(list))
 		for i := 0; i < len(list); i++ {
-			tokens := strings.Split(list[i], tsep)
-
-			newTokens := make([]string, len(tokens))
-			tagValues := [][]string{}
-
+			// find all the templates {{}} in this acl
+			tokens := mustacheRE.FindAllString(list[i], -1)
+			srcs := make([]string, len(tokens))
+			values := make([][]string, len(tokens))
+			hasTags := false
 			for tokenNum, tk := range tokens {
-				if strings.HasPrefix(tk, "{{") && strings.HasSuffix(tk, "}}") {
-					op := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(tk, "{{"), "}}"))
-					switch {
-					case op == "name()":
-						tk = ujwt.Name
-					case op == "subject()":
-						tk = ujwt.Subject
-					case op == "account-name()":
+				srcs[tokenNum] = tk
+				op := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(tk, "{{"), "}}"))
+				if strings.EqualFold("name()", op) {
+					values[tokenNum] = []string{ujwt.Name}
+				} else if strings.EqualFold("subject()", op) {
+					values[tokenNum] = []string{ujwt.Subject}
+				} else if strings.EqualFold("account-name()", op) {
+					acc.mu.RLock()
+					values[tokenNum] = []string{acc.nameTag}
+					acc.mu.RUnlock()
+				} else if strings.EqualFold("account-subject()", op) {
+					// this always has an issuer account since this is a scoped signer
+					values[tokenNum] = []string{ujwt.IssuerAccount}
+				} else if isTag(op) != nil {
+					hasTags = true
+					match := isTag(op)
+					var tags jwt.TagList
+					if match[0] == "account-tag" {
 						acc.mu.RLock()
-						name := acc.nameTag
+						tags = acc.tags
 						acc.mu.RUnlock()
-						tk = name
-					case op == "account-subject()":
-						tk = ujwt.IssuerAccount
-					case (strings.HasPrefix(op, "tag(") || strings.HasPrefix(op, "account-tag(")) &&
-						strings.HasSuffix(op, ")"):
-						// insert dummy tav value that will throw of subject validation (in case nothing is found)
-						tk = _EMPTY_
-						// collect list of matching tag values
-
-						var tags jwt.TagList
-						var tagPrefix string
-						if strings.HasPrefix(op, "account-tag(") {
-							acc.mu.RLock()
-							tags = acc.tags
-							acc.mu.RUnlock()
-							tagPrefix = fmt.Sprintf("%s:", strings.ToLower(
-								strings.TrimSuffix(strings.TrimPrefix(op, "account-tag("), ")")))
-						} else {
-							tags = ujwt.Tags
-							tagPrefix = fmt.Sprintf("%s:", strings.ToLower(
-								strings.TrimSuffix(strings.TrimPrefix(op, "tag("), ")")))
-						}
-
-						valueList := []string{}
-						for _, tag := range tags {
-							if strings.HasPrefix(tag, tagPrefix) {
-								tagValue := strings.TrimPrefix(tag, tagPrefix)
-								valueList = append(valueList, tagValue)
-							}
-						}
-						if len(valueList) != 0 {
-							tagValues = append(tagValues, valueList)
-						}
-					default:
-						// if macro is not recognized, throw off subject check on purpose
-						tk = " "
+					} else {
+						tags = ujwt.Tags
 					}
+					tagPrefix := fmt.Sprintf("%s:", strings.ToLower(match[1]))
+					var valueList []string
+					for _, tag := range tags {
+						if strings.HasPrefix(tag, tagPrefix) {
+							tagValue := strings.TrimPrefix(tag, tagPrefix)
+							valueList = append(valueList, tagValue)
+						}
+					}
+					if len(valueList) != 0 {
+						values[tokenNum] = valueList
+					} else if failOnBadSubject {
+						return nil, fmt.Errorf("generated invalid subject %q: %q is not defined", list[i], match[1])
+					} else {
+						// generate an invalid subject?
+						values[tokenNum] = []string{" "}
+					}
+				} else if failOnBadSubject {
+					return nil, fmt.Errorf("template operation in %q: %q is not defined", list[i], op)
 				}
-				newTokens[tokenNum] = tk
 			}
-			// fill in tag value placeholders
-			if len(tagValues) == 0 {
-				emitSubj := strings.Join(newTokens, tsep)
-				if IsValidSubject(emitSubj) {
-					emittedList = append(emittedList, emitSubj)
+			if !hasTags {
+				subj := list[i]
+				for idx, m := range srcs {
+					subj = strings.Replace(subj, m, values[idx][0], -1)
+				}
+				if IsValidSubject(subj) {
+					emittedList = append(emittedList, subj)
 				} else if failOnBadSubject {
 					return nil, fmt.Errorf("generated invalid subject")
 				}
-				// else skip emitting
 			} else {
-				// compute the cartesian product and compute subject to emit for each combination
-				for _, valueList := range nArrayCartesianProduct(tagValues...) {
-					b := strings.Builder{}
-					for i, token := range newTokens {
-						if token == _EMPTY_ && len(valueList) > 0 {
-							b.WriteString(valueList[0])
-							valueList = valueList[1:]
-						} else {
-							b.WriteString(token)
-						}
-						if i != len(newTokens)-1 {
-							b.WriteString(tsep)
-						}
+				a := nArrayCartesianProduct(values...)
+				for _, aa := range a {
+					subj := list[i]
+					for j := 0; j < len(srcs); j++ {
+						subj = strings.Replace(subj, srcs[j], aa[j], -1)
 					}
-					emitSubj := b.String()
-					if IsValidSubject(emitSubj) {
-						emittedList = append(emittedList, emitSubj)
+					if IsValidSubject(subj) {
+						emittedList = append(emittedList, subj)
 					} else if failOnBadSubject {
 						return nil, fmt.Errorf("generated invalid subject")
 					}
-					// else skip emitting
 				}
 			}
 		}
@@ -606,12 +604,38 @@ func (s *Server) processClientOrLeafAuthentication(c *client, opts *Options) (au
 			}
 			return
 		}
-		// We have a juc defined here, check account.
+		// We have a juc, check if externally managed, i.e. should be delegated
+		// to the auth callout service.
 		if juc != nil && !acc.hasExternalAuth() {
 			if !authorized {
 				s.sendAccountAuthErrorEvent(c, c.acc, reason)
 			}
 			return
+		}
+		// Check config-mode. The global account is a condition since users that
+		// are not found in the config are implicitly bound to the global account.
+		// This means those users should be implicitly delegated to auth callout
+		// if configured. Exclude LEAF connections from this check.
+		if c.kind != LEAF && juc == nil && opts.AuthCallout != nil && c.acc.Name != globalAccountName {
+			// If no allowed accounts are defined, then all accounts are in scope.
+			// Otherwise see if the account is in the list.
+			delegated := len(opts.AuthCallout.AllowedAccounts) == 0
+			if !delegated {
+				for _, n := range opts.AuthCallout.AllowedAccounts {
+					if n == c.acc.Name {
+						delegated = true
+						break
+					}
+				}
+			}
+
+			// Not delegated, so return with previous authorized result.
+			if !delegated {
+				if !authorized {
+					s.sendAccountAuthErrorEvent(c, c.acc, reason)
+				}
+				return
+			}
 		}
 
 		// We have auth callout set here.
@@ -730,6 +754,9 @@ func (s *Server) processClientOrLeafAuthentication(c *client, opts *Options) (au
 
 	// Check if we have trustedKeys defined in the server. If so we require a user jwt.
 	if s.trustedKeys != nil {
+		if c.opts.JWT == _EMPTY_ && opts.DefaultSentinel != _EMPTY_ {
+			c.opts.JWT = opts.DefaultSentinel
+		}
 		if c.opts.JWT == _EMPTY_ {
 			s.mu.Unlock()
 			c.Debugf("Authentication requires a user JWT")
@@ -857,6 +884,54 @@ func (s *Server) processClientOrLeafAuthentication(c *client, opts *Options) (au
 	// If we have a jwt and a userClaim, make sure we have the Account, etc associated.
 	// We need to look up the account. This will use an account resolver if one is present.
 	if juc != nil {
+		issuer := juc.Issuer
+		if juc.IssuerAccount != _EMPTY_ {
+			issuer = juc.IssuerAccount
+		}
+		if pinnedAcounts != nil {
+			if _, ok := pinnedAcounts[issuer]; !ok {
+				c.Debugf("Account %s not listed as operator pinned account", issuer)
+				atomic.AddUint64(&s.pinnedAccFail, 1)
+				return false
+			}
+		}
+		if acc, err = s.LookupAccount(issuer); acc == nil {
+			c.Debugf("Account JWT lookup error: %v", err)
+			return false
+		}
+		acc.mu.RLock()
+		aissuer := acc.Issuer
+		acc.mu.RUnlock()
+		if !s.isTrustedIssuer(aissuer) {
+			c.Debugf("Account JWT not signed by trusted operator")
+			return false
+		}
+		if scope, ok := acc.hasIssuer(juc.Issuer); !ok {
+			c.Debugf("User JWT issuer is not known")
+			return false
+		} else if scope != nil {
+			if err := scope.ValidateScopedSigner(juc); err != nil {
+				c.Debugf("User JWT is not valid: %v", err)
+				return false
+			} else if uSc, ok := scope.(*jwt.UserScope); !ok {
+				c.Debugf("User JWT is not valid")
+				return false
+			} else if juc.UserPermissionLimits, err = processUserPermissionsTemplate(uSc.Template, juc, acc); err != nil {
+				c.Debugf("User JWT generated invalid permissions")
+				return false
+			}
+		}
+		if acc.IsExpired() {
+			c.Debugf("Account JWT has expired")
+			return false
+		}
+		if juc.BearerToken && acc.failBearer() {
+			c.Debugf("Account does not allow bearer tokens")
+			return false
+		}
+		// We check the allowed connection types, but only after processing
+		// of scoped signer (so that it updates `juc` with what is defined
+		// in the account.
 		allowedConnTypes, err := convertAllowedConnectionTypes(juc.AllowedConnectionTypes)
 		if err != nil {
 			// We got an error, which means some connection types were unknown. As long as
@@ -882,48 +957,6 @@ func (s *Server) processClientOrLeafAuthentication(c *client, opts *Options) (au
 		}
 		if !c.connectionTypeAllowed(allowedConnTypes) {
 			c.Debugf("Connection type not allowed")
-			return false
-		}
-		issuer := juc.Issuer
-		if juc.IssuerAccount != _EMPTY_ {
-			issuer = juc.IssuerAccount
-		}
-		if pinnedAcounts != nil {
-			if _, ok := pinnedAcounts[issuer]; !ok {
-				c.Debugf("Account %s not listed as operator pinned account", issuer)
-				atomic.AddUint64(&s.pinnedAccFail, 1)
-				return false
-			}
-		}
-		if acc, err = s.LookupAccount(issuer); acc == nil {
-			c.Debugf("Account JWT lookup error: %v", err)
-			return false
-		}
-		if !s.isTrustedIssuer(acc.Issuer) {
-			c.Debugf("Account JWT not signed by trusted operator")
-			return false
-		}
-		if scope, ok := acc.hasIssuer(juc.Issuer); !ok {
-			c.Debugf("User JWT issuer is not known")
-			return false
-		} else if scope != nil {
-			if err := scope.ValidateScopedSigner(juc); err != nil {
-				c.Debugf("User JWT is not valid: %v", err)
-				return false
-			} else if uSc, ok := scope.(*jwt.UserScope); !ok {
-				c.Debugf("User JWT is not valid")
-				return false
-			} else if juc.UserPermissionLimits, err = processUserPermissionsTemplate(uSc.Template, juc, acc); err != nil {
-				c.Debugf("User JWT generated invalid permissions")
-				return false
-			}
-		}
-		if acc.IsExpired() {
-			c.Debugf("Account JWT has expired")
-			return false
-		}
-		if juc.BearerToken && acc.failBearer() {
-			c.Debugf("Account does not allow bearer tokens")
 			return false
 		}
 		// skip validation of nonce when presented with a bearer token
@@ -978,12 +1011,12 @@ func (s *Server) processClientOrLeafAuthentication(c *client, opts *Options) (au
 			deniedSub := []string{}
 			for _, sub := range denyAllJs {
 				if c.perms.pub.deny != nil {
-					if r := c.perms.pub.deny.Match(sub); len(r.psubs)+len(r.qsubs) > 0 {
+					if c.perms.pub.deny.HasInterest(sub) {
 						deniedPub = append(deniedPub, sub)
 					}
 				}
 				if c.perms.sub.deny != nil {
-					if r := c.perms.sub.deny.Match(sub); len(r.psubs)+len(r.qsubs) > 0 {
+					if c.perms.sub.deny.HasInterest(sub) {
 						deniedSub = append(deniedSub, sub)
 					}
 				}
@@ -1465,7 +1498,8 @@ func validateAllowedConnectionTypes(m map[string]struct{}) error {
 		switch ctuc {
 		case jwt.ConnectionTypeStandard, jwt.ConnectionTypeWebsocket,
 			jwt.ConnectionTypeLeafnode, jwt.ConnectionTypeLeafnodeWS,
-			jwt.ConnectionTypeMqtt, jwt.ConnectionTypeMqttWS:
+			jwt.ConnectionTypeMqtt, jwt.ConnectionTypeMqttWS,
+			jwt.ConnectionTypeInProcess:
 		default:
 			return fmt.Errorf("unknown connection type %q", ct)
 		}

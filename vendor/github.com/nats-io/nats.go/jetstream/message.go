@@ -1,4 +1,4 @@
-// Copyright 2022-2024 The NATS Authors
+// Copyright 2022-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -16,6 +16,7 @@ package jetstream
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -146,6 +147,7 @@ const (
 	reqTimeout       = "408"
 	maxBytesExceeded = "409"
 	noResponders     = "503"
+	pinIdMismatch    = "423"
 )
 
 // Headers used when publishing messages.
@@ -189,9 +191,16 @@ const (
 	// option.
 	ExpectedLastMsgIDHeader = "Nats-Expected-Last-Msg-Id"
 
+	// MsgTTLHeader is used to specify the TTL for a specific message. This will
+	// override the default TTL for the stream.
+	MsgTTLHeader = "Nats-TTL"
+
 	// MsgRollup is used to apply a purge of all prior messages in the stream
 	// ("all") or at the subject ("sub") before this message.
 	MsgRollup = "Nats-Rollup"
+
+	// MarkerReasonHeader is used to specify a reason for message deletion.
+	MarkerReasonHeader = "Nats-Marker-Reason"
 )
 
 // Headers for republished messages and direct gets. Those headers are set by
@@ -341,7 +350,7 @@ func (m *jetStreamMsg) ackReply(ctx context.Context, ackType ackType, sync bool,
 
 	if sync {
 		var cancel context.CancelFunc
-		ctx, cancel = wrapContextWithoutDeadline(ctx)
+		ctx, cancel = m.js.wrapContextWithoutDeadline(ctx)
 		if cancel != nil {
 			defer cancel()
 		}
@@ -413,9 +422,14 @@ func checkMsg(msg *nats.Msg) (bool, error) {
 		return false, nats.ErrTimeout
 	case controlMsg:
 		return false, nil
+	case pinIdMismatch:
+		return false, ErrPinIDMismatch
 	case maxBytesExceeded:
 		if strings.Contains(strings.ToLower(descr), "message size exceeds maxbytes") {
 			return false, ErrMaxBytesExceeded
+		}
+		if strings.Contains(strings.ToLower(descr), "batch completed") {
+			return false, ErrBatchCompleted
 		}
 		if strings.Contains(strings.ToLower(descr), "consumer deleted") {
 			return false, ErrConsumerDeleted
@@ -434,7 +448,7 @@ func parsePending(msg *nats.Msg) (int, int, error) {
 	if msgsLeftStr != "" {
 		msgsLeft, err = strconv.Atoi(msgsLeftStr)
 		if err != nil {
-			return 0, 0, fmt.Errorf("nats: invalid format of Nats-Pending-Messages")
+			return 0, 0, errors.New("nats: invalid format of Nats-Pending-Messages")
 		}
 	}
 	bytesLeftStr := msg.Header.Get("Nats-Pending-Bytes")
@@ -442,7 +456,7 @@ func parsePending(msg *nats.Msg) (int, int, error) {
 	if bytesLeftStr != "" {
 		bytesLeft, err = strconv.Atoi(bytesLeftStr)
 		if err != nil {
-			return 0, 0, fmt.Errorf("nats: invalid format of Nats-Pending-Bytes")
+			return 0, 0, errors.New("nats: invalid format of Nats-Pending-Bytes")
 		}
 	}
 	return msgsLeft, bytesLeft, nil
