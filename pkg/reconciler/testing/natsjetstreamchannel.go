@@ -78,7 +78,7 @@ func WithNatsJetStreamChannelFinalizer(nc *v1alpha1.NatsJetStreamChannel) {
 
 func WithNatsJetStreamChannelDeleted(nc *v1alpha1.NatsJetStreamChannel) {
 	deleteTime := metav1.NewTime(time.Unix(1e9, 0))
-	nc.ObjectMeta.SetDeletionTimestamp(&deleteTime)
+	nc.SetDeletionTimestamp(&deleteTime)
 }
 
 func WithNatsJetStreamDeploymentSpecTemplate(nc *v1alpha1.NatsJetStreamChannel) {

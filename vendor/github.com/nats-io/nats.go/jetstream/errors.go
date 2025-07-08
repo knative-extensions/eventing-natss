@@ -1,4 +1,4 @@
-// Copyright 2022-2024 The NATS Authors
+// Copyright 2022-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -195,9 +195,18 @@ var (
 	// consumer.
 	ErrNoMessages JetStreamError = &jsError{message: "no messages"}
 
+	// ErrPinIDMismatch is returned when Pin ID sent in the request does not match
+	// the currently pinned consumer subscriber ID on the server.
+	ErrPinIDMismatch JetStreamError = &jsError{message: "pin ID mismatch"}
+
 	// ErrMaxBytesExceeded is returned when a message would exceed MaxBytes set
 	// on a pull request.
 	ErrMaxBytesExceeded JetStreamError = &jsError{message: "message size exceeds max bytes"}
+
+	// ErrBatchCompleted is returned when a fetch request sent the whole batch,
+	// but there are still bytes left. This is applicable only when MaxBytes is
+	// set on a pull request.
+	ErrBatchCompleted JetStreamError = &jsError{message: "batch completed"}
 
 	// ErrConsumerDeleted is returned when attempting to send pull request to a
 	// consumer which does not exist.
@@ -270,6 +279,12 @@ var (
 	// of an ordered consumer which was not yet created.
 	ErrOrderedConsumerNotCreated JetStreamError = &jsError{message: "consumer instance not yet created"}
 
+	// ErrJetStreamPublisherClosed is returned for each unfinished ack future when JetStream.Cleanup is called.
+	ErrJetStreamPublisherClosed JetStreamError = &jsError{message: "jetstream context closed"}
+
+	// ErrAsyncPublishTimeout is returned when waiting for ack on async publish
+	ErrAsyncPublishTimeout JetStreamError = &jsError{message: "timeout waiting for ack"}
+
 	// KeyValue Errors
 
 	// ErrKeyExists is returned when attempting to create a key that already
@@ -314,6 +329,14 @@ var (
 
 	// ErrNoKeysFound is returned when no keys are found.
 	ErrNoKeysFound JetStreamError = &jsError{message: "no keys found"}
+
+	// ErrTTLOnDeleteNotSupported is returned when attempting to set a TTL
+	// on a delete operation.
+	ErrTTLOnDeleteNotSupported JetStreamError = &jsError{message: "TTL is not supported on delete"}
+
+	// ErrLimitMarkerTTLNotSupported is returned when the connected jetstream API
+	// does not support setting the LimitMarkerTTL.
+	ErrLimitMarkerTTLNotSupported JetStreamError = &jsError{message: "limit marker TTLs not supported by server"}
 
 	// ErrObjectConfigRequired is returned when attempting to create an object
 	// without a config.

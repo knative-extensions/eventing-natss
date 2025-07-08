@@ -1,4 +1,4 @@
-// Copyright 2022-2024 The NATS Authors
+// Copyright 2022-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -19,7 +19,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/nats-io/nats.go/internal/syncx"
 	"github.com/nats-io/nuid"
 )
 
@@ -62,7 +64,9 @@ type (
 		// for delivered messages.
 		//
 		// Messages channel is always closed, thus it is safe to range over it
-		// without additional checks.
+		// without additional checks. After the channel is closed,
+		// MessageBatch.Error() should be checked to see if there was an error
+		// during message delivery (e.g. missing heartbeat).
 		Fetch(batch int, opts ...FetchOpt) (MessageBatch, error)
 
 		// FetchBytes is used to retrieve up to a provided bytes from the
@@ -81,7 +85,9 @@ type (
 		// for delivered messages.
 		//
 		// Messages channel is always closed, thus it is safe to range over it
-		// without additional checks.
+		// without additional checks. After the channel is closed,
+		// MessageBatch.Error() should be checked to see if there was an error
+		// during message delivery (e.g. missing heartbeat).
 		FetchBytes(maxBytes int, opts ...FetchOpt) (MessageBatch, error)
 
 		// FetchNoWait is used to retrieve up to a provided number of messages
@@ -93,7 +99,9 @@ type (
 		// channel for delivered messages.
 		//
 		// Messages channel is always closed, thus it is safe to range over it
-		// without additional checks.
+		// without additional checks. After the channel is closed,
+		// MessageBatch.Error() should be checked to see if there was an error
+		// during message delivery (e.g. missing heartbeat).
 		FetchNoWait(batch int) (MessageBatch, error)
 
 		// Consume will continuously receive messages and handle them
@@ -148,14 +156,14 @@ type (
 
 // Info fetches current ConsumerInfo from the server.
 func (p *pullConsumer) Info(ctx context.Context) (*ConsumerInfo, error) {
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := p.js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
-	infoSubject := apiSubj(p.jetStream.apiPrefix, fmt.Sprintf(apiConsumerInfoT, p.stream, p.name))
+	infoSubject := fmt.Sprintf(apiConsumerInfoT, p.stream, p.name)
 	var resp consumerInfoResponse
 
-	if _, err := p.jetStream.apiRequestJSON(ctx, infoSubject, &resp); err != nil {
+	if _, err := p.js.apiRequestJSON(ctx, infoSubject, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Error != nil {
@@ -180,7 +188,7 @@ func (p *pullConsumer) CachedInfo() *ConsumerInfo {
 }
 
 func upsertConsumer(ctx context.Context, js *jetStream, stream string, cfg ConsumerConfig, action string) (Consumer, error) {
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
@@ -211,9 +219,9 @@ func upsertConsumer(ctx context.Context, js *jetStream, stream string, cfg Consu
 		if err := validateSubject(cfg.FilterSubject); err != nil {
 			return nil, err
 		}
-		ccSubj = apiSubj(js.apiPrefix, fmt.Sprintf(apiConsumerCreateWithFilterSubjectT, stream, consumerName, cfg.FilterSubject))
+		ccSubj = fmt.Sprintf(apiConsumerCreateWithFilterSubjectT, stream, consumerName, cfg.FilterSubject)
 	} else {
-		ccSubj = apiSubj(js.apiPrefix, fmt.Sprintf(apiConsumerCreateT, stream, consumerName))
+		ccSubj = fmt.Sprintf(apiConsumerCreateT, stream, consumerName)
 	}
 	var resp consumerInfoResponse
 
@@ -233,12 +241,12 @@ func upsertConsumer(ctx context.Context, js *jetStream, stream string, cfg Consu
 	}
 
 	return &pullConsumer{
-		jetStream:     js,
-		stream:        stream,
-		name:          resp.Name,
-		durable:       cfg.Durable != "",
-		info:          resp.ConsumerInfo,
-		subscriptions: make(map[string]*pullSubscription),
+		js:      js,
+		stream:  stream,
+		name:    resp.Name,
+		durable: cfg.Durable != "",
+		info:    resp.ConsumerInfo,
+		subs:    syncx.Map[string, *pullSubscription]{},
 	}, nil
 }
 
@@ -260,14 +268,14 @@ func generateConsName() string {
 }
 
 func getConsumer(ctx context.Context, js *jetStream, stream, name string) (Consumer, error) {
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
 	if err := validateConsumerName(name); err != nil {
 		return nil, err
 	}
-	infoSubject := apiSubj(js.apiPrefix, fmt.Sprintf(apiConsumerInfoT, stream, name))
+	infoSubject := fmt.Sprintf(apiConsumerInfoT, stream, name)
 
 	var resp consumerInfoResponse
 
@@ -285,26 +293,26 @@ func getConsumer(ctx context.Context, js *jetStream, stream, name string) (Consu
 	}
 
 	cons := &pullConsumer{
-		jetStream:     js,
-		stream:        stream,
-		name:          name,
-		durable:       resp.Config.Durable != "",
-		info:          resp.ConsumerInfo,
-		subscriptions: make(map[string]*pullSubscription, 0),
+		js:      js,
+		stream:  stream,
+		name:    name,
+		durable: resp.Config.Durable != "",
+		info:    resp.ConsumerInfo,
+		subs:    syncx.Map[string, *pullSubscription]{},
 	}
 
 	return cons, nil
 }
 
 func deleteConsumer(ctx context.Context, js *jetStream, stream, consumer string) error {
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
 	if err := validateConsumerName(consumer); err != nil {
 		return err
 	}
-	deleteSubject := apiSubj(js.apiPrefix, fmt.Sprintf(apiConsumerDeleteT, stream, consumer))
+	deleteSubject := fmt.Sprintf(apiConsumerDeleteT, stream, consumer)
 
 	var resp consumerDeleteResponse
 
@@ -320,6 +328,43 @@ func deleteConsumer(ctx context.Context, js *jetStream, stream, consumer string)
 	return nil
 }
 
+func pauseConsumer(ctx context.Context, js *jetStream, stream, consumer string, pauseUntil *time.Time) (*ConsumerPauseResponse, error) {
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+	if err := validateConsumerName(consumer); err != nil {
+		return nil, err
+	}
+	subject := fmt.Sprintf(apiConsumerPauseT, stream, consumer)
+
+	var resp consumerPauseApiResponse
+	req, err := json.Marshal(consumerPauseRequest{
+		PauseUntil: pauseUntil,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := js.apiRequestJSON(ctx, subject, &resp, req); err != nil {
+		return nil, err
+	}
+	if resp.Error != nil {
+		if resp.Error.ErrorCode == JSErrCodeConsumerNotFound {
+			return nil, ErrConsumerNotFound
+		}
+		return nil, resp.Error
+	}
+	return &ConsumerPauseResponse{
+		Paused:         resp.Paused,
+		PauseUntil:     resp.PauseUntil,
+		PauseRemaining: resp.PauseRemaining,
+	}, nil
+}
+
+func resumeConsumer(ctx context.Context, js *jetStream, stream, consumer string) (*ConsumerPauseResponse, error) {
+	return pauseConsumer(ctx, js, stream, consumer, nil)
+}
+
 func validateConsumerName(dur string) error {
 	if dur == "" {
 		return fmt.Errorf("%w: '%s'", ErrInvalidConsumerName, "name is required")
@@ -327,5 +372,39 @@ func validateConsumerName(dur string) error {
 	if strings.ContainsAny(dur, ">*. /\\") {
 		return fmt.Errorf("%w: '%s'", ErrInvalidConsumerName, dur)
 	}
+	return nil
+}
+
+func unpinConsumer(ctx context.Context, js *jetStream, stream, consumer, group string) error {
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
+	if cancel != nil {
+		defer cancel()
+	}
+	if err := validateConsumerName(consumer); err != nil {
+		return err
+	}
+	unpinSubject := fmt.Sprintf(apiConsumerUnpinT, stream, consumer)
+
+	var req = consumerUnpinRequest{
+		Group: group,
+	}
+
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	var resp apiResponse
+
+	if _, err := js.apiRequestJSON(ctx, unpinSubject, &resp, reqJSON); err != nil {
+		return err
+	}
+	if resp.Error != nil {
+		if resp.Error.ErrorCode == JSErrCodeConsumerNotFound {
+			return ErrConsumerNotFound
+		}
+		return resp.Error
+	}
+
 	return nil
 }

@@ -34,7 +34,6 @@ import (
 	dispatchertesting "knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/testing"
 	"knative.dev/eventing-natss/pkg/client/injection/client"
 	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
-	reconcilertesting "knative.dev/eventing-natss/pkg/reconciler/testing"
 	fakeeventingclient "knative.dev/eventing/pkg/client/injection/client/fake"
 	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
 	"knative.dev/pkg/controller"
@@ -69,7 +68,7 @@ func TestDispatcher_Start(t *testing.T) {
 	_, err := js.AddStream(streamConfig)
 	require.NoError(t, err)
 
-	ls := reconcilertesting.NewListers([]runtime.Object{})
+	ls := reconciletesting.NewListers([]runtime.Object{})
 
 	ctx, _ = fakekubeclient.With(ctx, ls.GetKubeObjects()...)
 	ctx, _ = fakeeventingclient.With(ctx, ls.GetEventingObjects()...)
@@ -107,7 +106,7 @@ func TestDispatcher_ReconcileConsumers(t *testing.T) {
 	defer dispatchertesting.ShutdownJSServerAndRemoveStorage(t, s)
 	_, js := dispatchertesting.JsClient(t, s)
 
-	ls := reconcilertesting.NewListers([]runtime.Object{})
+	ls := reconciletesting.NewListers([]runtime.Object{})
 
 	ctx, _ = fakekubeclient.With(ctx, ls.GetKubeObjects()...)
 	ctx, _ = fakeeventingclient.With(ctx, ls.GetEventingObjects()...)
