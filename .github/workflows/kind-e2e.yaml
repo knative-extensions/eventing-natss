@@ -19,7 +19,7 @@ jobs:
         - v1.33.x
 
         eventing-version:
-        - knative-v1.18.0
+        - knative-v1.16.0
 
     env:
       KO_DOCKER_REPO: kind.local
