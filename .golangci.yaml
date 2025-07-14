@@ -16,7 +16,7 @@ linters:
       - legacy
       - std-error-handling
     paths:
-      - third_party$
+      - third_party
       - builtin$
       - examples$
 formatters:

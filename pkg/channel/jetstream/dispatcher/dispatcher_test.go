@@ -43,12 +43,11 @@ import (
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
-	reconciletesting "knative.dev/eventing-natss/pkg/reconciler/testing"
 	"knative.dev/eventing/pkg/channel"
 )
 
 func TestDispatcher_RegisterChannelHost(t *testing.T) {
-	nc := reconciletesting.NewNatsJetStreamChannel(testNS, ncName)
+	nc := reconcilertesting.NewNatsJetStreamChannel(testNS, ncName)
 	config := createChannelConfig(nc)
 
 	d := &Dispatcher{}
@@ -116,7 +115,7 @@ func TestDispatcher_ReconcileConsumers(t *testing.T) {
 	eventRecorder := record.NewFakeRecorder(10)
 	ctx = controller.WithEventRecorder(ctx, eventRecorder)
 
-	nc := reconciletesting.NewNatsJetStreamChannel(testNS, ncName, reconciletesting.WithNatsJetStreamChannelSubscribers(subscribers))
+	nc := reconcilertesting.NewNatsJetStreamChannel(testNS, ncName, reconcilertesting.WithNatsJetStreamChannelSubscribers(subscribers))
 	sub := fanout.Subscription{
 		RetryConfig: &kncloudevents.RetryConfig{
 			RequestTimeout: time.Second,

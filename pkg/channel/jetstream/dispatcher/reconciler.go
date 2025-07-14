@@ -285,9 +285,9 @@ func (r *Reconciler) newConfigFromChannel(nc *v1alpha1.NatsJetStreamChannel) Cha
 		HostName:               nc.Status.Address.URL.Host,
 		ConsumerConfigTemplate: nc.Spec.ConsumerConfigTemplate,
 	}
-	if nc.Spec.SubscribableSpec.Subscribers != nil {
-		newSubs := make([]Subscription, len(nc.Spec.SubscribableSpec.Subscribers))
-		for i, source := range nc.Spec.SubscribableSpec.Subscribers {
+	if nc.Spec.Subscribers != nil {
+		newSubs := make([]Subscription, len(nc.Spec.Subscribers))
+		for i, source := range nc.Spec.Subscribers {
 			innerSub, _ := fanout.SubscriberSpecToFanoutConfig(source)
 
 			// This functionality cannot be configured via the Subscription CRD. The default implementation is

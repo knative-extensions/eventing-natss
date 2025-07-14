@@ -1,4 +1,4 @@
-// Copyright 2012-2020 The NATS Authors
+// Copyright 2012-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -217,6 +217,14 @@ func (s *Server) Warnf(format string, v ...any) {
 	s.executeLogCall(func(logger Logger, format string, v ...any) {
 		logger.Warnf(format, v...)
 	}, format, v...)
+}
+
+func (s *Server) rateLimitFormatWarnf(format string, v ...any) {
+	if _, loaded := s.rateLimitLogging.LoadOrStore(format, time.Now()); loaded {
+		return
+	}
+	statement := fmt.Sprintf(format, v...)
+	s.Warnf("%s", statement)
 }
 
 func (s *Server) RateLimitWarnf(format string, v ...any) {

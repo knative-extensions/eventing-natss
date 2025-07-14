@@ -1,4 +1,4 @@
-// Copyright 2017-2023 The NATS Authors
+// Copyright 2017-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -14,12 +14,13 @@
 package server
 
 import (
+	"cmp"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/url"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -138,7 +139,7 @@ func (t *traceOption) Apply(server *Server) {
 	server.Noticef("Reloaded: trace = %v", t.newValue)
 }
 
-// traceOption implements the option interface for the `trace` setting.
+// traceVersboseOption implements the option interface for the `trace_verbose` setting.
 type traceVerboseOption struct {
 	traceLevelOption
 	newValue bool
@@ -147,6 +148,17 @@ type traceVerboseOption struct {
 // Apply is a no-op because logging will be reloaded after options are applied.
 func (t *traceVerboseOption) Apply(server *Server) {
 	server.Noticef("Reloaded: trace_verbose = %v", t.newValue)
+}
+
+// traceHeadersOption implements the option interface for the `trace_headers` setting.
+type traceHeadersOption struct {
+	traceLevelOption
+	newValue bool
+}
+
+// Apply is a no-op because logging will be reloaded after options are applied.
+func (t *traceHeadersOption) Apply(server *Server) {
+	server.Noticef("Reloaded: trace_headers = %v", t.newValue)
 }
 
 // debugOption implements the option interface for the `debug` setting.
@@ -716,6 +728,15 @@ func (jso jetStreamOption) IsStatszChange() bool {
 	return true
 }
 
+type defaultSentinelOption struct {
+	noopOption
+	newValue string
+}
+
+func (so *defaultSentinelOption) Apply(s *Server) {
+	s.Noticef("Reloaded: default_sentinel = %s", so.newValue)
+}
+
 type ocspOption struct {
 	tlsOption
 	newValue *OCSPConfig
@@ -847,6 +868,7 @@ func (l *leafNodeOption) Apply(s *Server) {
 	opts := s.getOpts()
 	if l.tlsFirstChanged {
 		s.Noticef("Reloaded: LeafNode TLS HandshakeFirst value is: %v", opts.LeafNode.TLSHandshakeFirst)
+		s.Noticef("Reloaded: LeafNode TLS HandshakeFirstFallback value is: %v", opts.LeafNode.TLSHandshakeFirstFallback)
 		for _, r := range opts.LeafNode.Remotes {
 			s.Noticef("Reloaded: LeafNode Remote to %v TLS HandshakeFirst value is: %v", r.URLs, r.TLSHandshakeFirst)
 		}
@@ -913,6 +935,19 @@ func (l *leafNodeOption) Apply(s *Server) {
 		}
 		s.Noticef("Reloaded: LeafNode compression settings")
 	}
+}
+
+type noFastProdStallReload struct {
+	noopOption
+	noStall bool
+}
+
+func (l *noFastProdStallReload) Apply(s *Server) {
+	var not string
+	if l.noStall {
+		not = "not "
+	}
+	s.Noticef("Reloaded: fast producers will %sbe stalled", not)
 }
 
 // Compares options and disconnects clients that are no longer listed in pinned certs. Lock must not be held.
@@ -1131,43 +1166,30 @@ func (s *Server) reloadOptions(curOpts, newOpts *Options) error {
 func imposeOrder(value any) error {
 	switch value := value.(type) {
 	case []*Account:
-		sort.Slice(value, func(i, j int) bool {
-			return value[i].Name < value[j].Name
-		})
+		slices.SortFunc(value, func(i, j *Account) int { return cmp.Compare(i.Name, j.Name) })
 		for _, a := range value {
-			sort.Slice(a.imports.streams, func(i, j int) bool {
-				return a.imports.streams[i].acc.Name < a.imports.streams[j].acc.Name
-			})
+			slices.SortFunc(a.imports.streams, func(i, j *streamImport) int { return cmp.Compare(i.acc.Name, j.acc.Name) })
 		}
 	case []*User:
-		sort.Slice(value, func(i, j int) bool {
-			return value[i].Username < value[j].Username
-		})
+		slices.SortFunc(value, func(i, j *User) int { return cmp.Compare(i.Username, j.Username) })
 	case []*NkeyUser:
-		sort.Slice(value, func(i, j int) bool {
-			return value[i].Nkey < value[j].Nkey
-		})
+		slices.SortFunc(value, func(i, j *NkeyUser) int { return cmp.Compare(i.Nkey, j.Nkey) })
 	case []*url.URL:
-		sort.Slice(value, func(i, j int) bool {
-			return value[i].String() < value[j].String()
-		})
+		slices.SortFunc(value, func(i, j *url.URL) int { return cmp.Compare(i.String(), j.String()) })
 	case []string:
-		sort.Strings(value)
+		slices.Sort(value)
 	case []*jwt.OperatorClaims:
-		sort.Slice(value, func(i, j int) bool {
-			return value[i].Issuer < value[j].Issuer
-		})
+		slices.SortFunc(value, func(i, j *jwt.OperatorClaims) int { return cmp.Compare(i.Issuer, j.Issuer) })
 	case GatewayOpts:
-		sort.Slice(value.Gateways, func(i, j int) bool {
-			return value.Gateways[i].Name < value.Gateways[j].Name
-		})
+		slices.SortFunc(value.Gateways, func(i, j *RemoteGatewayOpts) int { return cmp.Compare(i.Name, j.Name) })
 	case WebsocketOpts:
-		sort.Strings(value.AllowedOrigins)
-	case string, bool, uint8, int, int32, int64, time.Duration, float64, nil, LeafNodeOpts, ClusterOpts, *tls.Config, PinnedCertSet,
+		slices.Sort(value.AllowedOrigins)
+	case string, bool, uint8, uint16, int, int32, int64, time.Duration, float64, nil, LeafNodeOpts, ClusterOpts, *tls.Config, PinnedCertSet,
 		*URLAccResolver, *MemAccResolver, *DirAccResolver, *CacheDirAccResolver, Authentication, MQTTOpts, jwt.TagList,
 		*OCSPConfig, map[string]string, JSLimitOpts, StoreCipher, *OCSPResponseCacheConfig:
 		// explicitly skipped types
 	case *AuthCallout:
+	case JSTpmOpts:
 	default:
 		// this will fail during unit tests
 		return fmt.Errorf("OnReload, sort or explicitly skip type: %s",
@@ -1229,6 +1251,8 @@ func (s *Server) diffOptions(newOpts *Options) ([]option, error) {
 		switch optName {
 		case "traceverbose":
 			diffOpts = append(diffOpts, &traceVerboseOption{newValue: newValue.(bool)})
+		case "traceheaders":
+			diffOpts = append(diffOpts, &traceHeadersOption{newValue: newValue.(bool)})
 		case "trace":
 			diffOpts = append(diffOpts, &traceOption{newValue: newValue.(bool)})
 		case "debug":
@@ -1367,14 +1391,16 @@ func (s *Server) diffOptions(newOpts *Options) ([]option, error) {
 			tmpNew.TLSConfig = nil
 			tmpOld.tlsConfigOpts = nil
 			tmpNew.tlsConfigOpts = nil
-			// We will allow TLSHandshakeFirst to me config reloaded. First,
+			// We will allow TLSHandshakeFirst to be config reloaded. First,
 			// we just want to detect if there was a change in the leafnodes{}
 			// block, and if not, we will check the remotes.
-			handshakeFirstChanged := tmpOld.TLSHandshakeFirst != tmpNew.TLSHandshakeFirst
+			handshakeFirstChanged := tmpOld.TLSHandshakeFirst != tmpNew.TLSHandshakeFirst ||
+				tmpOld.TLSHandshakeFirstFallback != tmpNew.TLSHandshakeFirstFallback
 			// If changed, set them (in the temporary variables) to false so that the
 			// rest of the comparison does not fail.
 			if handshakeFirstChanged {
 				tmpOld.TLSHandshakeFirst, tmpNew.TLSHandshakeFirst = false, false
+				tmpOld.TLSHandshakeFirstFallback, tmpNew.TLSHandshakeFirstFallback = 0, 0
 			} else if len(tmpOld.Remotes) == len(tmpNew.Remotes) {
 				// Since we don't support changes in the remotes, we will do a
 				// simple pass to see if there was a change of this field.
@@ -1621,6 +1647,8 @@ func (s *Server) diffOptions(newOpts *Options) ([]option, error) {
 				return nil, fmt.Errorf("config reload not supported for %s: old=%v, new=%v",
 					field.Name, oldValue, newValue)
 			}
+		case "defaultsentinel":
+			diffOpts = append(diffOpts, &defaultSentinelOption{newValue: newValue.(string)})
 		case "systemaccount":
 			if oldValue != DEFAULT_SYSTEM_ACCOUNT || newValue != _EMPTY_ {
 				return nil, fmt.Errorf("config reload not supported for %s: old=%v, new=%v",
@@ -1636,6 +1664,12 @@ func (s *Server) diffOptions(newOpts *Options) ([]option, error) {
 			if new != old {
 				diffOpts = append(diffOpts, &profBlockRateReload{newValue: new})
 			}
+		case "configdigest":
+			// skip changes in config digest, this is handled already while
+			// processing the config.
+			continue
+		case "nofastproducerstall":
+			diffOpts = append(diffOpts, &noFastProdStallReload{noStall: newValue.(bool)})
 		default:
 			// TODO(ik): Implement String() on those options to have a nice print.
 			// %v is difficult to figure what's what, %+v print private fields and
@@ -1783,8 +1817,11 @@ func (s *Server) applyOptions(ctx *reloadContext, opts []option) {
 	if err := s.reloadOCSP(); err != nil {
 		s.Warnf("Can't restart OCSP features: %v", err)
 	}
-
-	s.Noticef("Reloaded server configuration")
+	var cd string
+	if newOpts.configDigest != "" {
+		cd = fmt.Sprintf("(%s)", newOpts.configDigest)
+	}
+	s.Noticef("Reloaded server configuration %s", cd)
 }
 
 // This will send a reset to the internal send loop.
@@ -2185,15 +2222,22 @@ func (s *Server) reloadClusterPermissions(oldPerms *RoutePermissions) {
 		}
 		deleteRoutedSubs = deleteRoutedSubs[:0]
 		route.mu.Lock()
+		pa, _, hasSubType := route.getRoutedSubKeyInfo()
 		for key, sub := range route.subs {
-			if an := strings.Fields(key)[0]; an != accName {
-				continue
+			// If this is not a pinned-account route, we need to get the
+			// account name from the key to see if we collect this sub.
+			if !pa {
+				if an := getAccNameFromRoutedSubKey(sub, key, hasSubType); an != accName {
+					continue
+				}
 			}
 			// If we can't export, we need to drop the subscriptions that
 			// we have on behalf of this route.
+			// Need to make a string cast here since canExport call sl.Match()
 			subj := string(sub.subject)
 			if !route.canExport(subj) {
-				delete(route.subs, string(sub.sid))
+				// We can use bytesToString() here.
+				delete(route.subs, bytesToString(sub.sid))
 				deleteRoutedSubs = append(deleteRoutedSubs, sub)
 			}
 		}
@@ -2259,7 +2303,7 @@ func (s *Server) reloadClusterPoolAndAccounts(co *clusterOption, opts *Options) 
 					}
 					// Otherwise get the route pool index it would have been before
 					// the move so we can send the protocol to those routes.
-					rpi = s.computeRoutePoolIdx(acc)
+					rpi = computeRoutePoolIdx(s.routesPoolSize, acc.Name)
 				}
 				acc.mu.Unlock()
 				// Generate the INFO protocol to send indicating that this account
@@ -2270,21 +2314,56 @@ func (s *Server) reloadClusterPoolAndAccounts(co *clusterOption, opts *Options) 
 					RouteAccReqID: s.accAddedReqID,
 				}
 				proto := generateInfoJSON(&ri)
-				// Go over each remote's route at pool index `rpi` and remove
-				// remote subs for this account and send the protocol.
-				s.forEachRouteIdx(rpi, func(r *client) bool {
+				// Since v2.11.0, we support remotes with a different pool size
+				// (for rolling upgrades), so we need to use the remote route
+				// pool index (based on the remote configured pool size) since
+				// the remote subscriptions will be attached to the route at
+				// that index, not at our account's route pool index. However,
+				// we are going to send the protocol through the route that
+				// handles this account from our pool size perspective (that
+				// would be the route at index `rpi`).
+				removeSubsAndSendProto := func(r *client, doSubs, doProto bool) {
 					r.mu.Lock()
+					defer r.mu.Unlock()
 					// Exclude routes to servers that don't support pooling.
-					if !r.route.noPool {
+					if r.route.noPool {
+						return
+					}
+					if doSubs {
 						if subs := r.removeRemoteSubsForAcc(an); len(subs) > 0 {
 							sl.RemoveBatch(subs)
 						}
+					}
+					if doProto {
 						r.enqueueProto(proto)
 						protosSent++
 					}
-					r.mu.Unlock()
-					return true
-				})
+				}
+				for remote, conns := range s.routes {
+					r := conns[rpi]
+					// The route connection at this index is currently not up,
+					// so we won't be able to send the protocol, so move to the
+					// next remote.
+					if r == nil {
+						continue
+					}
+					doSubs := true
+					// Check the remote's route pool size and if different than
+					// ours, remove the subs on that other route.
+					remotePoolSize, ok := s.remoteRoutePoolSize[remote]
+					if ok && remotePoolSize != s.routesPoolSize {
+						// This is the remote's route pool index for this account
+						rrpi := computeRoutePoolIdx(remotePoolSize, an)
+						if rr := conns[rrpi]; rr != nil {
+							removeSubsAndSendProto(rr, true, false)
+							// Indicate that we have already remove the subs.
+							doSubs = false
+						}
+					}
+					// Now send the protocol from the route that handles the
+					// account from this server perspective.
+					removeSubsAndSendProto(r, doSubs, true)
+				}
 			}
 		}
 		if protosSent > 0 {
