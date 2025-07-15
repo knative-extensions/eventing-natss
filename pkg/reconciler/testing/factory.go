@@ -36,7 +36,7 @@ import (
 	"knative.dev/pkg/logging"
 	logtesting "knative.dev/pkg/logging/testing"
 	"knative.dev/pkg/reconciler"
-	. "knative.dev/pkg/reconciler/testing"
+	reconcilertesting "knative.dev/pkg/reconciler/testing"
 )
 
 const (
@@ -49,8 +49,8 @@ const (
 type Ctor func(context.Context, *Listers) controller.Reconciler
 
 // MakeFactory creates a reconciler factory with fake clients and controller created by `ctor`.
-func MakeFactory(ctor Ctor) Factory {
-	return func(t *testing.T, r *TableRow) (controller.Reconciler, ActionRecorderList, EventList) {
+func MakeFactory(ctor Ctor) reconcilertesting.Factory {
+	return func(t *testing.T, r *reconcilertesting.TableRow) (controller.Reconciler, reconcilertesting.ActionRecorderList, reconcilertesting.EventList) {
 		ls := NewListers(r.Objects)
 
 		ctx := logging.WithLogger(context.Background(), logtesting.TestLogger(t))
@@ -77,14 +77,14 @@ func MakeFactory(ctor Ctor) Factory {
 
 		// Validate all Create operations through the eventing client.
 		client.PrependReactor("create", "*", func(action clientgotesting.Action) (handled bool, ret runtime.Object, err error) {
-			return ValidateCreates(context.Background(), action)
+			return reconcilertesting.ValidateCreates(context.Background(), action)
 		})
 		client.PrependReactor("update", "*", func(action clientgotesting.Action) (handled bool, ret runtime.Object, err error) {
-			return ValidateUpdates(context.Background(), action)
+			return reconcilertesting.ValidateUpdates(context.Background(), action)
 		})
 
-		actionRecorderList := ActionRecorderList{dynamicClient, client, kubeClient}
-		eventList := EventList{Recorder: eventRecorder}
+		actionRecorderList := reconcilertesting.ActionRecorderList{dynamicClient, client, kubeClient}
+		eventList := reconcilertesting.EventList{Recorder: eventRecorder}
 
 		if r.Ctx == nil {
 			r.Ctx = ctx

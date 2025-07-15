@@ -1,4 +1,4 @@
-// Copyright 2019-2024 The NATS Authors
+// Copyright 2019-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,11 +18,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 	"unsafe"
 
 	"github.com/nats-io/nats-server/v2/server/avl"
+	"github.com/nats-io/nats-server/v2/server/gsl"
 )
 
 // StorageType determines how messages are stored for retention.
@@ -54,7 +56,7 @@ var (
 	// while a snapshot is in progress.
 	ErrStoreSnapshotInProgress = errors.New("snapshot in progress")
 	// ErrMsgTooLarge is returned when a message is considered too large.
-	ErrMsgTooLarge = errors.New("message to large")
+	ErrMsgTooLarge = errors.New("message too large")
 	// ErrStoreWrongType is for when you access the wrong storage type.
 	ErrStoreWrongType = errors.New("wrong storage type")
 	// ErrNoAckPolicy is returned when trying to update a consumer's acks with no ack policy.
@@ -65,6 +67,8 @@ var (
 	ErrSequenceMismatch = errors.New("expected sequence does not match store")
 	// ErrCorruptStreamState
 	ErrCorruptStreamState = errors.New("stream state snapshot is corrupt")
+	// ErrTooManyResults
+	ErrTooManyResults = errors.New("too many matching results for request")
 )
 
 // StoreMsg is the stored message format for messages that are retained by the Store layer.
@@ -81,15 +85,22 @@ type StoreMsg struct {
 // For the cases where its a single message we will also supply sequence number and subject.
 type StorageUpdateHandler func(msgs, bytes int64, seq uint64, subj string)
 
+// Used to call back into the upper layers to remove a message.
+type StorageRemoveMsgHandler func(seq uint64)
+
+// Used to call back into the upper layers to report on newly created subject delete markers.
+type SubjectDeleteMarkerUpdateHandler func(*inMsg)
+
 type StreamStore interface {
-	StoreMsg(subject string, hdr, msg []byte) (uint64, int64, error)
-	StoreRawMsg(subject string, hdr, msg []byte, seq uint64, ts int64) error
+	StoreMsg(subject string, hdr, msg []byte, ttl int64) (uint64, int64, error)
+	StoreRawMsg(subject string, hdr, msg []byte, seq uint64, ts int64, ttl int64) error
 	SkipMsg() uint64
 	SkipMsgs(seq uint64, num uint64) error
 	LoadMsg(seq uint64, sm *StoreMsg) (*StoreMsg, error)
 	LoadNextMsg(filter string, wc bool, start uint64, smp *StoreMsg) (sm *StoreMsg, skip uint64, err error)
-	LoadNextMsgMulti(sl *Sublist, start uint64, smp *StoreMsg) (sm *StoreMsg, skip uint64, err error)
+	LoadNextMsgMulti(sl *gsl.SimpleSublist, start uint64, smp *StoreMsg) (sm *StoreMsg, skip uint64, err error)
 	LoadLastMsg(subject string, sm *StoreMsg) (*StoreMsg, error)
+	LoadPrevMsg(start uint64, smp *StoreMsg) (sm *StoreMsg, err error)
 	RemoveMsg(seq uint64) (bool, error)
 	EraseMsg(seq uint64) (bool, error)
 	Purge() (uint64, error)
@@ -100,13 +111,19 @@ type StreamStore interface {
 	FilteredState(seq uint64, subject string) SimpleState
 	SubjectsState(filterSubject string) map[string]SimpleState
 	SubjectsTotals(filterSubject string) map[string]uint64
+	AllLastSeqs() ([]uint64, error)
+	MultiLastSeqs(filters []string, maxSeq uint64, maxAllowed int) ([]uint64, error)
+	SubjectForSeq(seq uint64) (string, error)
 	NumPending(sseq uint64, filter string, lastPerSubject bool) (total, validThrough uint64)
+	NumPendingMulti(sseq uint64, sl *gsl.SimpleSublist, lastPerSubject bool) (total, validThrough uint64)
 	State() StreamState
 	FastState(*StreamState)
 	EncodedStreamState(failed uint64) (enc []byte, err error)
 	SyncDeleted(dbs DeleteBlocks)
 	Type() StorageType
 	RegisterStorageUpdates(StorageUpdateHandler)
+	RegisterStorageRemoveMsg(handler StorageRemoveMsgHandler)
+	RegisterSubjectDeleteMarkerUpdates(SubjectDeleteMarkerUpdateHandler)
 	UpdateConfig(cfg *StreamConfig) error
 	Delete() error
 	Stop() error
@@ -165,6 +182,8 @@ type SimpleState struct {
 
 	// Internal usage for when the first needs to be updated before use.
 	firstNeedsUpdate bool
+	// Internal usage for when the last needs to be updated before use.
+	lastNeedsUpdate bool
 }
 
 // LostStreamData indicates msgs that have been lost.
@@ -177,6 +196,7 @@ type LostStreamData struct {
 type SnapshotResult struct {
 	Reader io.ReadCloser
 	State  StreamState
+	errCh  chan string
 }
 
 const (
@@ -291,12 +311,16 @@ type DeleteRange struct {
 }
 
 func (dr *DeleteRange) State() (first, last, num uint64) {
-	return dr.First, dr.First + dr.Num, dr.Num
+	deletesAfterFirst := dr.Num
+	if deletesAfterFirst > 0 {
+		deletesAfterFirst--
+	}
+	return dr.First, dr.First + deletesAfterFirst, dr.Num
 }
 
 // Range will range over all the deleted sequences represented by this block.
 func (dr *DeleteRange) Range(f func(uint64) bool) {
-	for seq := dr.First; seq <= dr.First+dr.Num; seq++ {
+	for seq := dr.First; seq < dr.First+dr.Num; seq++ {
 		if !f(seq) {
 			return
 		}
@@ -333,6 +357,7 @@ func (dbs DeleteBlocks) NumDeleted() (total uint64) {
 // ConsumerStore stores state on consumers for streams.
 type ConsumerStore interface {
 	SetStarting(sseq uint64) error
+	UpdateStarting(sseq uint64)
 	HasState() bool
 	UpdateDelivered(dseq, sseq, dc uint64, ts int64) error
 	UpdateAcks(dseq, sseq uint64) error
@@ -721,7 +746,7 @@ func isOutOfSpaceErr(err error) bool {
 var errFirstSequenceMismatch = errors.New("first sequence mismatch")
 
 func isClusterResetErr(err error) bool {
-	return err == errLastSeqMismatch || err == ErrStoreEOF || err == errFirstSequenceMismatch || err == errCatchupTooManyRetries
+	return err == errLastSeqMismatch || err == ErrStoreEOF || err == errFirstSequenceMismatch || errors.Is(err, errCatchupAbortedNoLeader) || err == errCatchupTooManyRetries
 }
 
 // Copy all fields.
@@ -764,4 +789,16 @@ func stringToBytes(s string) []byte {
 	p := unsafe.StringData(s)
 	b := unsafe.Slice(p, len(s))
 	return b
+}
+
+// Forces a copy of a string, for use in the case that you might have been passed a value when bytesToString was used,
+// but now you need a separate copy of it to store for longer-term use.
+func copyString(s string) string {
+	b := make([]byte, len(s))
+	copy(b, s)
+	return bytesToString(b)
+}
+
+func isPermissionError(err error) bool {
+	return err != nil && os.IsPermission(err)
 }

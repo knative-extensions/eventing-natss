@@ -1,4 +1,4 @@
-// Copyright 2016-2024 The NATS Authors
+// Copyright 2016-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -20,6 +20,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"unicode/utf8"
+
+	"github.com/nats-io/nats-server/v2/server/stree"
 )
 
 // Sublist is a routing mechanism to handle subject distribution and
@@ -527,20 +529,33 @@ var emptyResult = &SublistResult{}
 // Match will match all entries to the literal subject.
 // It will return a set of results for both normal and queue subscribers.
 func (s *Sublist) Match(subject string) *SublistResult {
-	return s.match(subject, true)
+	return s.match(subject, true, false)
+}
+
+// MatchBytes will match all entries to the literal subject.
+// It will return a set of results for both normal and queue subscribers.
+func (s *Sublist) MatchBytes(subject []byte) *SublistResult {
+	return s.match(bytesToString(subject), true, true)
 }
 
 // HasInterest will return whether or not there is any interest in the subject.
 // In cases where more detail is not required, this may be faster than Match.
 func (s *Sublist) HasInterest(subject string) bool {
-	return s.hasInterest(subject, true)
+	return s.hasInterest(subject, true, nil, nil)
+}
+
+// NumInterest will return the number of subs/qsubs interested in the subject.
+// In cases where more detail is not required, this may be faster than Match.
+func (s *Sublist) NumInterest(subject string) (np, nq int) {
+	s.hasInterest(subject, true, &np, &nq)
+	return
 }
 
 func (s *Sublist) matchNoLock(subject string) *SublistResult {
-	return s.match(subject, false)
+	return s.match(subject, false, false)
 }
 
-func (s *Sublist) match(subject string, doLock bool) *SublistResult {
+func (s *Sublist) match(subject string, doLock bool, doCopyOnCache bool) *SublistResult {
 	atomic.AddUint64(&s.matches, 1)
 
 	// Check cache first.
@@ -595,6 +610,9 @@ func (s *Sublist) match(subject string, doLock bool) *SublistResult {
 		result = emptyResult
 	}
 	if cacheEnabled {
+		if doCopyOnCache {
+			subject = copyString(subject)
+		}
 		s.cache[subject] = result
 		n = len(s.cache)
 	}
@@ -614,7 +632,7 @@ func (s *Sublist) match(subject string, doLock bool) *SublistResult {
 	return result
 }
 
-func (s *Sublist) hasInterest(subject string, doLock bool) bool {
+func (s *Sublist) hasInterest(subject string, doLock bool, np, nq *int) bool {
 	// Check cache first.
 	if doLock {
 		s.RLock()
@@ -622,6 +640,12 @@ func (s *Sublist) hasInterest(subject string, doLock bool) bool {
 	var matched bool
 	if s.cache != nil {
 		if r, ok := s.cache[subject]; ok {
+			if np != nil && nq != nil {
+				*np += len(r.psubs)
+				for _, qsub := range r.qsubs {
+					*nq += len(qsub)
+				}
+			}
 			matched = len(r.psubs)+len(r.qsubs) > 0
 		}
 	}
@@ -654,7 +678,7 @@ func (s *Sublist) hasInterest(subject string, doLock bool) bool {
 		s.RLock()
 		defer s.RUnlock()
 	}
-	return matchLevelForAny(s.root, tokens)
+	return matchLevelForAny(s.root, tokens, np, nq)
 }
 
 // Remove entries in the cache until we are under the maximum.
@@ -769,17 +793,23 @@ func matchLevel(l *level, toks []string, results *SublistResult) {
 	}
 }
 
-func matchLevelForAny(l *level, toks []string) bool {
+func matchLevelForAny(l *level, toks []string, np, nq *int) bool {
 	var pwc, n *node
 	for i, t := range toks {
 		if l == nil {
 			return false
 		}
 		if l.fwc != nil {
+			if np != nil && nq != nil {
+				*np += len(l.fwc.psubs)
+				for _, qsub := range l.fwc.qsubs {
+					*nq += len(qsub)
+				}
+			}
 			return true
 		}
 		if pwc = l.pwc; pwc != nil {
-			if match := matchLevelForAny(pwc.next, toks[i+1:]); match {
+			if match := matchLevelForAny(pwc.next, toks[i+1:], np, nq); match {
 				return true
 			}
 		}
@@ -791,9 +821,21 @@ func matchLevelForAny(l *level, toks []string) bool {
 		}
 	}
 	if n != nil {
+		if np != nil && nq != nil {
+			*np += len(n.psubs)
+			for _, qsub := range n.qsubs {
+				*nq += len(qsub)
+			}
+		}
 		return len(n.plist) > 0 || len(n.psubs) > 0 || len(n.qsubs) > 0
 	}
 	if pwc != nil {
+		if np != nil && nq != nil {
+			*np += len(pwc.psubs)
+			for _, qsub := range pwc.qsubs {
+				*nq += len(qsub)
+			}
+		}
 		return len(pwc.plist) > 0 || len(pwc.psubs) > 0 || len(pwc.qsubs) > 0
 	}
 	return false
@@ -1172,6 +1214,10 @@ func isValidSubject(subject string, checkRunes bool) bool {
 		return false
 	}
 	if checkRunes {
+		// Check if we have embedded nulls.
+		if bytes.IndexByte(stringToBytes(subject), 0) >= 0 {
+			return false
+		}
 		// Since casting to a string will always produce valid UTF-8, we need to look for replacement runes.
 		// This signals something is off or corrupt.
 		for _, r := range subject {
@@ -1225,12 +1271,12 @@ func isValidLiteralSubject(tokens []string) bool {
 	return true
 }
 
-// ValidateMappingDestination returns nil error if the subject is a valid subject mapping destination subject
-func ValidateMappingDestination(subject string) error {
-	if subject == _EMPTY_ {
+// ValidateMapping returns nil error if the subject is a valid subject mapping destination subject
+func ValidateMapping(src string, dest string) error {
+	if dest == _EMPTY_ {
 		return nil
 	}
-	subjectTokens := strings.Split(subject, tsep)
+	subjectTokens := strings.Split(dest, tsep)
 	sfwc := false
 	for _, t := range subjectTokens {
 		length := len(t)
@@ -1238,6 +1284,7 @@ func ValidateMappingDestination(subject string) error {
 			return &mappingDestinationErr{t, ErrInvalidMappingDestinationSubject}
 		}
 
+		// if it looks like it contains a mapping function, it should be a valid mapping function
 		if length > 4 && t[0] == '{' && t[1] == '{' && t[length-2] == '}' && t[length-1] == '}' {
 			if !partitionMappingFunctionRegEx.MatchString(t) &&
 				!wildcardMappingFunctionRegEx.MatchString(t) &&
@@ -1258,7 +1305,10 @@ func ValidateMappingDestination(subject string) error {
 			return ErrInvalidMappingDestinationSubject
 		}
 	}
-	return nil
+
+	// Finally, verify that the transform can actually be created from the source and destination
+	_, err := NewSubjectTransform(src, dest)
+	return err
 }
 
 // Will check tokens and report back if the have any partial or full wildcards.
@@ -1685,5 +1735,55 @@ func getAllNodes(l *level, results *SublistResult) {
 	for _, n := range l.nodes {
 		addNodeToResults(n, results)
 		getAllNodes(n.next, results)
+	}
+}
+
+// IntersectStree will match all items in the given subject tree that
+// have interest expressed in the given sublist. The callback will only be called
+// once for each subject, regardless of overlapping subscriptions in the sublist.
+func IntersectStree[T any](st *stree.SubjectTree[T], sl *Sublist, cb func(subj []byte, entry *T)) {
+	var _subj [255]byte
+	intersectStree(st, sl.root, _subj[:0], cb)
+}
+
+func intersectStree[T any](st *stree.SubjectTree[T], r *level, subj []byte, cb func(subj []byte, entry *T)) {
+	nsubj := subj
+	if len(nsubj) > 0 {
+		nsubj = append(subj, '.')
+	}
+	switch {
+	case r.fwc != nil:
+		// We've reached a full wildcard, do a FWC match on the stree at this point
+		// and don't keep iterating downward.
+		nsubj := append(nsubj, '>')
+		st.Match(nsubj, cb)
+	case r.pwc != nil:
+		// We've found a partial wildcard. We'll keep iterating downwards, but first
+		// check whether there's interest at this level (without triggering dupes) and
+		// match if so.
+		nsubj := append(nsubj, '*')
+		if len(r.pwc.psubs)+len(r.pwc.qsubs) > 0 {
+			st.Match(nsubj, cb)
+		}
+		if r.pwc.next != nil && r.pwc.next.numNodes() > 0 {
+			intersectStree(st, r.pwc.next, nsubj, cb)
+		}
+	default:
+		// Normal node with subject literals, keep iterating.
+		for t, n := range r.nodes {
+			nsubj := append(nsubj, t...)
+			if len(n.psubs)+len(n.qsubs) > 0 {
+				if subjectHasWildcard(bytesToString(nsubj)) {
+					st.Match(nsubj, cb)
+				} else {
+					if e, ok := st.Find(nsubj); ok {
+						cb(nsubj, e)
+					}
+				}
+			}
+			if n.next != nil && n.next.numNodes() > 0 {
+				intersectStree(st, n.next, nsubj, cb)
+			}
+		}
 	}
 }

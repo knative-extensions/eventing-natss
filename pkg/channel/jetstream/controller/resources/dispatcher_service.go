@@ -59,9 +59,9 @@ func (b *DispatcherServiceBuilder) WithArgs(args *DispatcherServiceArgs) *Dispat
 }
 
 func (b *DispatcherServiceBuilder) Build() *corev1.Service {
-	b.service.ObjectMeta.Namespace = b.args.DispatcherNamespace
-	b.service.ObjectMeta.Annotations = commonconfig.JoinStringMaps(b.service.Annotations, b.args.ServiceAnnotations)
-	b.service.ObjectMeta.Labels = commonconfig.JoinStringMaps(b.service.Labels, b.args.ServiceLabels)
+	b.service.Namespace = b.args.DispatcherNamespace
+	b.service.Annotations = commonconfig.JoinStringMaps(b.service.Annotations, b.args.ServiceAnnotations)
+	b.service.Labels = commonconfig.JoinStringMaps(b.service.Labels, b.args.ServiceLabels)
 	return b.service
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2012-2019 The NATS Authors
+// Copyright 2012-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
+
+	srvlog "github.com/nats-io/nats-server/v2/logger"
 )
 
 // So we can pass tests and benchmarks..
@@ -92,6 +94,13 @@ func RunServerCallback(opts *server.Options, callback func(*server.Server)) *ser
 
 	if doLog {
 		s.ConfigureLogger()
+	}
+
+	if ll := os.Getenv("NATS_LOGGING"); ll != "" {
+		log := srvlog.NewTestLogger(fmt.Sprintf("[%s] | ", s), true)
+		debug := ll == "debug" || ll == "trace"
+		trace := ll == "trace"
+		s.SetLoggerV2(log, debug, trace, false)
 	}
 
 	if callback != nil {
@@ -364,9 +373,10 @@ var (
 	asubRe      = regexp.MustCompile(`A\+\s+([^\r\n]+)\r\n`)
 	aunsubRe    = regexp.MustCompile(`A\-\s+([^\r\n]+)\r\n`)
 	lsubRe      = regexp.MustCompile(`LS\+\s+([^\s]+)\s*([^\s]+)?\s*(\d+)?\r\n`)
-	lunsubRe    = regexp.MustCompile(`LS\-\s+([^\s]+)\s*([^\s]+)?\r\n`)
+	lunsubRe    = regexp.MustCompile(`LS\-\s+([^\s]+)\s*([^\s]+)\s*([^\s]+)?\r\n`)
 	lmsgRe      = regexp.MustCompile(`(?:(?:LMSG\s+([^\s]+)\s+(?:([|+]\s+([\w\s]+)|[^\s]+)[^\S\r\n]+)?(\d+)\s*\r\n([^\\r\\n]*?)\r\n)+?)`)
 	rlsubRe     = regexp.MustCompile(`LS\+\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*([^\s]+)?\s*(\d+)?\r\n`)
+	rlunsubRe   = regexp.MustCompile(`LS\-\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)\s*([^\s]+)?\r\n`)
 )
 
 const (
