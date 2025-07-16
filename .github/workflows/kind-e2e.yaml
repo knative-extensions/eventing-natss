@@ -15,18 +15,12 @@ jobs:
       fail-fast: false # Keep running if one leg fails.
       matrix:
         k8s-version:
-        - v1.31.4
+        - v1.32.x
+        - v1.33.x
 
         eventing-version:
         - knative-v1.16.0
 
-        # Map between K8s and KinD versions.
-        # This is attempting to make it a bit clearer what's being tested.
-        # See: https://github.com/kubernetes-sigs/kind/releases/tag/v0.9.0
-        include:
-        - k8s-version: v1.31.4
-          kind-version: v0.26.0
-          kind-image-sha: sha256:2cb39f7295fe7eafee0842b1052a599a4fb0f8bcf3f83d96c7f4864c357c6c30
     env:
       KO_DOCKER_REPO: kind.local
       SYSTEM_NAMESPACE: knative-eventing
@@ -49,46 +43,11 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install KinD
-      env:
-        KIND_VERSION: ${{ matrix.kind-version }}
-      run: |
-        set -x
-
-        curl -Lo ./kind https://github.com/kubernetes-sigs/kind/releases/download/${{ matrix.kind-version }}/kind-$(uname)-amd64
-        chmod +x ./kind
-        sudo mv kind /usr/local/bin
-
-    - name: Create KinD Cluster
-      run: |
-        set -x
-
-        # KinD configuration.
-        cat > kind.yaml <<EOF
-        apiVersion: kind.x-k8s.io/v1alpha4
-        kind: Cluster
-
-        # This is needed in order to support projected volumes with service account tokens.
-        # See: https://kubernetes.slack.com/archives/CEKK1KTN2/p1600268272383600
-        kubeadmConfigPatches:
-          - |
-            apiVersion: kubeadm.k8s.io/v1beta2
-            kind: ClusterConfiguration
-            metadata:
-              name: config
-            apiServer:
-              extraArgs:
-                "service-account-issuer": "kubernetes.default.svc"
-                "service-account-signing-key-file": "/etc/kubernetes/pki/sa.key"
-        nodes:
-        - role: control-plane
-          image: kindest/node:${{ matrix.k8s-version }}@${{ matrix.kind-image-sha }}
-        - role: worker
-          image: kindest/node:${{ matrix.k8s-version }}@${{ matrix.kind-image-sha }}
-
-        EOF
-
-        # Create a cluster!
-        kind create cluster --config kind.yaml
+      uses: chainguard-dev/actions/setup-kind@16e2fd6603a1c6a1fbc880fdbb922b2e8e2be3e7 # main
+      with:
+        k8s-version: ${{ matrix.k8s-version }}
+        kind-worker-count: 1
+        cluster-suffix: c${{ github.run_id }}.local
 
     - name: Install nats
       run: |
