@@ -1,4 +1,4 @@
-// Copyright 2018-2023 The NATS Authors
+// Copyright 2018-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,9 +21,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,7 +33,6 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/s2"
-
 	"github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nats-server/v2/server/certidp"
 	"github.com/nats-io/nats-server/v2/server/pse"
@@ -97,6 +98,7 @@ const (
 
 // FIXME(dlc) - make configurable.
 var eventsHBInterval = 30 * time.Second
+var statsHBInterval = 10 * time.Second
 
 // Default minimum wait time for sending statsz
 const defaultStatszRateLimit = 1 * time.Second
@@ -130,6 +132,7 @@ type internal struct {
 	replies        map[string]msgHandler
 	sendq          *ipQueue[*pubMsg]
 	recvq          *ipQueue[*inSysMsg]
+	recvqp         *ipQueue[*inSysMsg] // For STATSZ/Pings
 	resetCh        chan struct{}
 	wg             sync.WaitGroup
 	sq             *sendq
@@ -213,6 +216,7 @@ type AccountNumConns struct {
 // AccountStat contains the data common between AccountNumConns and AccountStatz
 type AccountStat struct {
 	Account       string    `json:"acc"`
+	Name          string    `json:"name"`
 	Conns         int       `json:"conns"`
 	LeafNodes     int       `json:"leafnodes"`
 	TotalConns    int       `json:"total_conns"`
@@ -262,6 +266,7 @@ type ServerInfo struct {
 const (
 	JetStreamEnabled     ServerCapability = 1 << iota // Server had JetStream enabled.
 	BinaryStreamSnapshot                              // New stream snapshot capability.
+	AccountNRG                                        // Move NRG traffic out of system account.
 )
 
 // Set JetStream capability.
@@ -285,6 +290,17 @@ func (si *ServerInfo) SetBinaryStreamSnapshot() {
 // JetStreamEnabled indicates whether or not we have binary stream snapshot capbilities.
 func (si *ServerInfo) BinaryStreamSnapshot() bool {
 	return si.Flags&BinaryStreamSnapshot != 0
+}
+
+// Set account NRG capability.
+func (si *ServerInfo) SetAccountNRG() {
+	si.Flags |= AccountNRG
+}
+
+// AccountNRG indicates whether or not we support moving the NRG traffic out of the
+// system account and into the asset account.
+func (si *ServerInfo) AccountNRG() bool {
+	return si.Flags&AccountNRG != 0
 }
 
 // ClientInfo is detailed information about the client forming a connection.
@@ -313,23 +329,57 @@ type ClientInfo struct {
 	Nonce      string        `json:"nonce,omitempty"`
 }
 
+// forAssignmentSnap returns the minimum amount of ClientInfo we need for assignment snapshots.
+func (ci *ClientInfo) forAssignmentSnap() *ClientInfo {
+	return &ClientInfo{
+		Account: ci.Account,
+		Service: ci.Service,
+		Cluster: ci.Cluster,
+	}
+}
+
+// forProposal returns the minimum amount of ClientInfo we need for assignment proposals.
+func (ci *ClientInfo) forProposal() *ClientInfo {
+	if ci == nil {
+		return nil
+	}
+	cci := *ci
+	cci.Jwt = _EMPTY_
+	cci.IssuerKey = _EMPTY_
+	return &cci
+}
+
+// forAdvisory returns the minimum amount of ClientInfo we need for JS advisory events.
+func (ci *ClientInfo) forAdvisory() *ClientInfo {
+	if ci == nil {
+		return nil
+	}
+	cci := *ci
+	cci.Jwt = _EMPTY_
+	cci.Alternates = nil
+	return &cci
+}
+
 // ServerStats hold various statistics that we will periodically send out.
 type ServerStats struct {
-	Start            time.Time      `json:"start"`
-	Mem              int64          `json:"mem"`
-	Cores            int            `json:"cores"`
-	CPU              float64        `json:"cpu"`
-	Connections      int            `json:"connections"`
-	TotalConnections uint64         `json:"total_connections"`
-	ActiveAccounts   int            `json:"active_accounts"`
-	NumSubs          uint32         `json:"subscriptions"`
-	Sent             DataStats      `json:"sent"`
-	Received         DataStats      `json:"received"`
-	SlowConsumers    int64          `json:"slow_consumers"`
-	Routes           []*RouteStat   `json:"routes,omitempty"`
-	Gateways         []*GatewayStat `json:"gateways,omitempty"`
-	ActiveServers    int            `json:"active_servers,omitempty"`
-	JetStream        *JetStreamVarz `json:"jetstream,omitempty"`
+	Start              time.Time           `json:"start"`
+	Mem                int64               `json:"mem"`
+	Cores              int                 `json:"cores"`
+	CPU                float64             `json:"cpu"`
+	Connections        int                 `json:"connections"`
+	TotalConnections   uint64              `json:"total_connections"`
+	ActiveAccounts     int                 `json:"active_accounts"`
+	NumSubs            uint32              `json:"subscriptions"`
+	Sent               DataStats           `json:"sent"`
+	Received           DataStats           `json:"received"`
+	SlowConsumers      int64               `json:"slow_consumers"`
+	SlowConsumersStats *SlowConsumersStats `json:"slow_consumer_stats,omitempty"`
+	Routes             []*RouteStat        `json:"routes,omitempty"`
+	Gateways           []*GatewayStat      `json:"gateways,omitempty"`
+	ActiveServers      int                 `json:"active_servers,omitempty"`
+	JetStream          *JetStreamVarz      `json:"jetstream,omitempty"`
+	MemLimit           int64               `json:"gomemlimit,omitempty"`
+	MaxProcs           int                 `json:"gomaxprocs,omitempty"`
 }
 
 // RouteStat holds route statistics.
@@ -350,10 +400,17 @@ type GatewayStat struct {
 	NumInbound int       `json:"inbound_connections"`
 }
 
-// DataStats reports how may msg and bytes. Applicable for both sent and received.
-type DataStats struct {
+type dataStats struct {
 	Msgs  int64 `json:"msgs"`
 	Bytes int64 `json:"bytes"`
+}
+
+// DataStats reports how may msg and bytes. Applicable for both sent and received.
+type DataStats struct {
+	dataStats
+	Gateways dataStats `json:"gateways,omitempty"`
+	Routes   dataStats `json:"routes,omitempty"`
+	Leafs    dataStats `json:"leafs,omitempty"`
 }
 
 // Used for internally queueing up messages that the server wants to send.
@@ -412,15 +469,7 @@ type TypedEvent struct {
 
 // internalReceiveLoop will be responsible for dispatching all messages that
 // a server receives and needs to internally process, e.g. internal subs.
-func (s *Server) internalReceiveLoop() {
-	s.mu.RLock()
-	if s.sys == nil || s.sys.recvq == nil {
-		s.mu.RUnlock()
-		return
-	}
-	recvq := s.sys.recvq
-	s.mu.RUnlock()
-
+func (s *Server) internalReceiveLoop(recvq *ipQueue[*inSysMsg]) {
 	for s.eventsRunning() {
 		select {
 		case <-recvq.ch:
@@ -481,10 +530,14 @@ RESET:
 					si.Version = VERSION
 					si.Time = time.Now().UTC()
 					si.Tags = tags
+					si.Flags = 0
 					if js {
 						// New capability based flags.
 						si.SetJetStreamEnabled()
 						si.SetBinaryStreamSnapshot()
+						if s.accountNRGAllowed.Load() {
+							si.SetAccountNRG()
+						}
 					}
 				}
 				var b []byte
@@ -659,7 +712,7 @@ func (s *Server) sendInternalAccountMsgWithReply(a *Account, subject, reply stri
 }
 
 // Send system style message to an account scope.
-func (s *Server) sendInternalAccountSysMsg(a *Account, subj string, si *ServerInfo, msg interface{}) {
+func (s *Server) sendInternalAccountSysMsg(a *Account, subj string, si *ServerInfo, msg any, ct compressionType) {
 	s.mu.RLock()
 	if s.sys == nil || s.sys.sendq == nil || a == nil {
 		s.mu.RUnlock()
@@ -672,7 +725,7 @@ func (s *Server) sendInternalAccountSysMsg(a *Account, subj string, si *ServerIn
 	c := a.internalClient()
 	a.mu.Unlock()
 
-	sendq.push(newPubMsg(c, subj, _EMPTY_, si, nil, msg, noCompression, false, false))
+	sendq.push(newPubMsg(c, subj, _EMPTY_, si, nil, msg, ct, false, false))
 }
 
 // This will queue up a message to be sent.
@@ -779,6 +832,10 @@ func (s *Server) updateServerUsage(v *ServerStats) {
 	var vss int64
 	pse.ProcUsage(&v.CPU, &v.Mem, &vss)
 	v.Cores = runtime.NumCPU()
+	v.MaxProcs = runtime.GOMAXPROCS(-1)
+	if mm := debug.SetMemoryLimit(-1); mm < math.MaxInt64 {
+		v.MemLimit = mm
+	}
 }
 
 // Generate a route stat for our statz update.
@@ -792,12 +849,16 @@ func routeStat(r *client) *RouteStat {
 	rs := &RouteStat{
 		ID: r.cid,
 		Sent: DataStats{
-			Msgs:  r.outMsgs,
-			Bytes: r.outBytes,
+			dataStats: dataStats{
+				Msgs:  r.outMsgs,
+				Bytes: r.outBytes,
+			},
 		},
 		Received: DataStats{
-			Msgs:  atomic.LoadInt64(&r.inMsgs),
-			Bytes: atomic.LoadInt64(&r.inBytes),
+			dataStats: dataStats{
+				Msgs:  atomic.LoadInt64(&r.inMsgs),
+				Bytes: atomic.LoadInt64(&r.inBytes),
+			},
 		},
 		Pending: int(r.out.pb),
 	}
@@ -870,6 +931,16 @@ func (s *Server) sendStatsz(subj string) {
 	m.Stats.Sent.Msgs = atomic.LoadInt64(&s.outMsgs)
 	m.Stats.Sent.Bytes = atomic.LoadInt64(&s.outBytes)
 	m.Stats.SlowConsumers = atomic.LoadInt64(&s.slowConsumers)
+	// Evaluate the slow consumer stats, but set it only if one of the value is not 0.
+	scs := &SlowConsumersStats{
+		Clients:  s.NumSlowConsumersClients(),
+		Routes:   s.NumSlowConsumersRoutes(),
+		Gateways: s.NumSlowConsumersGateways(),
+		Leafs:    s.NumSlowConsumersLeafs(),
+	}
+	if scs.Clients != 0 || scs.Routes != 0 || scs.Gateways != 0 || scs.Leafs != 0 {
+		m.Stats.SlowConsumersStats = scs
+	}
 	m.Stats.NumSubs = s.numSubscriptions()
 	// Routes
 	s.forEachRoute(func(r *client) {
@@ -886,8 +957,10 @@ func (s *Server) sendStatsz(subj string) {
 			// Note that *client.out[Msgs|Bytes] are not set using atomic,
 			// unlike the in[Msgs|bytes].
 			gs.Sent = DataStats{
-				Msgs:  c.outMsgs,
-				Bytes: c.outBytes,
+				dataStats: dataStats{
+					Msgs:  c.outMsgs,
+					Bytes: c.outBytes,
+				},
 			}
 			c.mu.Unlock()
 			// Gather matching inbound connections
@@ -951,7 +1024,11 @@ func (s *Server) sendStatsz(subj string) {
 					Size:   mg.ClusterSize(),
 				}
 			}
+			if ipq := s.jsAPIRoutedReqs; ipq != nil && jStat.Meta != nil {
+				jStat.Meta.Pending = ipq.len()
+			}
 		}
+		jStat.Limits = &s.getOpts().JetStreamLimits
 		m.Stats.JetStream = jStat
 		s.mu.RLock()
 	}
@@ -1139,7 +1216,7 @@ func (s *Server) initEventTracking() {
 	}
 	// Listen for ping messages that will be sent to all servers for statsz.
 	// This subscription is kept for backwards compatibility. Got replaced by ...PING.STATZ from below
-	if _, err := s.sysSubscribe(serverStatsPingReqSubj, s.noInlineCallback(s.statszReq)); err != nil {
+	if _, err := s.sysSubscribe(serverStatsPingReqSubj, s.noInlineCallbackStatsz(s.statszReq)); err != nil {
 		s.Errorf("Error setting up internal tracking: %v", err)
 		return
 	}
@@ -1182,23 +1259,50 @@ func (s *Server) initEventTracking() {
 			optz := &HealthzEventOptions{}
 			s.zReq(c, reply, hdr, msg, &optz.EventFilterOptions, optz, func() (any, error) { return s.healthz(&optz.HealthzOptions), nil })
 		},
-		"PROFILEZ": func(sub *subscription, c *client, _ *Account, subject, reply string, hdr, msg []byte) {
-			optz := &ProfilezEventOptions{}
-			s.zReq(c, reply, hdr, msg, &optz.EventFilterOptions, optz, func() (any, error) { return s.profilez(&optz.ProfilezOptions), nil })
-		},
+		"PROFILEZ": nil, // Special case, see below
 		"EXPVARZ": func(sub *subscription, c *client, _ *Account, subject, reply string, hdr, msg []byte) {
 			optz := &ExpvarzEventOptions{}
 			s.zReq(c, reply, hdr, msg, &optz.EventFilterOptions, optz, func() (any, error) { return s.expvarz(optz), nil })
 		},
+		"IPQUEUESZ": func(sub *subscription, c *client, _ *Account, subject, reply string, hdr, msg []byte) {
+			optz := &IpqueueszEventOptions{}
+			s.zReq(c, reply, hdr, msg, &optz.EventFilterOptions, optz, func() (any, error) { return s.Ipqueuesz(&optz.IpqueueszOptions), nil })
+		},
+		"RAFTZ": func(sub *subscription, c *client, _ *Account, subject, reply string, hdr, msg []byte) {
+			optz := &RaftzEventOptions{}
+			s.zReq(c, reply, hdr, msg, &optz.EventFilterOptions, optz, func() (any, error) { return s.Raftz(&optz.RaftzOptions), nil })
+		},
+	}
+	profilez := func(_ *subscription, c *client, _ *Account, _, rply string, rmsg []byte) {
+		hdr, msg := c.msgParts(rmsg)
+		// Need to copy since we are passing those to the go routine below.
+		hdr, msg = copyBytes(hdr), copyBytes(msg)
+		// Execute in its own go routine because CPU profiling, for instance,
+		// could take several seconds to complete.
+		go func() {
+			optz := &ProfilezEventOptions{}
+			s.zReq(c, rply, hdr, msg, &optz.EventFilterOptions, optz, func() (any, error) {
+				return s.profilez(&optz.ProfilezOptions), nil
+			})
+		}()
 	}
 	for name, req := range monSrvc {
+		var h msgHandler
+		switch name {
+		case "PROFILEZ":
+			h = profilez
+		case "STATSZ":
+			h = s.noInlineCallbackStatsz(req)
+		default:
+			h = s.noInlineCallback(req)
+		}
 		subject = fmt.Sprintf(serverDirectReqSubj, s.info.ID, name)
-		if _, err := s.sysSubscribe(subject, s.noInlineCallback(req)); err != nil {
+		if _, err := s.sysSubscribe(subject, h); err != nil {
 			s.Errorf("Error setting up internal tracking: %v", err)
 			return
 		}
 		subject = fmt.Sprintf(serverPingReqSubj, name)
-		if _, err := s.sysSubscribe(subject, s.noInlineCallback(req)); err != nil {
+		if _, err := s.sysSubscribe(subject, h); err != nil {
 			s.Errorf("Error setting up internal tracking: %v", err)
 			return
 		}
@@ -1602,7 +1706,8 @@ func (s *Server) remoteServerUpdate(sub *subscription, c *client, _ *Account, su
 	}
 
 	node := getHash(si.Name)
-	s.nodeToInfo.Store(node, nodeInfo{
+	accountNRG := si.AccountNRG()
+	oldInfo, _ := s.nodeToInfo.Swap(node, nodeInfo{
 		si.Name,
 		si.Version,
 		si.Cluster,
@@ -1614,7 +1719,14 @@ func (s *Server) remoteServerUpdate(sub *subscription, c *client, _ *Account, su
 		false,
 		si.JetStreamEnabled(),
 		si.BinaryStreamSnapshot(),
+		accountNRG,
 	})
+	if oldInfo == nil || accountNRG != oldInfo.(nodeInfo).accountNRG {
+		// One of the servers we received statsz from changed its mind about
+		// whether or not it supports in-account NRG, so update the groups
+		// with this information.
+		s.updateNRGAccountStatus()
+	}
 }
 
 // updateRemoteServer is called when we have an update from a remote server.
@@ -1661,12 +1773,33 @@ func (s *Server) processNewServer(si *ServerInfo) {
 				false,
 				si.JetStreamEnabled(),
 				si.BinaryStreamSnapshot(),
+				si.AccountNRG(),
 			})
 		}
 	}
+	go s.updateNRGAccountStatus()
 	// Announce ourselves..
 	// Do this in a separate Go routine.
 	go s.sendStatszUpdate()
+}
+
+// Works out whether all nodes support moving the NRG traffic into
+// the account and moves it appropriately.
+// Server lock MUST NOT be held on entry.
+func (s *Server) updateNRGAccountStatus() {
+	s.rnMu.RLock()
+	raftNodes := make([]RaftNode, 0, len(s.raftNodes))
+	for _, n := range s.raftNodes {
+		raftNodes = append(raftNodes, n)
+	}
+	s.rnMu.RUnlock()
+	for _, n := range raftNodes {
+		// In the event that the node is happy that all nodes that
+		// it cares about haven't changed, this will be a no-op.
+		if err := n.RecreateInternalSubs(); err != nil {
+			n.Stop()
+		}
+	}
 }
 
 // If GW is enabled on this server and there are any leaf node connections,
@@ -1874,6 +2007,18 @@ type ExpvarzEventOptions struct {
 	EventFilterOptions
 }
 
+// In the context of system events, IpqueueszEventOptions are options passed to Ipqueuesz
+type IpqueueszEventOptions struct {
+	EventFilterOptions
+	IpqueueszOptions
+}
+
+// In the context of system events, RaftzEventOptions are options passed to Raftz
+type RaftzEventOptions struct {
+	EventFilterOptions
+	RaftzOptions
+}
+
 // returns true if the request does NOT apply to this server and can be ignored.
 // DO NOT hold the server lock when
 func (s *Server) filterRequest(fOpts *EventFilterOptions) bool {
@@ -1922,13 +2067,92 @@ type ServerAPIResponse struct {
 	compress compressionType
 }
 
-// Specialized response types for unmarshalling.
+// Specialized response types for unmarshalling. These structures are not
+// used in the server code and only there for users of the Z endpoints to
+// unmarshal the data without having to create these structs in their code
 
 // ServerAPIConnzResponse is the response type connz
 type ServerAPIConnzResponse struct {
 	Server *ServerInfo `json:"server"`
 	Data   *Connz      `json:"data,omitempty"`
 	Error  *ApiError   `json:"error,omitempty"`
+}
+
+// ServerAPIRoutezResponse is the response type for routez
+type ServerAPIRoutezResponse struct {
+	Server *ServerInfo `json:"server"`
+	Data   *Routez     `json:"data,omitempty"`
+	Error  *ApiError   `json:"error,omitempty"`
+}
+
+// ServerAPIGatewayzResponse is the response type for gatewayz
+type ServerAPIGatewayzResponse struct {
+	Server *ServerInfo `json:"server"`
+	Data   *Gatewayz   `json:"data,omitempty"`
+	Error  *ApiError   `json:"error,omitempty"`
+}
+
+// ServerAPIJszResponse is the response type for jsz
+type ServerAPIJszResponse struct {
+	Server *ServerInfo `json:"server"`
+	Data   *JSInfo     `json:"data,omitempty"`
+	Error  *ApiError   `json:"error,omitempty"`
+}
+
+// ServerAPIHealthzResponse is the response type for healthz
+type ServerAPIHealthzResponse struct {
+	Server *ServerInfo   `json:"server"`
+	Data   *HealthStatus `json:"data,omitempty"`
+	Error  *ApiError     `json:"error,omitempty"`
+}
+
+// ServerAPIVarzResponse is the response type for varz
+type ServerAPIVarzResponse struct {
+	Server *ServerInfo `json:"server"`
+	Data   *Varz       `json:"data,omitempty"`
+	Error  *ApiError   `json:"error,omitempty"`
+}
+
+// ServerAPISubszResponse is the response type for subsz
+type ServerAPISubszResponse struct {
+	Server *ServerInfo `json:"server"`
+	Data   *Subsz      `json:"data,omitempty"`
+	Error  *ApiError   `json:"error,omitempty"`
+}
+
+// ServerAPILeafzResponse is the response type for leafz
+type ServerAPILeafzResponse struct {
+	Server *ServerInfo `json:"server"`
+	Data   *Leafz      `json:"data,omitempty"`
+	Error  *ApiError   `json:"error,omitempty"`
+}
+
+// ServerAPIAccountzResponse is the response type for accountz
+type ServerAPIAccountzResponse struct {
+	Server *ServerInfo `json:"server"`
+	Data   *Accountz   `json:"data,omitempty"`
+	Error  *ApiError   `json:"error,omitempty"`
+}
+
+// ServerAPIExpvarzResponse is the response type for expvarz
+type ServerAPIExpvarzResponse struct {
+	Server *ServerInfo    `json:"server"`
+	Data   *ExpvarzStatus `json:"data,omitempty"`
+	Error  *ApiError      `json:"error,omitempty"`
+}
+
+// ServerAPIpqueueszResponse is the response type for ipqueuesz
+type ServerAPIpqueueszResponse struct {
+	Server *ServerInfo      `json:"server"`
+	Data   *IpqueueszStatus `json:"data,omitempty"`
+	Error  *ApiError        `json:"error,omitempty"`
+}
+
+// ServerAPIRaftzResponse is the response type for raftz
+type ServerAPIRaftzResponse struct {
+	Server *ServerInfo  `json:"server"`
+	Data   *RaftzStatus `json:"data,omitempty"`
+	Error  *ApiError    `json:"error,omitempty"`
 }
 
 // statszReq is a request for us to respond with current statsz.
@@ -2081,10 +2305,11 @@ func (s *Server) registerSystemImports(a *Account) {
 	if sacc == nil || sacc == a {
 		return
 	}
+	dstAccName := sacc.Name
 	// FIXME(dlc) - make a shared list between sys exports etc.
 
 	importSrvc := func(subj, mappedSubj string) {
-		if !a.serviceImportExists(subj) {
+		if !a.serviceImportExists(dstAccName, subj) {
 			if err := a.addServiceImportWithClaim(sacc, subj, mappedSubj, nil, true); err != nil {
 				s.Errorf("Error setting up system service import %s -> %s for account: %v",
 					subj, mappedSubj, err)
@@ -2190,21 +2415,57 @@ func (s *Server) sendAccConnsUpdate(a *Account, subj ...string) {
 func (a *Account) statz() *AccountStat {
 	localConns := a.numLocalConnections()
 	leafConns := a.numLocalLeafNodes()
+
+	a.stats.Lock()
+	received := DataStats{
+		dataStats: dataStats{
+			Msgs:  a.stats.inMsgs,
+			Bytes: a.stats.inBytes,
+		},
+		Gateways: dataStats{
+			Msgs:  a.stats.gw.inMsgs,
+			Bytes: a.stats.gw.inBytes,
+		},
+		Routes: dataStats{
+			Msgs:  a.stats.rt.inMsgs,
+			Bytes: a.stats.rt.inBytes,
+		},
+		Leafs: dataStats{
+			Msgs:  a.stats.ln.inMsgs,
+			Bytes: a.stats.ln.inBytes,
+		},
+	}
+	sent := DataStats{
+		dataStats: dataStats{
+			Msgs:  a.stats.outMsgs,
+			Bytes: a.stats.outBytes,
+		},
+		Gateways: dataStats{
+			Msgs:  a.stats.gw.outMsgs,
+			Bytes: a.stats.gw.outBytes,
+		},
+		Routes: dataStats{
+			Msgs:  a.stats.rt.outMsgs,
+			Bytes: a.stats.rt.outBytes,
+		},
+		Leafs: dataStats{
+			Msgs:  a.stats.ln.outMsgs,
+			Bytes: a.stats.ln.outBytes,
+		},
+	}
+	slowConsumers := a.stats.slowConsumers
+	a.stats.Unlock()
+
 	return &AccountStat{
-		Account:    a.Name,
-		Conns:      localConns,
-		LeafNodes:  leafConns,
-		TotalConns: localConns + leafConns,
-		NumSubs:    a.sl.Count(),
-		Received: DataStats{
-			Msgs:  atomic.LoadInt64(&a.inMsgs),
-			Bytes: atomic.LoadInt64(&a.inBytes),
-		},
-		Sent: DataStats{
-			Msgs:  atomic.LoadInt64(&a.outMsgs),
-			Bytes: atomic.LoadInt64(&a.outBytes),
-		},
-		SlowConsumers: atomic.LoadInt64(&a.slowConsumers),
+		Account:       a.Name,
+		Name:          a.getNameTagLocked(),
+		Conns:         localConns,
+		LeafNodes:     leafConns,
+		TotalConns:    localConns + leafConns,
+		NumSubs:       a.sl.Count(),
+		Received:      received,
+		Sent:          sent,
+		SlowConsumers: slowConsumers,
 	}
 }
 
@@ -2262,7 +2523,7 @@ func (s *Server) accountConnectEvent(c *client) {
 			Jwt:        c.opts.JWT,
 			IssuerKey:  issuerForClient(c),
 			Tags:       c.tags,
-			NameTag:    c.nameTag,
+			NameTag:    c.acc.getNameTag(),
 			Kind:       c.kindString(),
 			ClientType: c.clientTypeString(),
 			MQTTClient: c.getMQTTClientID(),
@@ -2314,18 +2575,22 @@ func (s *Server) accountDisconnectEvent(c *client, now time.Time, reason string)
 			Jwt:        c.opts.JWT,
 			IssuerKey:  issuerForClient(c),
 			Tags:       c.tags,
-			NameTag:    c.nameTag,
+			NameTag:    c.acc.getNameTag(),
 			Kind:       c.kindString(),
 			ClientType: c.clientTypeString(),
 			MQTTClient: c.getMQTTClientID(),
 		},
 		Sent: DataStats{
-			Msgs:  atomic.LoadInt64(&c.inMsgs),
-			Bytes: atomic.LoadInt64(&c.inBytes),
+			dataStats: dataStats{
+				Msgs:  atomic.LoadInt64(&c.inMsgs),
+				Bytes: atomic.LoadInt64(&c.inBytes),
+			},
 		},
 		Received: DataStats{
-			Msgs:  c.outMsgs,
-			Bytes: c.outBytes,
+			dataStats: dataStats{
+				Msgs:  c.outMsgs,
+				Bytes: c.outBytes,
+			},
 		},
 		Reason: reason,
 	}
@@ -2368,18 +2633,22 @@ func (s *Server) sendAuthErrorEvent(c *client) {
 			Jwt:        c.opts.JWT,
 			IssuerKey:  issuerForClient(c),
 			Tags:       c.tags,
-			NameTag:    c.nameTag,
+			NameTag:    c.acc.getNameTag(),
 			Kind:       c.kindString(),
 			ClientType: c.clientTypeString(),
 			MQTTClient: c.getMQTTClientID(),
 		},
 		Sent: DataStats{
-			Msgs:  c.inMsgs,
-			Bytes: c.inBytes,
+			dataStats: dataStats{
+				Msgs:  c.inMsgs,
+				Bytes: c.inBytes,
+			},
 		},
 		Received: DataStats{
-			Msgs:  c.outMsgs,
-			Bytes: c.outBytes,
+			dataStats: dataStats{
+				Msgs:  c.outMsgs,
+				Bytes: c.outBytes,
+			},
 		},
 		Reason: AuthenticationViolation.String(),
 	}
@@ -2426,24 +2695,28 @@ func (s *Server) sendAccountAuthErrorEvent(c *client, acc *Account, reason strin
 			Jwt:        c.opts.JWT,
 			IssuerKey:  issuerForClient(c),
 			Tags:       c.tags,
-			NameTag:    c.nameTag,
+			NameTag:    c.acc.getNameTag(),
 			Kind:       c.kindString(),
 			ClientType: c.clientTypeString(),
 			MQTTClient: c.getMQTTClientID(),
 		},
 		Sent: DataStats{
-			Msgs:  c.inMsgs,
-			Bytes: c.inBytes,
+			dataStats: dataStats{
+				Msgs:  c.inMsgs,
+				Bytes: c.inBytes,
+			},
 		},
 		Received: DataStats{
-			Msgs:  c.outMsgs,
-			Bytes: c.outBytes,
+			dataStats: dataStats{
+				Msgs:  c.outMsgs,
+				Bytes: c.outBytes,
+			},
 		},
 		Reason: reason,
 	}
 	c.mu.Unlock()
 
-	s.sendInternalAccountSysMsg(acc, authErrorAccountEventSubj, &m.Server, &m)
+	s.sendInternalAccountSysMsg(acc, authErrorAccountEventSubj, &m.Server, &m, noCompression)
 }
 
 // Internal message callback.
@@ -2451,16 +2724,39 @@ func (s *Server) sendAccountAuthErrorEvent(c *client, acc *Account, reason strin
 // rmsg contains header and the message. use client.msgParts(rmsg) to split them apart
 type msgHandler func(sub *subscription, client *client, acc *Account, subject, reply string, rmsg []byte)
 
+const (
+	recvQMuxed  = 1
+	recvQStatsz = 2
+)
+
 // Create a wrapped callback handler for the subscription that will move it to an
 // internal recvQ for processing not inline with routes etc.
 func (s *Server) noInlineCallback(cb sysMsgHandler) msgHandler {
+	return s.noInlineCallbackRecvQSelect(cb, recvQMuxed)
+}
+
+// Create a wrapped callback handler for the subscription that will move it to an
+// internal recvQ for Statsz/Pings for processing not inline with routes etc.
+func (s *Server) noInlineCallbackStatsz(cb sysMsgHandler) msgHandler {
+	return s.noInlineCallbackRecvQSelect(cb, recvQStatsz)
+}
+
+// Create a wrapped callback handler for the subscription that will move it to an
+// internal IPQueue for processing not inline with routes etc.
+func (s *Server) noInlineCallbackRecvQSelect(cb sysMsgHandler, recvQSelect int) msgHandler {
 	s.mu.RLock()
 	if !s.eventsEnabled() {
 		s.mu.RUnlock()
 		return nil
 	}
 	// Capture here for direct reference to avoid any unnecessary blocking inline with routes, gateways etc.
-	recvq := s.sys.recvq
+	var recvq *ipQueue[*inSysMsg]
+	switch recvQSelect {
+	case recvQStatsz:
+		recvq = s.sys.recvqp
+	default:
+		recvq = s.sys.recvq
+	}
 	s.mu.RUnlock()
 
 	return func(sub *subscription, c *client, acc *Account, subj, rply string, rmsg []byte) {
@@ -2597,8 +2893,6 @@ func (s *Server) remoteLatencyUpdate(sub *subscription, _ *client, _ *Account, s
 	si.rc = nil
 	acc.mu.Unlock()
 
-	// Make sure we remove the entry here.
-	acc.removeServiceImport(si.from)
 	// Send the metrics
 	s.sendInternalAccountMsg(acc, lsub, m1)
 }
