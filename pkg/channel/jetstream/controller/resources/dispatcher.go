@@ -86,15 +86,15 @@ func (b *DispatcherDeploymentBuilder) WithArgs(args *DispatcherDeploymentArgs) *
 func (b *DispatcherDeploymentBuilder) Build() *v1.Deployment {
 	replicas := b.args.Replicas
 
-	b.deployment.ObjectMeta.Namespace = b.args.DispatcherNamespace
-	b.deployment.ObjectMeta.OwnerReferences = []metav1.OwnerReference{b.args.OwnerRef}
-	b.deployment.ObjectMeta.Annotations = commonconfig.JoinStringMaps(b.deployment.ObjectMeta.Annotations, b.args.DeploymentAnnotations)
-	b.deployment.ObjectMeta.Labels = commonconfig.JoinStringMaps(b.deployment.ObjectMeta.Labels, b.args.DeploymentLabels)
+	b.deployment.Namespace = b.args.DispatcherNamespace
+	b.deployment.OwnerReferences = []metav1.OwnerReference{b.args.OwnerRef}
+	b.deployment.Annotations = commonconfig.JoinStringMaps(b.deployment.Annotations, b.args.DeploymentAnnotations)
+	b.deployment.Labels = commonconfig.JoinStringMaps(b.deployment.Labels, b.args.DeploymentLabels)
 
 	b.deployment.Spec.Replicas = &replicas
 	defaultAnnotations := map[string]string{constants.ConfigMapHashAnnotationKey: b.args.ConfigMapHash}
-	b.deployment.Spec.Template.ObjectMeta.Annotations = commonconfig.JoinStringMaps(defaultAnnotations, b.args.PodAnnotations)
-	b.deployment.Spec.Template.ObjectMeta.Labels = commonconfig.JoinStringMaps(b.deployment.Spec.Template.ObjectMeta.Labels, b.args.PodLabels)
+	b.deployment.Spec.Template.Annotations = commonconfig.JoinStringMaps(defaultAnnotations, b.args.PodAnnotations)
+	b.deployment.Spec.Template.Labels = commonconfig.JoinStringMaps(b.deployment.Spec.Template.Labels, b.args.PodLabels)
 	b.deployment.Spec.Template.Spec.ServiceAccountName = b.args.ServiceAccount
 
 	b.deployment.Spec.Template.Spec.NodeSelector = b.args.DeploymentNodeSelector
@@ -117,7 +117,7 @@ func (b *DispatcherDeploymentBuilder) Build() *v1.Deployment {
 	if b.args.ConfigMapName != "" {
 		for i, v := range b.deployment.Spec.Template.Spec.Volumes {
 			if v.Name == constants.SettingsConfigMapName {
-				b.deployment.Spec.Template.Spec.Volumes[i].VolumeSource.ConfigMap.Name = b.args.ConfigMapName
+				b.deployment.Spec.Template.Spec.Volumes[i].ConfigMap.Name = b.args.ConfigMapName
 
 				break
 			}

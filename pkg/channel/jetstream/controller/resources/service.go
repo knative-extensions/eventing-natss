@@ -65,7 +65,7 @@ func MakeK8sService(kc *v1alpha1.NatsJetStreamChannel, opts ...ServiceOption) (*
 			Kind:       "Service",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      MakeJSMChannelServiceName(kc.ObjectMeta.Name),
+			Name:      MakeJSMChannelServiceName(kc.Name),
 			Namespace: kc.Namespace,
 			Labels: map[string]string{
 				MessagingRoleLabel: MessagingRole,

@@ -1,4 +1,4 @@
-// Copyright 2022-2024 The NATS Authors
+// Copyright 2022-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -18,11 +18,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/internal/syncx"
 	"github.com/nats-io/nuid"
 )
 
@@ -58,6 +60,11 @@ type (
 		// Drain unsubscribes from the stream and cancels subscription.
 		// All messages that are already in the buffer will be processed in callback function.
 		Drain()
+
+		// Closed returns a channel that is closed when the consuming is
+		// fully stopped/drained. When the channel is closed, no more messages
+		// will be received and processing is complete.
+		Closed() <-chan struct{}
 	}
 
 	// MessageHandler is a handler function used as callback in [Consume].
@@ -75,26 +82,35 @@ type (
 
 	pullConsumer struct {
 		sync.Mutex
-		jetStream     *jetStream
-		stream        string
-		durable       bool
-		name          string
-		info          *ConsumerInfo
-		subscriptions map[string]*pullSubscription
+		js      *jetStream
+		stream  string
+		durable bool
+		name    string
+		info    *ConsumerInfo
+		subs    syncx.Map[string, *pullSubscription]
+		pinID   string
 	}
 
 	pullRequest struct {
-		Expires   time.Duration `json:"expires,omitempty"`
-		Batch     int           `json:"batch,omitempty"`
-		MaxBytes  int           `json:"max_bytes,omitempty"`
-		NoWait    bool          `json:"no_wait,omitempty"`
-		Heartbeat time.Duration `json:"idle_heartbeat,omitempty"`
+		Expires       time.Duration `json:"expires,omitempty"`
+		Batch         int           `json:"batch,omitempty"`
+		MaxBytes      int           `json:"max_bytes,omitempty"`
+		NoWait        bool          `json:"no_wait,omitempty"`
+		Heartbeat     time.Duration `json:"idle_heartbeat,omitempty"`
+		MinPending    int64         `json:"min_pending,omitempty"`
+		MinAckPending int64         `json:"min_ack_pending,omitempty"`
+		PinID         string        `json:"id,omitempty"`
+		Group         string        `json:"group,omitempty"`
 	}
 
 	consumeOpts struct {
 		Expires                 time.Duration
 		MaxMessages             int
 		MaxBytes                int
+		LimitSize               bool
+		MinPending              int64
+		MinAckPending           int64
+		Group                   string
 		Heartbeat               time.Duration
 		ErrHandler              ConsumeErrHandlerFunc
 		ReportMissingHeartbeats bool
@@ -116,14 +132,15 @@ type (
 		errs              chan error
 		pending           pendingMsgs
 		hbMonitor         *hbMonitor
-		fetchInProgress   uint32
-		closed            uint32
-		draining          uint32
+		fetchInProgress   atomic.Uint32
+		closed            atomic.Uint32
+		draining          atomic.Uint32
 		done              chan struct{}
 		connStatusChanged chan nats.Status
 		fetchNext         chan *pullRequest
 		consumeOpts       *consumeOpts
 		delivered         int
+		closedCh          chan struct{}
 	}
 
 	pendingMsgs struct {
@@ -137,6 +154,7 @@ type (
 	}
 
 	fetchResult struct {
+		sync.Mutex
 		msgs chan Msg
 		err  error
 		done bool
@@ -152,9 +170,10 @@ type (
 )
 
 const (
-	DefaultMaxMessages = 500
-	DefaultExpires     = 30 * time.Second
-	unset              = -1
+	DefaultMaxMessages       = 500
+	DefaultExpires           = 30 * time.Second
+	defaultBatchMaxBytesOnly = 1_000_000
+	unset                    = -1
 )
 
 func min(x, y int) int {
@@ -177,29 +196,37 @@ func (p *pullConsumer) Consume(handler MessageHandler, opts ...PullConsumeOpt) (
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidOption, err)
 	}
+
+	if len(p.info.Config.PriorityGroups) != 0 {
+		if consumeOpts.Group == "" {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidOption, "priority group is required for priority consumer")
+		}
+
+		if !slices.Contains(p.info.Config.PriorityGroups, consumeOpts.Group) {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidOption, "invalid priority group")
+		}
+	} else if consumeOpts.Group != "" {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidOption, "priority group is not supported for this consumer")
+	}
+
 	p.Lock()
 
-	subject := apiSubj(p.jetStream.apiPrefix, fmt.Sprintf(apiRequestNextT, p.stream, p.name))
+	subject := p.js.apiSubject(fmt.Sprintf(apiRequestNextT, p.stream, p.name))
 
-	// for single consume, use empty string as id
-	// this is useful for ordered consumer, where only a single subscription is valid
-	var consumeID string
-	if len(p.subscriptions) > 0 {
-		consumeID = nuid.Next()
-	}
+	consumeID := nuid.Next()
 	sub := &pullSubscription{
 		id:          consumeID,
 		consumer:    p,
-		errs:        make(chan error, 1),
+		errs:        make(chan error, 10),
 		done:        make(chan struct{}, 1),
 		fetchNext:   make(chan *pullRequest, 1),
 		consumeOpts: consumeOpts,
 	}
-	sub.connStatusChanged = p.jetStream.conn.StatusChanged(nats.CONNECTED, nats.RECONNECTING)
+	sub.connStatusChanged = p.js.conn.StatusChanged(nats.CONNECTED, nats.RECONNECTING)
 
 	sub.hbMonitor = sub.scheduleHeartbeatCheck(consumeOpts.Heartbeat)
 
-	p.subscriptions[sub.id] = sub
+	p.subs.Store(sub.id, sub)
 	p.Unlock()
 
 	internalHandler := func(msg *nats.Msg) {
@@ -232,7 +259,7 @@ func (p *pullConsumer) Consume(handler MessageHandler, opts ...PullConsumeOpt) (
 			sub.Unlock()
 
 			if err != nil {
-				if atomic.LoadUint32(&sub.closed) == 1 {
+				if sub.closed.Load() == 1 {
 					return
 				}
 				if sub.consumeOpts.ErrHandler != nil {
@@ -242,7 +269,10 @@ func (p *pullConsumer) Consume(handler MessageHandler, opts ...PullConsumeOpt) (
 			}
 			return
 		}
-		handler(p.jetStream.toJSMsg(msg))
+		if pinId := msg.Header.Get("Nats-Pin-Id"); pinId != "" {
+			p.setPinID(pinId)
+		}
+		handler(p.js.toJSMsg(msg))
 		sub.Lock()
 		sub.decrementPendingMsgs(msg)
 		sub.incrementDeliveredMsgs()
@@ -252,17 +282,21 @@ func (p *pullConsumer) Consume(handler MessageHandler, opts ...PullConsumeOpt) (
 			sub.Stop()
 		}
 	}
-	inbox := p.jetStream.conn.NewInbox()
-	sub.subscription, err = p.jetStream.conn.Subscribe(inbox, internalHandler)
+	inbox := p.js.conn.NewInbox()
+	sub.subscription, err = p.js.conn.Subscribe(inbox, internalHandler)
 	if err != nil {
 		return nil, err
 	}
 	sub.subscription.SetClosedHandler(func(sid string) func(string) {
 		return func(subject string) {
-			p.Lock()
-			defer p.Unlock()
-			delete(p.subscriptions, sid)
-			atomic.CompareAndSwapUint32(&sub.draining, 1, 0)
+			p.subs.Delete(sid)
+			sub.draining.CompareAndSwap(1, 0)
+			sub.Lock()
+			if sub.closedCh != nil {
+				close(sub.closedCh)
+				sub.closedCh = nil
+			}
+			sub.Unlock()
 		}
 	}(sub.id))
 
@@ -274,10 +308,14 @@ func (p *pullConsumer) Consume(handler MessageHandler, opts ...PullConsumeOpt) (
 		batchSize = min(batchSize, sub.consumeOpts.StopAfter-sub.delivered)
 	}
 	if err := sub.pull(&pullRequest{
-		Expires:   consumeOpts.Expires,
-		Batch:     batchSize,
-		MaxBytes:  consumeOpts.MaxBytes,
-		Heartbeat: consumeOpts.Heartbeat,
+		Expires:       consumeOpts.Expires,
+		Batch:         batchSize,
+		MaxBytes:      consumeOpts.MaxBytes,
+		Heartbeat:     consumeOpts.Heartbeat,
+		MinPending:    consumeOpts.MinPending,
+		MinAckPending: consumeOpts.MinAckPending,
+		Group:         consumeOpts.Group,
+		PinID:         p.getPinID(),
 	}, subject); err != nil {
 		sub.errs <- err
 	}
@@ -286,7 +324,7 @@ func (p *pullConsumer) Consume(handler MessageHandler, opts ...PullConsumeOpt) (
 	go func() {
 		isConnected := true
 		for {
-			if atomic.LoadUint32(&sub.closed) == 1 {
+			if sub.closed.Load() == 1 {
 				return
 			}
 			select {
@@ -309,10 +347,14 @@ func (p *pullConsumer) Consume(handler MessageHandler, opts ...PullConsumeOpt) (
 						}
 
 						sub.fetchNext <- &pullRequest{
-							Expires:   sub.consumeOpts.Expires,
-							Batch:     sub.consumeOpts.MaxMessages,
-							MaxBytes:  sub.consumeOpts.MaxBytes,
-							Heartbeat: sub.consumeOpts.Heartbeat,
+							Expires:       sub.consumeOpts.Expires,
+							Batch:         sub.consumeOpts.MaxMessages,
+							MaxBytes:      sub.consumeOpts.MaxBytes,
+							Heartbeat:     sub.consumeOpts.Heartbeat,
+							MinPending:    sub.consumeOpts.MinPending,
+							MinAckPending: sub.consumeOpts.MinAckPending,
+							Group:         sub.consumeOpts.Group,
+							PinID:         p.getPinID(),
 						}
 						if sub.hbMonitor != nil {
 							sub.hbMonitor.Reset(2 * sub.consumeOpts.Heartbeat)
@@ -332,10 +374,14 @@ func (p *pullConsumer) Consume(handler MessageHandler, opts ...PullConsumeOpt) (
 						batchSize = min(batchSize, sub.consumeOpts.StopAfter-sub.delivered)
 					}
 					sub.fetchNext <- &pullRequest{
-						Expires:   sub.consumeOpts.Expires,
-						Batch:     batchSize,
-						MaxBytes:  sub.consumeOpts.MaxBytes,
-						Heartbeat: sub.consumeOpts.Heartbeat,
+						Expires:       sub.consumeOpts.Expires,
+						Batch:         batchSize,
+						MaxBytes:      sub.consumeOpts.MaxBytes,
+						Heartbeat:     sub.consumeOpts.Heartbeat,
+						MinPending:    sub.consumeOpts.MinPending,
+						MinAckPending: sub.consumeOpts.MinAckPending,
+						Group:         sub.consumeOpts.Group,
+						PinID:         p.getPinID(),
 					}
 					if sub.hbMonitor != nil {
 						sub.hbMonitor.Reset(2 * sub.consumeOpts.Heartbeat)
@@ -366,7 +412,7 @@ func (s *pullSubscription) resetPendingMsgs() {
 // lock should be held before calling this method
 func (s *pullSubscription) decrementPendingMsgs(msg *nats.Msg) {
 	s.pending.msgCount--
-	if s.consumeOpts.MaxBytes != 0 {
+	if s.consumeOpts.MaxBytes != 0 && !s.consumeOpts.LimitSize {
 		s.pending.byteCount -= msg.Size()
 	}
 }
@@ -381,28 +427,41 @@ func (s *pullSubscription) incrementDeliveredMsgs() {
 // the buffer to trigger a new pull request.
 // lock should be held before calling this method
 func (s *pullSubscription) checkPending() {
+	// check if we went below any threshold
+	// we don't want to track bytes threshold if either it's not set or we used
+	// PullMaxMessagesWithBytesLimit
 	if (s.pending.msgCount < s.consumeOpts.ThresholdMessages ||
-		(s.pending.byteCount < s.consumeOpts.ThresholdBytes && s.consumeOpts.MaxBytes != 0)) &&
-		atomic.LoadUint32(&s.fetchInProgress) == 0 {
+		(s.pending.byteCount < s.consumeOpts.ThresholdBytes && s.consumeOpts.MaxBytes != 0 && !s.consumeOpts.LimitSize)) &&
+		s.fetchInProgress.Load() == 0 {
 
 		var batchSize, maxBytes int
-		if s.consumeOpts.MaxBytes == 0 {
-			// if using messages, calculate appropriate batch size
-			batchSize = s.consumeOpts.MaxMessages - s.pending.msgCount
-		} else {
-			// if using bytes, use the max value
-			batchSize = s.consumeOpts.MaxMessages
-			maxBytes = s.consumeOpts.MaxBytes - s.pending.byteCount
+		batchSize = s.consumeOpts.MaxMessages - s.pending.msgCount
+		if s.consumeOpts.MaxBytes != 0 {
+			if s.consumeOpts.LimitSize {
+				maxBytes = s.consumeOpts.MaxBytes
+			} else {
+				maxBytes = s.consumeOpts.MaxBytes - s.pending.byteCount
+				// when working with max bytes only, always ask for full batch
+				batchSize = s.consumeOpts.MaxMessages
+			}
 		}
 		if s.consumeOpts.StopAfter > 0 {
 			batchSize = min(batchSize, s.consumeOpts.StopAfter-s.delivered-s.pending.msgCount)
 		}
 		if batchSize > 0 {
+			pinID := ""
+			if s.consumer != nil {
+				pinID = s.consumer.getPinID()
+			}
 			s.fetchNext <- &pullRequest{
-				Expires:   s.consumeOpts.Expires,
-				Batch:     batchSize,
-				MaxBytes:  maxBytes,
-				Heartbeat: s.consumeOpts.Heartbeat,
+				Expires:       s.consumeOpts.Expires,
+				Batch:         batchSize,
+				MaxBytes:      maxBytes,
+				Heartbeat:     s.consumeOpts.Heartbeat,
+				PinID:         pinID,
+				Group:         s.consumeOpts.Group,
+				MinPending:    s.consumeOpts.MinPending,
+				MinAckPending: s.consumeOpts.MinAckPending,
 			}
 
 			s.pending.msgCount = s.consumeOpts.MaxMessages
@@ -422,49 +481,54 @@ func (p *pullConsumer) Messages(opts ...PullMessagesOpt) (MessagesContext, error
 		return nil, fmt.Errorf("%w: %s", ErrInvalidOption, err)
 	}
 
+	if len(p.info.Config.PriorityGroups) != 0 {
+		if consumeOpts.Group == "" {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidOption, "priority group is required for priority consumer")
+		}
+
+		if !slices.Contains(p.info.Config.PriorityGroups, consumeOpts.Group) {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidOption, "invalid priority group")
+		}
+	} else if consumeOpts.Group != "" {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidOption, "priority group is not supported for this consumer")
+	}
+
 	p.Lock()
-	subject := apiSubj(p.jetStream.apiPrefix, fmt.Sprintf(apiRequestNextT, p.stream, p.name))
+	subject := p.js.apiSubject(fmt.Sprintf(apiRequestNextT, p.stream, p.name))
 
 	msgs := make(chan *nats.Msg, consumeOpts.MaxMessages)
 
-	// for single consume, use empty string as id
-	// this is useful for ordered consumer, where only a single subscription is valid
-	var consumeID string
-	if len(p.subscriptions) > 0 {
-		consumeID = nuid.Next()
-	}
+	consumeID := nuid.Next()
 	sub := &pullSubscription{
 		id:          consumeID,
 		consumer:    p,
 		done:        make(chan struct{}, 1),
 		msgs:        msgs,
-		errs:        make(chan error, 1),
+		errs:        make(chan error, 10),
 		fetchNext:   make(chan *pullRequest, 1),
 		consumeOpts: consumeOpts,
 	}
-	sub.connStatusChanged = p.jetStream.conn.StatusChanged(nats.CONNECTED, nats.RECONNECTING)
-	inbox := p.jetStream.conn.NewInbox()
-	sub.subscription, err = p.jetStream.conn.ChanSubscribe(inbox, sub.msgs)
+	sub.connStatusChanged = p.js.conn.StatusChanged(nats.CONNECTED, nats.RECONNECTING)
+	inbox := p.js.conn.NewInbox()
+	sub.subscription, err = p.js.conn.ChanSubscribe(inbox, sub.msgs)
 	if err != nil {
 		p.Unlock()
 		return nil, err
 	}
 	sub.subscription.SetClosedHandler(func(sid string) func(string) {
 		return func(subject string) {
-			p.Lock()
-			defer p.Unlock()
-			if atomic.LoadUint32(&sub.draining) != 1 {
+			if sub.draining.Load() != 1 {
 				// if we're not draining, subscription can be closed as soon
 				// as closed handler is called
 				// otherwise, we need to wait until all messages are drained
 				// in Next
-				delete(p.subscriptions, sid)
+				p.subs.Delete(sid)
 			}
 			close(msgs)
 		}
 	}(sub.id))
 
-	p.subscriptions[sub.id] = sub
+	p.subs.Store(sub.id, sub)
 	p.Unlock()
 
 	go sub.pullMessages(subject)
@@ -502,12 +566,12 @@ var (
 func (s *pullSubscription) Next() (Msg, error) {
 	s.Lock()
 	defer s.Unlock()
-	drainMode := atomic.LoadUint32(&s.draining) == 1
-	closed := atomic.LoadUint32(&s.closed) == 1
+	drainMode := s.draining.Load() == 1
+	closed := s.closed.Load() == 1
 	if closed && !drainMode {
 		return nil, ErrMsgIteratorClosed
 	}
-	hbMonitor := s.scheduleHeartbeatCheck(2 * s.consumeOpts.Heartbeat)
+	hbMonitor := s.scheduleHeartbeatCheck(s.consumeOpts.Heartbeat)
 	defer func() {
 		if hbMonitor != nil {
 			hbMonitor.Stop()
@@ -526,8 +590,8 @@ func (s *pullSubscription) Next() (Msg, error) {
 		case msg, ok := <-s.msgs:
 			if !ok {
 				// if msgs channel is closed, it means that subscription was either drained or stopped
-				delete(s.consumer.subscriptions, s.id)
-				atomic.CompareAndSwapUint32(&s.draining, 1, 0)
+				s.consumer.subs.Delete(s.id)
+				s.draining.CompareAndSwap(1, 0)
 				return nil, ErrMsgIteratorClosed
 			}
 			if hbMonitor != nil {
@@ -545,9 +609,12 @@ func (s *pullSubscription) Next() (Msg, error) {
 				}
 				continue
 			}
+			if pinId := msg.Header.Get("Nats-Pin-Id"); pinId != "" {
+				s.consumer.setPinID(pinId)
+			}
 			s.decrementPendingMsgs(msg)
 			s.incrementDeliveredMsgs()
-			return s.consumer.jetStream.toJSMsg(msg), nil
+			return s.consumer.js.toJSMsg(msg), nil
 		case err := <-s.errs:
 			if errors.Is(err, ErrNoHeartbeat) {
 				s.pending.msgCount = 0
@@ -584,9 +651,14 @@ func (s *pullSubscription) Next() (Msg, error) {
 }
 
 func (s *pullSubscription) handleStatusMsg(msg *nats.Msg, msgErr error) error {
-	if !errors.Is(msgErr, nats.ErrTimeout) && !errors.Is(msgErr, ErrMaxBytesExceeded) {
+	if !errors.Is(msgErr, nats.ErrTimeout) && !errors.Is(msgErr, ErrMaxBytesExceeded) && !errors.Is(msgErr, ErrBatchCompleted) {
 		if errors.Is(msgErr, ErrConsumerDeleted) || errors.Is(msgErr, ErrBadRequest) {
 			return msgErr
+		}
+		if errors.Is(msgErr, ErrPinIDMismatch) {
+			s.consumer.setPinID("")
+			s.pending.msgCount = 0
+			s.pending.byteCount = 0
 		}
 		if s.consumeOpts.ErrHandler != nil {
 			s.consumeOpts.ErrHandler(s, msgErr)
@@ -605,7 +677,7 @@ func (s *pullSubscription) handleStatusMsg(msg *nats.Msg, msgErr error) error {
 	if s.pending.msgCount < 0 {
 		s.pending.msgCount = 0
 	}
-	if s.consumeOpts.MaxBytes > 0 {
+	if s.consumeOpts.MaxBytes > 0 && !s.consumeOpts.LimitSize {
 		s.pending.byteCount -= bytesLeft
 		if s.pending.byteCount < 0 {
 			s.pending.byteCount = 0
@@ -630,7 +702,7 @@ func (hb *hbMonitor) Reset(dur time.Duration) {
 // Next after calling Stop will return ErrMsgIteratorClosed error.
 // All messages that are already in the buffer are discarded.
 func (s *pullSubscription) Stop() {
-	if !atomic.CompareAndSwapUint32(&s.closed, 0, 1) {
+	if !s.closed.CompareAndSwap(0, 1) {
 		return
 	}
 	close(s.done)
@@ -648,10 +720,10 @@ func (s *pullSubscription) Stop() {
 // subsequent calls to Next. After the buffer is drained, Next will
 // return ErrMsgIteratorClosed error.
 func (s *pullSubscription) Drain() {
-	if !atomic.CompareAndSwapUint32(&s.closed, 0, 1) {
+	if !s.closed.CompareAndSwap(0, 1) {
 		return
 	}
-	atomic.StoreUint32(&s.draining, 1)
+	s.draining.Store(1)
 	close(s.done)
 	if s.consumeOpts.stopAfterMsgsLeft != nil {
 		if s.delivered >= s.consumeOpts.StopAfter {
@@ -660,6 +732,24 @@ func (s *pullSubscription) Drain() {
 			s.consumeOpts.stopAfterMsgsLeft <- s.consumeOpts.StopAfter - s.delivered
 		}
 	}
+}
+
+// Closed returns a channel that is closed when consuming is
+// fully stopped/drained. When the channel is closed, no more messages
+// will be received and processing is complete.
+func (s *pullSubscription) Closed() <-chan struct{} {
+	s.Lock()
+	defer s.Unlock()
+	closedCh := s.closedCh
+	if closedCh == nil {
+		closedCh = make(chan struct{})
+		s.closedCh = closedCh
+	}
+	if !s.subscription.IsValid() {
+		close(s.closedCh)
+		s.closedCh = nil
+	}
+	return closedCh
 }
 
 // Fetch sends a single request to retrieve given number of messages.
@@ -694,7 +784,7 @@ func (p *pullConsumer) Fetch(batch int, opts ...FetchOpt) (MessageBatch, error) 
 // FetchBytes is used to retrieve up to a provided bytes from the stream.
 func (p *pullConsumer) FetchBytes(maxBytes int, opts ...FetchOpt) (MessageBatch, error) {
 	req := &pullRequest{
-		Batch:     1000000,
+		Batch:     defaultBatchMaxBytesOnly,
 		MaxBytes:  maxBytes,
 		Expires:   DefaultExpires,
 		Heartbeat: unset,
@@ -737,20 +827,21 @@ func (p *pullConsumer) fetch(req *pullRequest) (MessageBatch, error) {
 		msgs: make(chan Msg, req.Batch),
 	}
 	msgs := make(chan *nats.Msg, 2*req.Batch)
-	subject := apiSubj(p.jetStream.apiPrefix, fmt.Sprintf(apiRequestNextT, p.stream, p.name))
+	subject := p.js.apiSubject(fmt.Sprintf(apiRequestNextT, p.stream, p.name))
 
 	sub := &pullSubscription{
 		consumer: p,
 		done:     make(chan struct{}, 1),
 		msgs:     msgs,
-		errs:     make(chan error, 1),
+		errs:     make(chan error, 10),
 	}
-	inbox := p.jetStream.conn.NewInbox()
+	inbox := p.js.conn.NewInbox()
 	var err error
-	sub.subscription, err = p.jetStream.conn.ChanSubscribe(inbox, sub.msgs)
+	sub.subscription, err = p.js.conn.ChanSubscribe(inbox, sub.msgs)
 	if err != nil {
 		return nil, err
 	}
+	req.PinID = p.getPinID()
 	if err := sub.pull(req, subject); err != nil {
 		return nil, err
 	}
@@ -763,7 +854,7 @@ func (p *pullConsumer) fetch(req *pullRequest) (MessageBatch, error) {
 		for {
 			select {
 			case msg := <-msgs:
-				p.Lock()
+				res.Lock()
 				if hbTimer != nil {
 					hbTimer.Reset(2 * req.Heartbeat)
 				}
@@ -773,18 +864,27 @@ func (p *pullConsumer) fetch(req *pullRequest) (MessageBatch, error) {
 					if errNotTimeoutOrNoMsgs && !errors.Is(err, ErrMaxBytesExceeded) {
 						res.err = err
 					}
+					if errors.Is(err, ErrPinIDMismatch) {
+						p.setPinID("")
+					}
 					res.done = true
-					p.Unlock()
+					res.Unlock()
 					return
 				}
 				if !userMsg {
-					p.Unlock()
+					res.Unlock()
 					continue
 				}
-				res.msgs <- p.jetStream.toJSMsg(msg)
+				if pinId := msg.Header.Get("Nats-Pin-Id"); pinId != "" {
+					p.setPinID(pinId)
+				}
+				res.msgs <- p.js.toJSMsg(msg)
 				meta, err := msg.Metadata()
 				if err != nil {
 					res.err = fmt.Errorf("parsing message metadata: %s", err)
+					res.done = true
+					res.Unlock()
+					return
 				}
 				res.sseq = meta.Sequence.Stream
 				receivedMsgs++
@@ -793,16 +893,20 @@ func (p *pullConsumer) fetch(req *pullRequest) (MessageBatch, error) {
 				}
 				if receivedMsgs == req.Batch || (req.MaxBytes != 0 && receivedBytes >= req.MaxBytes) {
 					res.done = true
-					p.Unlock()
+					res.Unlock()
 					return
 				}
-				p.Unlock()
+				res.Unlock()
 			case err := <-sub.errs:
+				res.Lock()
 				res.err = err
 				res.done = true
+				res.Unlock()
 				return
 			case <-time.After(req.Expires + 1*time.Second):
+				res.Lock()
 				res.done = true
+				res.Unlock()
 				return
 			}
 		}
@@ -811,11 +915,21 @@ func (p *pullConsumer) fetch(req *pullRequest) (MessageBatch, error) {
 }
 
 func (fr *fetchResult) Messages() <-chan Msg {
+	fr.Lock()
+	defer fr.Unlock()
 	return fr.msgs
 }
 
 func (fr *fetchResult) Error() error {
+	fr.Lock()
+	defer fr.Unlock()
 	return fr.err
+}
+
+func (fr *fetchResult) closed() bool {
+	fr.Lock()
+	defer fr.Unlock()
+	return fr.done
 }
 
 // Next is used to retrieve the next message from the stream. This
@@ -840,7 +954,7 @@ func (s *pullSubscription) pullMessages(subject string) {
 	for {
 		select {
 		case req := <-s.fetchNext:
-			atomic.StoreUint32(&s.fetchInProgress, 1)
+			s.fetchInProgress.Store(1)
 
 			if err := s.pull(req, subject); err != nil {
 				if errors.Is(err, ErrMsgIteratorClosed) {
@@ -849,7 +963,7 @@ func (s *pullSubscription) pullMessages(subject string) {
 				}
 				s.errs <- err
 			}
-			atomic.StoreUint32(&s.fetchInProgress, 0)
+			s.fetchInProgress.Store(0)
 		case <-s.done:
 			s.cleanup()
 			return
@@ -880,13 +994,13 @@ func (s *pullSubscription) cleanup() {
 	if s.hbMonitor != nil {
 		s.hbMonitor.Stop()
 	}
-	drainMode := atomic.LoadUint32(&s.draining) == 1
+	drainMode := s.draining.Load() == 1
 	if drainMode {
 		s.subscription.Drain()
 	} else {
 		s.subscription.Unsubscribe()
 	}
-	atomic.StoreUint32(&s.closed, 1)
+	s.closed.Store(1)
 }
 
 // pull sends a pull request to the server and waits for messages using a subscription from [pullSubscription].
@@ -894,7 +1008,7 @@ func (s *pullSubscription) cleanup() {
 func (s *pullSubscription) pull(req *pullRequest, subject string) error {
 	s.consumer.Lock()
 	defer s.consumer.Unlock()
-	if atomic.LoadUint32(&s.closed) == 1 {
+	if s.closed.Load() == 1 {
 		return ErrMsgIteratorClosed
 	}
 	if req.Batch < 1 {
@@ -904,9 +1018,9 @@ func (s *pullSubscription) pull(req *pullRequest, subject string) error {
 	if err != nil {
 		return err
 	}
-
 	reply := s.subscription.Subject
-	if err := s.consumer.jetStream.conn.PublishRequest(subject, reply, reqJSON); err != nil {
+
+	if err := s.consumer.js.conn.PublishRequest(subject, reply, reqJSON); err != nil {
 		return err
 	}
 	return nil
@@ -953,51 +1067,61 @@ func parseMessagesOpts(ordered bool, opts ...PullMessagesOpt) (*consumeOpts, err
 }
 
 func (consumeOpts *consumeOpts) setDefaults(ordered bool) error {
-	if consumeOpts.MaxBytes != unset && consumeOpts.MaxMessages != unset {
-		return fmt.Errorf("only one of MaxMessages and MaxBytes can be specified")
+	// we cannot use both max messages and max bytes unless we're using max bytes as fetch size limiter
+	if consumeOpts.MaxBytes != unset && consumeOpts.MaxMessages != unset && !consumeOpts.LimitSize {
+		return errors.New("only one of MaxMessages and MaxBytes can be specified")
 	}
-	if consumeOpts.MaxBytes != unset {
-		// when max_bytes is used, set batch size to a very large number
-		consumeOpts.MaxMessages = 1000000
-	} else if consumeOpts.MaxMessages != unset {
+	if consumeOpts.MaxBytes != unset && !consumeOpts.LimitSize {
+		// we used PullMaxBytes setting, set MaxMessages to a high value
+		consumeOpts.MaxMessages = defaultBatchMaxBytesOnly
+	} else if consumeOpts.MaxMessages == unset {
+		// otherwise, if max messages is not set, set it to default value
+		consumeOpts.MaxMessages = DefaultMaxMessages
+	}
+	// if user did not set max bytes, set it to 0
+	if consumeOpts.MaxBytes == unset {
 		consumeOpts.MaxBytes = 0
-	} else {
-		if consumeOpts.MaxBytes == unset {
-			consumeOpts.MaxBytes = 0
-		}
-		if consumeOpts.MaxMessages == unset {
-			consumeOpts.MaxMessages = DefaultMaxMessages
-		}
 	}
 
 	if consumeOpts.ThresholdMessages == 0 {
+		// half of the max messages, rounded up
 		consumeOpts.ThresholdMessages = int(math.Ceil(float64(consumeOpts.MaxMessages) / 2))
 	}
 	if consumeOpts.ThresholdBytes == 0 {
+		// half of the max bytes, rounded up
 		consumeOpts.ThresholdBytes = int(math.Ceil(float64(consumeOpts.MaxBytes) / 2))
 	}
+
+	// set default heartbeats
 	if consumeOpts.Heartbeat == unset {
+		// by default, use 50% of expiry time
+		consumeOpts.Heartbeat = consumeOpts.Expires / 2
 		if ordered {
-			consumeOpts.Heartbeat = 5 * time.Second
+			// for ordered consumers, the default heartbeat is 5 seconds
 			if consumeOpts.Expires < 10*time.Second {
 				consumeOpts.Heartbeat = consumeOpts.Expires / 2
+			} else {
+				consumeOpts.Heartbeat = 5 * time.Second
 			}
-		} else {
-			consumeOpts.Heartbeat = consumeOpts.Expires / 2
-			if consumeOpts.Heartbeat > 30*time.Second {
-				consumeOpts.Heartbeat = 30 * time.Second
-			}
+		} else if consumeOpts.Heartbeat > 30*time.Second {
+			// cap the heartbeat to 30 seconds
+			consumeOpts.Heartbeat = 30 * time.Second
 		}
 	}
 	if consumeOpts.Heartbeat > consumeOpts.Expires/2 {
-		return fmt.Errorf("the value of Heartbeat must be less than 50%% of expiry")
+		return errors.New("the value of Heartbeat must be less than 50%% of expiry")
 	}
 	return nil
 }
 
-func (c *pullConsumer) getSubscription(id string) (*pullSubscription, bool) {
+func (c *pullConsumer) getPinID() string {
 	c.Lock()
 	defer c.Unlock()
-	sub, ok := c.subscriptions[id]
-	return sub, ok
+	return c.pinID
+}
+
+func (c *pullConsumer) setPinID(pinID string) {
+	c.Lock()
+	defer c.Unlock()
+	c.pinID = pinID
 }
