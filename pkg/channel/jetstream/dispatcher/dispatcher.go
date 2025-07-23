@@ -25,13 +25,13 @@ import (
 	"sync"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	ce "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/google/uuid"
-	"go.opencensus.io/trace"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -43,7 +43,6 @@ import (
 	eventingchannels "knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/eventingtls"
 	"knative.dev/eventing/pkg/kncloudevents"
-	"knative.dev/pkg/kmeta"
 	"knative.dev/pkg/logging"
 )
 
@@ -55,7 +54,6 @@ import (
 type Dispatcher struct {
 	receiver   *eventingchannels.EventReceiver
 	dispatcher *kncloudevents.Dispatcher
-	reporter   eventingchannels.StatsReporter
 
 	js nats.JetStreamContext
 
@@ -74,12 +72,9 @@ type Dispatcher struct {
 func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, error) {
 	logger := logging.FromContext(ctx)
 
-	reporter := eventingchannels.NewStatsReporter(args.ContainerName, kmeta.ChildName(args.PodName, uuid.New().String()))
-
 	oidcTokenProvider := auth.NewOIDCTokenProvider(ctx)
 	d := &Dispatcher{
 		dispatcher: kncloudevents.NewDispatcher(eventingtls.ClientConfig{}, oidcTokenProvider),
-		reporter:   reporter,
 
 		js: args.JetStream,
 
@@ -94,7 +89,6 @@ func NewDispatcher(ctx context.Context, args NatsDispatcherArgs) (*Dispatcher, e
 	receiverFunc, err := eventingchannels.NewEventReceiver(
 		d.messageReceiver,
 		logger.Desugar(),
-		reporter,
 		eventingchannels.ResolveChannelFromHostHeader(d.getChannelReferenceFromHost),
 	)
 	if err != nil {
@@ -274,7 +268,6 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 		pushConsumer := &PushConsumer{
 			sub:              sub,
 			dispatcher:       d.dispatcher,
-			reporter:         d.reporter,
 			channelNamespace: config.Namespace,
 			logger:           logger,
 			ctx:              ctx,
@@ -287,6 +280,22 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 			return SubscriberStatusTypeError, err
 		}
 		pushConsumer.jsSub = jsSub
+
+		mp := otel.GetMeterProvider()
+		tp := otel.GetTracerProvider()
+		pushConsumer.tracer = tp.Tracer(scopeName)
+
+		meter := mp.Meter(scopeName)
+		pushConsumer.dispatchDuration, err = meter.Float64Histogram(
+			"kn.eventing.dispatch.duration",
+			metric.WithDescription("The duration to dispatch the event"),
+			metric.WithUnit("s"),
+			metric.WithExplicitBucketBoundaries(latencyBounds...),
+		)
+		if err != nil {
+			logger.Errorw("failed to set up dispatch duration metric", zap.Error(err))
+			return SubscriberStatusTypeError, err
+		}
 		consumer = pushConsumer
 	} else {
 		natsSub, err := d.js.PullSubscribe(".>", info.Config.Durable, nats.Bind(info.Stream, info.Name), nats.ManualAck())
@@ -294,7 +303,7 @@ func (d *Dispatcher) subscribe(ctx context.Context, config ChannelConfig, sub Su
 			logger.Errorw("failed to pull subscribe to jetstream", zap.Error(err))
 			return SubscriberStatusTypeError, err
 		}
-		consumer, err = NewPullConsumer(ctx, natsSub, sub, d.dispatcher, d.reporter, &config)
+		consumer, err = NewPullConsumer(ctx, natsSub, sub, d.dispatcher, &config)
 		if err != nil {
 			logger.Errorw("failed to create pull consumer", zap.Error(err))
 			return SubscriberStatusTypeError, err
@@ -383,7 +392,7 @@ func (d *Dispatcher) messageReceiver(ctx context.Context, ch eventingchannels.Ch
 	eventID := commonce.IDExtractorTransformer("")
 
 	transformers := append([]binding.Transformer{&eventID},
-		tracing.SerializeTraceTransformers(trace.FromContext(ctx).SpanContext())...,
+		tracing.SerializeTraceTransformers(ctx)...,
 	)
 
 	ctx = ce.WithEncodingStructured(ctx)
