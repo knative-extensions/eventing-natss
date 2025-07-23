@@ -21,32 +21,39 @@ import (
 	"errors"
 	"sync"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"k8s.io/apimachinery/pkg/types"
 	"knative.dev/eventing/pkg/kncloudevents"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/nats-io/nats.go"
-	"go.opencensus.io/trace"
 	"go.uber.org/zap"
 	"knative.dev/eventing-natss/pkg/tracing"
-	eventingchannels "knative.dev/eventing/pkg/channel"
-	"knative.dev/eventing/pkg/channel/fanout"
+	"knative.dev/eventing/pkg/observability"
+	eventingtracing "knative.dev/eventing/pkg/tracing"
 	"knative.dev/pkg/logging"
 )
 
 const (
 	jsmChannel = "jsm-channel"
+	scopeName  = "knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher"
 )
 
 var (
 	ErrConsumerClosed = errors.New("dispatcher consumer closed")
+	latencyBounds     = []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}
 )
 
 type PushConsumer struct {
 	sub              Subscription
 	dispatcher       *kncloudevents.Dispatcher
-	reporter         eventingchannels.StatsReporter
 	channelNamespace string
+	channelName      string
+	dispatchDuration metric.Float64Histogram
+	tracer           trace.Tracer
 
 	jsSub            *nats.Subscription
 	natsConsumerInfo *nats.ConsumerInfo
@@ -116,16 +123,30 @@ func (c *PushConsumer) doHandle(ctx context.Context, msg *nats.Msg) {
 	event := tracing.ConvertNatsMsgToEvent(c.logger.Desugar(), msg)
 	additionalHeaders := tracing.ConvertEventToHttpHeader(event)
 
-	sc, ok := tracing.ParseSpanContext(event)
-	var span *trace.Span
-	if !ok {
-		logger.Warn("Cannot parse the spancontext, creating a new span")
-		ctx, span = trace.StartSpan(ctx, jsmChannel+"-"+string(c.sub.UID))
-	} else {
-		ctx, span = trace.StartSpanWithRemoteParent(ctx, jsmChannel+"-"+string(c.sub.UID), sc)
-	}
+	ctx = observability.WithChannelLabels(ctx, types.NamespacedName{Name: c.channelName, Namespace: c.channelNamespace})
+	ctx = observability.WithMessagingLabels(
+		ctx,
+		eventingtracing.SubscriptionMessagingDestination(
+			types.NamespacedName{
+				Name:      c.sub.Name,
+				Namespace: c.sub.Namespace,
+			},
+		),
+		"send",
+	)
+	ctx = observability.WithMinimalEventLabels(ctx, event)
 
-	defer span.End()
+	ctx = tracing.ParseSpanContext(ctx, event)
+	ctx, span := c.tracer.Start(ctx, jsmChannel+"-"+string(c.sub.UID))
+	defer func() {
+		if span.IsRecording() {
+			// add full event labels here so that they only populate the span, and not any metrics
+			ctx = observability.WithEventLabels(ctx, event)
+			labeler, _ := otelhttp.LabelerFromContext(ctx)
+			span.SetAttributes(labeler.Get()...)
+		}
+		span.End()
+	}()
 
 	te := TypeExtractorTransformer("")
 
@@ -143,10 +164,13 @@ func (c *PushConsumer) doHandle(ctx context.Context, msg *nats.Msg) {
 		WithHeader(additionalHeaders),
 	)
 
-	_ = fanout.ParseDispatchResultAndReportMetrics(fanout.NewDispatchResult(err, dispatchExecutionInfo), c.reporter, eventingchannels.ReportArgs{
-		Ns:        c.channelNamespace,
-		EventType: string(te),
-	})
+	labeler, _ := otelhttp.LabelerFromContext(ctx)
+
+	c.dispatchDuration.Record(
+		ctx,
+		dispatchExecutionInfo.Duration.Seconds(),
+		metric.WithAttributes(labeler.Get()...),
+	)
 
 	if err != nil {
 		logger.Errorw("failed to forward message to downstream subscriber",

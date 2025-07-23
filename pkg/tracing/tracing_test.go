@@ -5,7 +5,10 @@ import (
 	"testing"
 
 	"github.com/cloudevents/sdk-go/v2/binding"
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/nats-io/nats.go"
@@ -71,10 +74,12 @@ func TestStartTraceFromMessage(t *testing.T) {
 	msg := cloudevents.NewEvent()
 	msg.SetExtension(traceParentHeader, tp)
 	msg.SetExtension(traceStateHeader, ts)
-	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), &msg, "span-name")
-	tc := trace.FromContext(ctx)
-	if traceId != tc.SpanContext().TraceID.String() {
-		t.Fatalf("TraceId is incorrect, expected: %v, actual: %v", traceId, tc.SpanContext().TraceID)
+	exporter := tracetest.NewInMemoryExporter()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), &msg, tracerProvider.Tracer(""), "span-name")
+	sc := trace.SpanContextFromContext(ctx)
+	if traceId != sc.TraceID().String() {
+		t.Fatalf("TraceId is incorrect, expected: %v, actual: %v", traceId, sc.TraceID())
 	}
 	if span == nil {
 		t.Fatalf("Span must be non-nil")
@@ -82,9 +87,11 @@ func TestStartTraceFromMessage(t *testing.T) {
 }
 
 func TestStartTraceFromMessageIsNil(t *testing.T) {
-	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), nil, "span-name")
-	tc := trace.FromContext(ctx)
-	if traceId == tc.SpanContext().TraceID.String() {
+	exporter := tracetest.NewInMemoryExporter()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), nil, tracerProvider.Tracer(""), "span-name")
+	sc := trace.SpanContextFromContext(ctx)
+	if traceId == sc.TraceID().String() {
 		t.Fatalf("TraceId must be new")
 	}
 	if span == nil {
@@ -94,9 +101,11 @@ func TestStartTraceFromMessageIsNil(t *testing.T) {
 
 func TestStartTraceFromMessageTraceParentIsNil(t *testing.T) {
 	msg := cloudevents.NewEvent()
-	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), &msg, "span-name")
-	tc := trace.FromContext(ctx)
-	if traceId == tc.SpanContext().TraceID.String() {
+	exporter := tracetest.NewInMemoryExporter()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), &msg, tracerProvider.Tracer(""), "span-name")
+	sc := trace.SpanContextFromContext(ctx)
+	if traceId == sc.TraceID().String() {
 		t.Fatalf("TraceId must be new")
 	}
 	if span == nil {
@@ -107,10 +116,12 @@ func TestStartTraceFromMessageTraceParentIsNil(t *testing.T) {
 func TestStartTraceFromMessageTraceStateIsNil(t *testing.T) {
 	msg := cloudevents.NewEvent()
 	msg.SetExtension(traceParentHeader, tp)
-	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), &msg, "span-name")
-	tc := trace.FromContext(ctx)
-	if traceId != tc.SpanContext().TraceID.String() {
-		t.Fatalf("TraceId is incorrect, expected: %v, actual: %v", traceId, tc.SpanContext().TraceID)
+	exporter := tracetest.NewInMemoryExporter()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	ctx, span := StartTraceFromMessage(zap.NewNop(), context.Background(), &msg, tracerProvider.Tracer(""), "span-name")
+	sc := trace.SpanContextFromContext(ctx)
+	if traceId != sc.TraceID().String() {
+		t.Fatalf("TraceId is incorrect, expected: %v, actual: %v", traceId, sc.TraceID())
 	}
 	if span == nil {
 		t.Fatalf("Span must be non-nil")
@@ -119,10 +130,11 @@ func TestStartTraceFromMessageTraceStateIsNil(t *testing.T) {
 
 func TestSerializeTraceTransformers(t *testing.T) {
 	msg := cloudevents.NewEvent()
-	msg.SetExtension(traceParentHeader, tp)
-	msg.SetExtension(traceStateHeader, ts)
-	sc, _ := format.SpanContextFromHeaders(tp, ts)
-	transformers := SerializeTraceTransformers(sc)
+	headerCarrier := propagation.HeaderCarrier{}
+	headerCarrier.Set(traceParentHeader, tp)
+	headerCarrier.Set(traceStateHeader, ts)
+	ctx := format.Extract(context.Background(), headerCarrier)
+	transformers := SerializeTraceTransformers(ctx)
 	message := binding.ToMessage(&msg)
 	event, _ := binding.ToEvent(context.Background(), message, transformers...)
 	if tp != event.Extensions()[traceParentHeader] {

@@ -13,8 +13,8 @@ import (
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/binding/transformer"
 	"github.com/cloudevents/sdk-go/v2/event"
-	"go.opencensus.io/plugin/ochttp/propagation/tracecontext"
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -24,14 +24,15 @@ const (
 )
 
 var (
-	format = tracecontext.HTTPFormat{}
+	format = propagation.TraceContext{}
 )
 
-func SerializeTraceTransformers(spanContext trace.SpanContext) []binding.Transformer {
-	tp, ts := format.SpanContextToHeaders(spanContext)
+func SerializeTraceTransformers(ctx context.Context) []binding.Transformer {
+	headerCarrier := propagation.HeaderCarrier{}
+	format.Inject(ctx, headerCarrier)
 	return []binding.Transformer{
-		keyValTransformer(traceParentHeader, tp),
-		keyValTransformer(traceStateHeader, ts),
+		keyValTransformer(traceParentHeader, headerCarrier.Get(traceParentHeader)),
+		keyValTransformer(traceStateHeader, headerCarrier.Get(traceStateHeader)),
 	}
 }
 
@@ -41,27 +42,27 @@ func keyValTransformer(key string, value string) binding.TransformerFunc {
 	})
 }
 
-func StartTraceFromMessage(logger *zap.Logger, inCtx context.Context, message *event.Event, spanName string) (context.Context, *trace.Span) {
-	sc, ok := ParseSpanContext(message)
-	if !ok {
-		logger.Warn("Cannot parse the spancontext, creating a new span")
-		return trace.StartSpan(inCtx, spanName)
-	}
-
-	return trace.StartSpanWithRemoteParent(inCtx, spanName, sc)
+func StartTraceFromMessage(logger *zap.Logger, inCtx context.Context, message *event.Event, tracer trace.Tracer, spanName string) (context.Context, trace.Span) {
+	ctx := ParseSpanContext(inCtx, message)
+	return tracer.Start(ctx, spanName)
 }
 
-func ParseSpanContext(message *event.Event) (sc trace.SpanContext, ok bool) {
+func ParseSpanContext(ctx context.Context, message *event.Event) context.Context {
 	if message == nil {
-		return trace.SpanContext{}, false
+		return ctx
 	}
 	tp, ok := message.Extensions()[traceParentHeader].(string)
 	if !ok {
-		return trace.SpanContext{}, false
+		return ctx
 	}
 	ts, _ := message.Extensions()[traceStateHeader].(string)
 
-	return format.SpanContextFromHeaders(tp, ts)
+	headerCarrier := propagation.HeaderCarrier{}
+
+	headerCarrier.Set(traceParentHeader, tp)
+	headerCarrier.Set(traceStateHeader, ts)
+
+	return format.Extract(ctx, headerCarrier)
 }
 
 func ConvertEventToHttpHeader(message *event.Event) http.Header {
