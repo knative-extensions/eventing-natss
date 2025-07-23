@@ -49,6 +49,13 @@ type (
 		// returned.
 		AccountInfo(ctx context.Context) (*AccountInfo, error)
 
+		// Conn returns the underlying NATS connection.
+		Conn() *nats.Conn
+
+		// Options returns read-only JetStreamOptions used
+		// when making requests to JetStream.
+		Options() JetStreamOptions
+
 		StreamConsumerManager
 		StreamManager
 		Publisher
@@ -101,6 +108,19 @@ type (
 		// outstanding asynchronously published messages are acknowledged by the
 		// server.
 		PublishAsyncComplete() <-chan struct{}
+
+		// CleanupPublisher will cleanup the publishing side of JetStreamContext.
+		//
+		// This will unsubscribe from the internal reply subject if needed.
+		// All pending async publishes will fail with ErrJetStreamContextClosed.
+		//
+		// If an error handler was provided, it will be called for each pending async
+		// publish and PublishAsyncComplete will be closed.
+		//
+		// After completing JetStreamContext is still usable - internal subscription
+		// will be recreated on next publish, but the acks from previous publishes will
+		// be lost.
+		CleanupPublisher()
 	}
 
 	// StreamManager provides CRUD API for managing streams. It is available as
@@ -109,7 +129,8 @@ type (
 	// to operate on a stream.
 	StreamManager interface {
 		// CreateStream creates a new stream with given config and returns an
-		// interface to operate on it. If stream with given name already exists,
+		// interface to operate on it. If stream with given name already exists
+		// and its configuration differs from the provided one,
 		// ErrStreamNameAlreadyInUse is returned.
 		CreateStream(ctx context.Context, cfg StreamConfig) (Stream, error)
 
@@ -183,6 +204,12 @@ type (
 		// DeleteConsumer removes a consumer with given name from a stream.
 		// If consumer does not exist, ErrConsumerNotFound is returned.
 		DeleteConsumer(ctx context.Context, stream string, consumer string) error
+
+		// PauseConsumer pauses a consumer until the given time.
+		PauseConsumer(ctx context.Context, stream string, consumer string, pauseUntil time.Time) (*ConsumerPauseResponse, error)
+
+		// ResumeConsumer resumes a paused consumer.
+		ResumeConsumer(ctx context.Context, stream string, consumer string) (*ConsumerPauseResponse, error)
 	}
 
 	// StreamListOpt is a functional option for [StreamManager.ListStreams] and
@@ -234,11 +261,17 @@ type (
 
 	// APIStats reports on API calls to JetStream for this account.
 	APIStats struct {
+		// Level is the API level for this account.
+		Level int `json:"level"`
+
 		// Total is the total number of API calls.
 		Total uint64 `json:"total"`
 
 		// Errors is the total number of API errors.
 		Errors uint64 `json:"errors"`
+
+		// Inflight is the number of API calls currently in flight.
+		Inflight uint64 `json:"inflight,omitempty"`
 	}
 
 	// AccountLimits includes the JetStream limits of the current account.
@@ -260,17 +293,32 @@ type (
 
 	jetStream struct {
 		conn *nats.Conn
-		jsOpts
+		opts JetStreamOptions
 
 		publisher *jetStreamClient
 	}
 
 	// JetStreamOpt is a functional option for [New], [NewWithAPIPrefix] and
 	// [NewWithDomain] methods.
-	JetStreamOpt func(*jsOpts) error
+	JetStreamOpt func(*JetStreamOptions) error
 
-	jsOpts struct {
-		publisherOpts  asyncPublisherOpts
+	// JetStreamOptions are used to configure JetStream.
+	JetStreamOptions struct {
+		// APIPrefix is the prefix used for JetStream API requests.
+		APIPrefix string
+
+		// Domain is the domain name token used when sending JetStream requests.
+		Domain string
+
+		// DefaultTimeout is the default timeout used for JetStream API requests.
+		// This applies when the context passed to JetStream methods does not have
+		// a deadline set.
+		DefaultTimeout time.Duration
+
+		publisherOpts asyncPublisherOpts
+
+		// this is the actual prefix used in the API requests
+		// it is either APIPrefix or a domain specific prefix
 		apiPrefix      string
 		replyPrefix    string
 		replyPrefixLen int
@@ -365,11 +413,12 @@ var subjectRegexp = regexp.MustCompile(`^[^ >]*[>]?$`)
 //   - [WithPublishAsyncMaxPending] - sets the maximum outstanding async publishes
 //     that can be inflight at one time.
 func New(nc *nats.Conn, opts ...JetStreamOpt) (JetStream, error) {
-	jsOpts := jsOpts{
+	jsOpts := JetStreamOptions{
 		apiPrefix: DefaultAPIPrefix,
 		publisherOpts: asyncPublisherOpts{
 			maxpa: defaultAsyncPubAckInflight,
 		},
+		DefaultTimeout: defaultAPITimeout,
 	}
 	setReplyPrefix(nc, &jsOpts)
 	for _, opt := range opts {
@@ -379,7 +428,7 @@ func New(nc *nats.Conn, opts ...JetStreamOpt) (JetStream, error) {
 	}
 	js := &jetStream{
 		conn:      nc,
-		jsOpts:    jsOpts,
+		opts:      jsOpts,
 		publisher: &jetStreamClient{asyncPublisherOpts: jsOpts.publisherOpts},
 	}
 
@@ -391,7 +440,7 @@ const (
 	defaultAsyncPubAckInflight = 4000
 )
 
-func setReplyPrefix(nc *nats.Conn, jsOpts *jsOpts) {
+func setReplyPrefix(nc *nats.Conn, jsOpts *JetStreamOptions) {
 	jsOpts.replyPrefix = nats.InboxPrefix
 	if nc.Opts.InboxPrefix != "" {
 		jsOpts.replyPrefix = nc.Opts.InboxPrefix + "."
@@ -410,10 +459,12 @@ func setReplyPrefix(nc *nats.Conn, jsOpts *jsOpts) {
 //   - [WithPublishAsyncMaxPending] - sets the maximum outstanding async publishes
 //     that can be inflight at one time.
 func NewWithAPIPrefix(nc *nats.Conn, apiPrefix string, opts ...JetStreamOpt) (JetStream, error) {
-	jsOpts := jsOpts{
+	jsOpts := JetStreamOptions{
 		publisherOpts: asyncPublisherOpts{
 			maxpa: defaultAsyncPubAckInflight,
 		},
+		APIPrefix:      apiPrefix,
+		DefaultTimeout: defaultAPITimeout,
 	}
 	setReplyPrefix(nc, &jsOpts)
 	for _, opt := range opts {
@@ -422,14 +473,16 @@ func NewWithAPIPrefix(nc *nats.Conn, apiPrefix string, opts ...JetStreamOpt) (Je
 		}
 	}
 	if apiPrefix == "" {
-		return nil, fmt.Errorf("API prefix cannot be empty")
+		return nil, errors.New("API prefix cannot be empty")
 	}
 	if !strings.HasSuffix(apiPrefix, ".") {
 		jsOpts.apiPrefix = fmt.Sprintf("%s.", apiPrefix)
+	} else {
+		jsOpts.apiPrefix = apiPrefix
 	}
 	js := &jetStream{
 		conn:      nc,
-		jsOpts:    jsOpts,
+		opts:      jsOpts,
 		publisher: &jetStreamClient{asyncPublisherOpts: jsOpts.publisherOpts},
 	}
 	return js, nil
@@ -444,10 +497,12 @@ func NewWithAPIPrefix(nc *nats.Conn, apiPrefix string, opts ...JetStreamOpt) (Je
 //   - [WithPublishAsyncMaxPending] - sets the maximum outstanding async publishes
 //     that can be inflight at one time.
 func NewWithDomain(nc *nats.Conn, domain string, opts ...JetStreamOpt) (JetStream, error) {
-	jsOpts := jsOpts{
+	jsOpts := JetStreamOptions{
 		publisherOpts: asyncPublisherOpts{
 			maxpa: defaultAsyncPubAckInflight,
 		},
+		Domain:         domain,
+		DefaultTimeout: defaultAPITimeout,
 	}
 	setReplyPrefix(nc, &jsOpts)
 	for _, opt := range opts {
@@ -461,10 +516,19 @@ func NewWithDomain(nc *nats.Conn, domain string, opts ...JetStreamOpt) (JetStrea
 	jsOpts.apiPrefix = fmt.Sprintf(jsDomainT, domain)
 	js := &jetStream{
 		conn:      nc,
-		jsOpts:    jsOpts,
+		opts:      jsOpts,
 		publisher: &jetStreamClient{asyncPublisherOpts: jsOpts.publisherOpts},
 	}
 	return js, nil
+}
+
+// Conn returns the underlying NATS connection.
+func (js *jetStream) Conn() *nats.Conn {
+	return js.conn
+}
+
+func (js *jetStream) Options() JetStreamOptions {
+	return js.opts
 }
 
 // CreateStream creates a new stream with given config and returns an
@@ -474,7 +538,7 @@ func (js *jetStream) CreateStream(ctx context.Context, cfg StreamConfig) (Stream
 	if err := validateStreamName(cfg.Name); err != nil {
 		return nil, err
 	}
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
@@ -506,7 +570,7 @@ func (js *jetStream) CreateStream(ctx context.Context, cfg StreamConfig) (Stream
 		return nil, err
 	}
 
-	createSubject := apiSubj(js.apiPrefix, fmt.Sprintf(apiStreamCreateT, cfg.Name))
+	createSubject := fmt.Sprintf(apiStreamCreateT, cfg.Name)
 	var resp streamInfoResponse
 
 	if _, err = js.apiRequestJSON(ctx, createSubject, &resp, req); err != nil {
@@ -536,9 +600,9 @@ func (js *jetStream) CreateStream(ctx context.Context, cfg StreamConfig) (Stream
 	}
 
 	return &stream{
-		jetStream: js,
-		name:      cfg.Name,
-		info:      resp.StreamInfo,
+		js:   js,
+		name: cfg.Name,
+		info: resp.StreamInfo,
 	}, nil
 }
 
@@ -576,7 +640,7 @@ func (js *jetStream) UpdateStream(ctx context.Context, cfg StreamConfig) (Stream
 	if err := validateStreamName(cfg.Name); err != nil {
 		return nil, err
 	}
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
@@ -586,7 +650,7 @@ func (js *jetStream) UpdateStream(ctx context.Context, cfg StreamConfig) (Stream
 		return nil, err
 	}
 
-	updateSubject := apiSubj(js.apiPrefix, fmt.Sprintf(apiStreamUpdateT, cfg.Name))
+	updateSubject := fmt.Sprintf(apiStreamUpdateT, cfg.Name)
 	var resp streamInfoResponse
 
 	if _, err = js.apiRequestJSON(ctx, updateSubject, &resp, req); err != nil {
@@ -616,9 +680,9 @@ func (js *jetStream) UpdateStream(ctx context.Context, cfg StreamConfig) (Stream
 	}
 
 	return &stream{
-		jetStream: js,
-		name:      cfg.Name,
-		info:      resp.StreamInfo,
+		js:   js,
+		name: cfg.Name,
+		info: resp.StreamInfo,
 	}, nil
 }
 
@@ -642,11 +706,11 @@ func (js *jetStream) Stream(ctx context.Context, name string) (Stream, error) {
 	if err := validateStreamName(name); err != nil {
 		return nil, err
 	}
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
-	infoSubject := apiSubj(js.apiPrefix, fmt.Sprintf(apiStreamInfoT, name))
+	infoSubject := fmt.Sprintf(apiStreamInfoT, name)
 
 	var resp streamInfoResponse
 
@@ -660,9 +724,9 @@ func (js *jetStream) Stream(ctx context.Context, name string) (Stream, error) {
 		return nil, resp.Error
 	}
 	return &stream{
-		jetStream: js,
-		name:      name,
-		info:      resp.StreamInfo,
+		js:   js,
+		name: name,
+		info: resp.StreamInfo,
 	}, nil
 }
 
@@ -671,11 +735,11 @@ func (js *jetStream) DeleteStream(ctx context.Context, name string) error {
 	if err := validateStreamName(name); err != nil {
 		return err
 	}
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
-	deleteSubject := apiSubj(js.apiPrefix, fmt.Sprintf(apiStreamDeleteT, name))
+	deleteSubject := fmt.Sprintf(apiStreamDeleteT, name)
 	var resp streamDeleteResponse
 
 	if _, err := js.apiRequestJSON(ctx, deleteSubject, &resp); err != nil {
@@ -733,7 +797,7 @@ func (js *jetStream) OrderedConsumer(ctx context.Context, stream string, cfg Ord
 		return nil, err
 	}
 	oc := &orderedConsumer{
-		jetStream:  js,
+		js:         js,
 		cfg:        &cfg,
 		stream:     stream,
 		namePrefix: nuid.Next(),
@@ -768,6 +832,20 @@ func (js *jetStream) DeleteConsumer(ctx context.Context, stream string, name str
 	return deleteConsumer(ctx, js, stream, name)
 }
 
+func (js *jetStream) PauseConsumer(ctx context.Context, stream string, consumer string, pauseUntil time.Time) (*ConsumerPauseResponse, error) {
+	if err := validateStreamName(stream); err != nil {
+		return nil, err
+	}
+	return pauseConsumer(ctx, js, stream, consumer, &pauseUntil)
+}
+
+func (js *jetStream) ResumeConsumer(ctx context.Context, stream string, consumer string) (*ConsumerPauseResponse, error) {
+	if err := validateStreamName(stream); err != nil {
+		return nil, err
+	}
+	return resumeConsumer(ctx, js, stream, consumer)
+}
+
 func validateStreamName(stream string) error {
 	if stream == "" {
 		return ErrStreamNameRequired
@@ -796,14 +874,13 @@ func validateSubject(subject string) error {
 // returned (for a single server setup). For clustered topologies, AccountInfo
 // will time out.
 func (js *jetStream) AccountInfo(ctx context.Context) (*AccountInfo, error) {
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
 	var resp accountInfoResponse
 
-	infoSubject := apiSubj(js.apiPrefix, apiAccountInfo)
-	if _, err := js.apiRequestJSON(ctx, infoSubject, &resp); err != nil {
+	if _, err := js.apiRequestJSON(ctx, apiAccountInfo, &resp); err != nil {
 		if errors.Is(err, nats.ErrNoResponders) {
 			return nil, ErrJetStreamNotEnabled
 		}
@@ -839,7 +916,7 @@ func (js *jetStream) ListStreams(ctx context.Context, opts ...StreamListOpt) Str
 	}
 	go func() {
 		defer close(l.streams)
-		ctx, cancel := wrapContextWithoutDeadline(ctx)
+		ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 		if cancel != nil {
 			defer cancel()
 		}
@@ -887,12 +964,12 @@ func (js *jetStream) StreamNames(ctx context.Context, opts ...StreamListOpt) Str
 	for _, opt := range opts {
 		if err := opt(&streamsReq); err != nil {
 			l.err = err
-			close(l.streams)
+			close(l.names)
 			return l
 		}
 	}
 	go func() {
-		ctx, cancel := wrapContextWithoutDeadline(ctx)
+		ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 		if cancel != nil {
 			defer cancel()
 		}
@@ -924,14 +1001,13 @@ func (js *jetStream) StreamNames(ctx context.Context, opts ...StreamListOpt) Str
 // subject. If no stream is bound to given subject, ErrStreamNotFound
 // is returned.
 func (js *jetStream) StreamNameBySubject(ctx context.Context, subject string) (string, error) {
-	ctx, cancel := wrapContextWithoutDeadline(ctx)
+	ctx, cancel := js.wrapContextWithoutDeadline(ctx)
 	if cancel != nil {
 		defer cancel()
 	}
 	if err := validateSubject(subject); err != nil {
 		return "", err
 	}
-	streamsSubject := apiSubj(js.apiPrefix, apiStreams)
 
 	r := &streamsRequest{Subject: subject}
 	req, err := json.Marshal(r)
@@ -939,7 +1015,7 @@ func (js *jetStream) StreamNameBySubject(ctx context.Context, subject string) (s
 		return "", err
 	}
 	var resp streamNamesResponse
-	_, err = js.apiRequestJSON(ctx, streamsSubject, &resp, req)
+	_, err = js.apiRequestJSON(ctx, apiStreams, &resp, req)
 	if err != nil {
 		return "", err
 	}
@@ -975,9 +1051,8 @@ func (s *streamLister) streamInfos(ctx context.Context, streamsReq streamsReques
 		return nil, err
 	}
 
-	slSubj := apiSubj(s.js.apiPrefix, apiStreamListT)
 	var resp streamListResponse
-	_, err = s.js.apiRequestJSON(ctx, slSubj, &resp, reqJSON)
+	_, err = s.js.apiRequestJSON(ctx, apiStreamListT, &resp, reqJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -1007,9 +1082,8 @@ func (s *streamLister) streamNames(ctx context.Context, streamsReq streamsReques
 		return nil, err
 	}
 
-	slSubj := apiSubj(s.js.apiPrefix, apiStreams)
 	var resp streamNamesResponse
-	_, err = s.js.apiRequestJSON(ctx, slSubj, &resp, reqJSON)
+	_, err = s.js.apiRequestJSON(ctx, apiStreams, &resp, reqJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -1025,11 +1099,44 @@ func (s *streamLister) streamNames(ctx context.Context, streamsReq streamsReques
 // wrapContextWithoutDeadline wraps context without deadline with default timeout.
 // If deadline is already set, it will be returned as is, and cancel() will be nil.
 // Caller should check if cancel() is nil before calling it.
-func wrapContextWithoutDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+func (js *jetStream) wrapContextWithoutDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
 	if _, ok := ctx.Deadline(); ok {
 		return ctx, nil
 	}
-	return context.WithTimeout(ctx, defaultAPITimeout)
+	return context.WithTimeout(ctx, js.opts.DefaultTimeout)
+}
+
+// CleanupPublisher will cleanup the publishing side of JetStreamContext.
+//
+// This will unsubscribe from the internal reply subject if needed.
+// All pending async publishes will fail with ErrJetStreamContextClosed.
+//
+// If an error handler was provided, it will be called for each pending async
+// publish and PublishAsyncComplete will be closed.
+//
+// After completing JetStreamContext is still usable - internal subscription
+// will be recreated on next publish, but the acks from previous publishes will
+// be lost.
+func (js *jetStream) CleanupPublisher() {
+	js.cleanupReplySub()
+	js.publisher.Lock()
+	errCb := js.publisher.aecb
+	for id, paf := range js.publisher.acks {
+		paf.err = ErrJetStreamPublisherClosed
+		if paf.errCh != nil {
+			paf.errCh <- paf.err
+		}
+		if errCb != nil {
+			// call error handler after releasing the mutex to avoid contention
+			defer errCb(js, paf.msg, ErrJetStreamPublisherClosed)
+		}
+		delete(js.publisher.acks, id)
+	}
+	if js.publisher.doneCh != nil {
+		close(js.publisher.doneCh)
+		js.publisher.doneCh = nil
+	}
+	js.publisher.Unlock()
 }
 
 func (js *jetStream) cleanupReplySub() {

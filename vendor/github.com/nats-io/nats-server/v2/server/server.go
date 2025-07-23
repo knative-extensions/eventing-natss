@@ -1,4 +1,4 @@
-// Copyright 2012-2024 The NATS Authors
+// Copyright 2012-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -21,33 +21,32 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"log"
 	"math/rand"
 	"net"
 	"net/http"
-	"regexp"
-	"runtime/pprof"
-
-	// Allow dynamic profiling.
-	_ "net/http/pprof"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	// Allow dynamic profiling.
+	_ "net/http/pprof"
+
 	"github.com/klauspost/compress/s2"
 	"github.com/nats-io/jwt/v2"
+	"github.com/nats-io/nats-server/v2/logger"
 	"github.com/nats-io/nkeys"
 	"github.com/nats-io/nuid"
-
-	"github.com/nats-io/nats-server/v2/logger"
 )
 
 const (
@@ -57,6 +56,49 @@ const (
 	// This is for the first ping for client connections.
 	firstClientPingInterval = 2 * time.Second
 )
+
+// These are protocol versions sent between server connections: ROUTER, LEAF and
+// GATEWAY. We may have protocol versions that have a meaning only for a certain
+// type of connections, but we don't have to have separate enums for that.
+// However, it is CRITICAL to not change the order of those constants since they
+// are exchanged between servers. When adding a new protocol version, add to the
+// end of the list, don't try to group them by connection types.
+const (
+	// RouteProtoZero is the original Route protocol from 2009.
+	// http://nats.io/documentation/internals/nats-protocol/
+	RouteProtoZero = iota
+	// RouteProtoInfo signals a route can receive more then the original INFO block.
+	// This can be used to update remote cluster permissions, etc...
+	RouteProtoInfo
+	// RouteProtoV2 is the new route/cluster protocol that provides account support.
+	RouteProtoV2
+	// MsgTraceProto indicates that this server understands distributed message tracing.
+	MsgTraceProto
+)
+
+// Will return the latest server-to-server protocol versions, unless the
+// option to override it is set.
+func (s *Server) getServerProto() int {
+	opts := s.getOpts()
+	// Initialize with the latest protocol version.
+	proto := MsgTraceProto
+	// For tests, we want to be able to make this server behave
+	// as an older server so check this option to see if we should override.
+	if opts.overrideProto < 0 {
+		// The option overrideProto is set to 0 by default (when creating an
+		// Options structure). Since this is the same value than the original
+		// proto RouteProtoZero, tests call setServerProtoForTest() with the
+		// desired protocol level, which sets it as negative value equal to:
+		// (wantedProto + 1) * -1. Here we compute back the real value.
+		proto = (opts.overrideProto * -1) - 1
+	}
+	return proto
+}
+
+// Used by tests.
+func setServerProtoForTest(wantedProto int) int {
+	return (wantedProto + 1) * -1
+}
 
 // Info is the information sent to clients, routes, gateways, and leaf nodes,
 // to help them understand information about this server.
@@ -92,12 +134,14 @@ type Info struct {
 	Import        *SubjectPermission `json:"import,omitempty"`
 	Export        *SubjectPermission `json:"export,omitempty"`
 	LNOC          bool               `json:"lnoc,omitempty"`
+	LNOCU         bool               `json:"lnocu,omitempty"`
 	InfoOnConnect bool               `json:"info_on_connect,omitempty"` // When true the server will respond to CONNECT with an INFO
 	ConnectInfo   bool               `json:"connect_info,omitempty"`    // When true this is the server INFO response to CONNECT
 	RoutePoolSize int                `json:"route_pool_size,omitempty"`
 	RoutePoolIdx  int                `json:"route_pool_idx,omitempty"`
 	RouteAccount  string             `json:"route_account,omitempty"`
 	RouteAccReqID string             `json:"route_acc_add_reqid,omitempty"`
+	GossipMode    byte               `json:"gossip_mode,omitempty"`
 
 	// Gateways Specific
 	Gateway           string   `json:"gateway,omitempty"`             // Name of the origin Gateway (sent by gateway's INFO)
@@ -138,14 +182,17 @@ type Server struct {
 	listenerErr         error
 	gacc                *Account
 	sys                 *internal
+	sysAcc              atomic.Pointer[Account]
 	js                  atomic.Pointer[jetStream]
 	isMetaLeader        atomic.Bool
+	jsClustered         atomic.Bool
 	accounts            sync.Map
 	tmpAccounts         sync.Map // Temporarily stores accounts that are being built
 	activeAccounts      int32
 	accResolver         AccountResolver
 	clients             map[uint64]*client
 	routes              map[string][]*client
+	remoteRoutePoolSize map[string]int                // Map for remote's configure route pool size
 	routesPoolSize      int                           // Configured pool size
 	routesReject        bool                          // During reload, we may want to reject adding routes until some conditions are met
 	routesNoPool        int                           // Number of routes that don't use pooling (connecting to older server for instance)
@@ -184,6 +231,7 @@ type Server struct {
 	leafRemoteAccounts sync.Map
 	leafNodeEnabled    bool
 	leafDisableConnect bool // Used in test only
+	leafNoCluster      bool // Indicate that this server has only remotes and no cluster defined
 
 	quitCh           chan struct{}
 	startupComplete  chan struct{}
@@ -315,6 +363,14 @@ type Server struct {
 
 	// Queue to process JS API requests that come from routes (or gateways)
 	jsAPIRoutedReqs *ipQueue[*jsAPIRoutedReq]
+
+	// Delayed API responses.
+	delayedAPIResponses *ipQueue[*delayedAPIResponse]
+
+	// Whether moving NRG traffic into accounts is permitted on this server.
+	// Controls whether or not the account NRG capability is set in statsz.
+	// Currently used by unit tests to simulate nodes not supporting account NRG.
+	accountNRGAllowed atomic.Bool
 }
 
 // For tracking JS nodes.
@@ -330,9 +386,9 @@ type nodeInfo struct {
 	offline         bool
 	js              bool
 	binarySnapshots bool
+	accountNRG      bool
 }
 
-// Make sure all are 64bits for atomic use
 type stats struct {
 	inMsgs        int64
 	outMsgs       int64
@@ -678,6 +734,14 @@ func NewServer(opts *Options) (*Server, error) {
 		syncOutSem:         make(chan struct{}, maxConcurrentSyncRequests),
 	}
 
+	// Delayed API response queue. Create regardless if JetStream is configured
+	// or not (since it can be enabled/disabled with config reload, we want this
+	// queue to exist at all times).
+	s.delayedAPIResponses = newIPQueue[*delayedAPIResponse](s, "delayed API responses")
+
+	// By default we'll allow account NRG.
+	s.accountNRGAllowed.Store(true)
+
 	// Fill up the maximum in flight syncRequests for this server.
 	// Used in JetStream catchup semantics.
 	for i := 0; i < maxConcurrentSyncRequests; i++ {
@@ -696,6 +760,7 @@ func NewServer(opts *Options) (*Server, error) {
 	// If we have solicited leafnodes but no clustering and no clustername.
 	// However we may need a stable clustername so use the server name.
 	if len(opts.LeafNode.Remotes) > 0 && opts.Cluster.Port == 0 && opts.Cluster.Name == _EMPTY_ {
+		s.leafNoCluster = true
 		opts.Cluster.Name = opts.ServerName
 	}
 
@@ -721,7 +786,7 @@ func NewServer(opts *Options) (*Server, error) {
 			opts.Tags,
 			&JetStreamConfig{MaxMemory: opts.JetStreamMaxMemory, MaxStore: opts.JetStreamMaxStore, CompressOK: true},
 			nil,
-			false, true, true,
+			false, true, true, true,
 		})
 	}
 
@@ -953,14 +1018,19 @@ func (s *Server) serverName() string {
 func (s *Server) ClientURL() string {
 	// FIXME(dlc) - should we add in user and pass if defined single?
 	opts := s.getOpts()
-	scheme := "nats://"
+	var u url.URL
+	u.Scheme = "nats"
 	if opts.TLSConfig != nil {
-		scheme = "tls://"
+		u.Scheme = "tls"
 	}
-	return fmt.Sprintf("%s%s:%d", scheme, opts.Host, opts.Port)
+	u.Host = net.JoinHostPort(opts.Host, fmt.Sprintf("%d", opts.Port))
+	return u.String()
 }
 
 func validateCluster(o *Options) error {
+	if o.Cluster.Name != _EMPTY_ && strings.Contains(o.Cluster.Name, " ") {
+		return ErrClusterNameHasSpaces
+	}
 	if o.Cluster.Compression.Mode != _EMPTY_ {
 		if err := validateAndNormalizeCompressionOption(&o.Cluster.Compression, CompressionS2Fast); err != nil {
 			return err
@@ -970,8 +1040,9 @@ func validateCluster(o *Options) error {
 		return fmt.Errorf("cluster: %v", err)
 	}
 	// Check that cluster name if defined matches any gateway name.
-	if o.Gateway.Name != "" && o.Gateway.Name != o.Cluster.Name {
-		if o.Cluster.Name != "" {
+	// Note that we have already verified that the gateway name does not have spaces.
+	if o.Gateway.Name != _EMPTY_ && o.Gateway.Name != o.Cluster.Name {
+		if o.Cluster.Name != _EMPTY_ {
 			return ErrClusterNameConfigConflict
 		}
 		// Set this here so we do not consider it dynamic.
@@ -1011,6 +1082,9 @@ func validateOptions(o *Options) error {
 	if int64(o.MaxPayload) > o.MaxPending {
 		return fmt.Errorf("max_payload (%v) cannot be higher than max_pending (%v)",
 			o.MaxPayload, o.MaxPending)
+	}
+	if o.ServerName != _EMPTY_ && strings.Contains(o.ServerName, " ") {
+		return errors.New("server name cannot contain spaces")
 	}
 	// Check that the trust configuration is correct.
 	if err := validateTrustedOperators(o); err != nil {
@@ -1105,9 +1179,11 @@ func (s *Server) configureAccounts(reloading bool) (map[string]struct{}, error) 
 				// Collect the sids for the service imports since we are going to
 				// replace with new ones.
 				var sids [][]byte
-				for _, si := range a.imports.services {
-					if si.sid != nil {
-						sids = append(sids, si.sid)
+				for _, sis := range a.imports.services {
+					for _, si := range sis {
+						if si.sid != nil {
+							sids = append(sids, si.sid)
+						}
 					}
 				}
 				// Setup to process later if needed.
@@ -1222,19 +1298,21 @@ func (s *Server) configureAccounts(reloading bool) (map[string]struct{}, error) 
 				si.acc = v.(*Account)
 			}
 		}
-		for _, si := range acc.imports.services {
-			if v, ok := s.accounts.Load(si.acc.Name); ok {
-				si.acc = v.(*Account)
+		for _, sis := range acc.imports.services {
+			for _, si := range sis {
+				if v, ok := s.accounts.Load(si.acc.Name); ok {
+					si.acc = v.(*Account)
 
-				// It is possible to allow for latency tracking inside your
-				// own account, so lock only when not the same account.
-				if si.acc == acc {
+					// It is possible to allow for latency tracking inside your
+					// own account, so lock only when not the same account.
+					if si.acc == acc {
+						si.se = si.acc.getServiceExport(si.to)
+						continue
+					}
+					si.acc.mu.RLock()
 					si.se = si.acc.getServiceExport(si.to)
-					continue
+					si.acc.mu.RUnlock()
 				}
-				si.acc.mu.RLock()
-				si.se = si.acc.getServiceExport(si.to)
-				si.acc.mu.RUnlock()
 			}
 		}
 		// Make sure the subs are running, but only if not reloading.
@@ -1276,6 +1354,7 @@ func (s *Server) configureAccounts(reloading bool) (map[string]struct{}, error) 
 		if err == nil && s.sys != nil && acc != s.sys.account {
 			// sys.account.clients (including internal client)/respmap/etc... are transferred separately
 			s.sys.account = acc
+			s.sysAcc.Store(acc)
 		}
 		if err != nil {
 			return awcsti, fmt.Errorf("error resolving system account: %v", err)
@@ -1307,8 +1386,9 @@ func (s *Server) configureAccounts(reloading bool) (map[string]struct{}, error) 
 
 	// Add any required exports from system account.
 	if s.sys != nil {
+		sysAcc := s.sys.account
 		s.mu.Unlock()
-		s.addSystemAccountExports(s.sys.account)
+		s.addSystemAccountExports(sysAcc)
 		s.mu.Lock()
 	}
 
@@ -1538,7 +1618,7 @@ func (s *Server) isRunning() bool {
 
 func (s *Server) logPid() error {
 	pidStr := strconv.Itoa(os.Getpid())
-	return os.WriteFile(s.getOpts().PidFile, []byte(pidStr), 0660)
+	return os.WriteFile(s.getOpts().PidFile, []byte(pidStr), defaultFilePerms)
 }
 
 // numReservedAccounts will return the number of reserved accounts configured in the server.
@@ -1631,13 +1711,7 @@ func (s *Server) SetSystemAccount(accName string) error {
 
 // SystemAccount returns the system account if set.
 func (s *Server) SystemAccount() *Account {
-	var sacc *Account
-	s.mu.RLock()
-	if s.sys != nil {
-		sacc = s.sys.account
-	}
-	s.mu.RUnlock()
-	return sacc
+	return s.sysAcc.Load()
 }
 
 // GlobalAccount returns the global account.
@@ -1685,7 +1759,7 @@ func (s *Server) setSystemAccount(acc *Account) error {
 	// locks on fast path for inbound messages and checking service imports.
 	acc.mu.Lock()
 	if acc.imports.services == nil {
-		acc.imports.services = make(map[string]*serviceImport)
+		acc.imports.services = make(map[string][]*serviceImport)
 	}
 	acc.mu.Unlock()
 
@@ -1698,14 +1772,19 @@ func (s *Server) setSystemAccount(acc *Account) error {
 		replies: make(map[string]msgHandler),
 		sendq:   newIPQueue[*pubMsg](s, "System sendQ"),
 		recvq:   newIPQueue[*inSysMsg](s, "System recvQ"),
+		recvqp:  newIPQueue[*inSysMsg](s, "System recvQ Pings"),
 		resetCh: make(chan struct{}),
-		sq:      s.newSendQ(),
-		statsz:  eventsHBInterval,
+		sq:      s.newSendQ(acc),
+		statsz:  statsHBInterval,
 		orphMax: 5 * eventsHBInterval,
 		chkOrph: 3 * eventsHBInterval,
 	}
+	recvq, recvqp := s.sys.recvq, s.sys.recvqp
 	s.sys.wg.Add(1)
 	s.mu.Unlock()
+
+	// Store in atomic for fast lookup.
+	s.sysAcc.Store(acc)
 
 	// Register with the account.
 	s.sys.client.registerWithAccount(acc)
@@ -1717,7 +1796,9 @@ func (s *Server) setSystemAccount(acc *Account) error {
 	go s.internalSendLoop(&s.sys.wg)
 
 	// Start the internal loop for inbound messages.
-	go s.internalReceiveLoop()
+	go s.internalReceiveLoop(recvq)
+	// Start the internal loop for inbound STATSZ/Ping messages.
+	go s.internalReceiveLoop(recvqp)
 
 	// Start up our general subscriptions
 	s.initEventTracking()
@@ -1755,9 +1836,9 @@ func (s *Server) createInternalAccountClient() *client {
 	return s.createInternalClient(ACCOUNT)
 }
 
-// Internal clients. kind should be SYSTEM or JETSTREAM
+// Internal clients. kind should be SYSTEM, JETSTREAM or ACCOUNT
 func (s *Server) createInternalClient(kind int) *client {
-	if kind != SYSTEM && kind != JETSTREAM && kind != ACCOUNT {
+	if !isInternalClient(kind) {
 		return nil
 	}
 	now := time.Now()
@@ -1890,25 +1971,11 @@ func (s *Server) setRouteInfo(acc *Account) {
 		// use modulo to assign to an index of the pool slice. For 1
 		// and below, all accounts will be bound to the single connection
 		// at index 0.
-		acc.routePoolIdx = s.computeRoutePoolIdx(acc)
+		acc.routePoolIdx = computeRoutePoolIdx(s.routesPoolSize, acc.Name)
 		if s.routesPoolSize > 1 {
 			s.accRouteByHash.Store(acc.Name, acc.routePoolIdx)
 		}
 	}
-}
-
-// Returns a route pool index for this account based on the given pool size.
-// Account lock is held on entry (account's name is accessed but immutable
-// so could be called without account's lock).
-// Server lock held on entry.
-func (s *Server) computeRoutePoolIdx(acc *Account) int {
-	if s.routesPoolSize <= 1 {
-		return 0
-	}
-	h := fnv.New32a()
-	h.Write([]byte(acc.Name))
-	sum32 := h.Sum32()
-	return int((sum32 % uint32(s.routesPoolSize)))
 }
 
 // lookupAccount is a function to return the account structure
@@ -1982,9 +2049,9 @@ func (s *Server) updateAccountWithClaimJWT(acc *Account, claimJWT string) error 
 	accClaims, _, err := s.verifyAccountClaims(claimJWT)
 	if err == nil && accClaims != nil {
 		acc.mu.Lock()
-		if acc.Issuer == _EMPTY_ {
-			acc.Issuer = accClaims.Issuer
-		}
+		// if an account is updated with a different operator signing key, we want to
+		// show a consistent issuer.
+		acc.Issuer = accClaims.Issuer
 		if acc.Name != accClaims.Subject {
 			acc.mu.Unlock()
 			return ErrAccountValidation
@@ -2111,7 +2178,17 @@ func (s *Server) Start() {
 
 	// Snapshot server options.
 	opts := s.getOpts()
-	clusterName := s.ClusterName()
+
+	// Capture if this server is a leaf that has no cluster, so we don't
+	// display the cluster name if that is the case.
+	s.mu.RLock()
+	leafNoCluster := s.leafNoCluster
+	s.mu.RUnlock()
+
+	var clusterName string
+	if !leafNoCluster {
+		clusterName = s.ClusterName()
+	}
 
 	s.Noticef("  Version:  %s", VERSION)
 	s.Noticef("  Git:      [%s]", gc)
@@ -2156,7 +2233,11 @@ func (s *Server) Start() {
 	}
 
 	if opts.ConfigFile != _EMPTY_ {
-		s.Noticef("Using configuration file: %s", opts.ConfigFile)
+		var cd string
+		if opts.configDigest != "" {
+			cd = fmt.Sprintf("(%s)", opts.configDigest)
+		}
+		s.Noticef("Using configuration file: %s %s", opts.ConfigFile, cd)
 	}
 
 	hasOperators := len(opts.TrustedOperators) > 0
@@ -2271,6 +2352,7 @@ func (s *Server) Start() {
 			StoreDir:     opts.StoreDir,
 			SyncInterval: opts.SyncInterval,
 			SyncAlways:   opts.SyncAlways,
+			Strict:       opts.JetStreamStrict,
 			MaxMemory:    opts.JetStreamMaxMemory,
 			MaxStore:     opts.JetStreamMaxStore,
 			Domain:       opts.JetStreamDomain,
@@ -2316,6 +2398,11 @@ func (s *Server) Start() {
 			ga.enableAllJetStreamServiceImportsAndMappings()
 		}
 	}
+
+	// Delayed API response handling. Start regardless of JetStream being
+	// currently configured or not (since it can be enabled/disabled with
+	// configuration reload).
+	s.startGoRoutine(s.delayedAPIResponder)
 
 	// Start OCSP Stapling monitoring for TLS certificates if enabled. Hook TLS handshake for
 	// OCSP check on peers (LEAF and CLIENT kind) if enabled.
@@ -2772,6 +2859,7 @@ func (s *Server) StartProfiler() {
 		Addr:           hp,
 		Handler:        http.DefaultServeMux,
 		MaxHeaderBytes: 1 << 20,
+		ReadTimeout:    time.Second * 5,
 	}
 	s.profiler = l
 	s.profilingServer = srv
@@ -2914,8 +3002,10 @@ func (s *Server) startMonitoring(secure bool) error {
 		}
 		hp = net.JoinHostPort(opts.HTTPHost, strconv.Itoa(port))
 		config := opts.TLSConfig.Clone()
-		config.GetConfigForClient = s.getMonitoringTLSConfig
-		config.ClientAuth = tls.NoClientCert
+		if !s.ocspPeerVerify {
+			config.GetConfigForClient = s.getMonitoringTLSConfig
+			config.ClientAuth = tls.NoClientCert
+		}
 		httpListener, err = tls.Listen("tcp", hp, config)
 
 	} else {
@@ -2971,10 +3061,11 @@ func (s *Server) startMonitoring(secure bool) error {
 	// to return empty response or unable to display page if the
 	// server needs more time to build the response.
 	srv := &http.Server{
-		Addr:           hp,
-		Handler:        mux,
-		MaxHeaderBytes: 1 << 20,
-		ErrorLog:       log.New(&captureHTTPServerLog{s, "monitoring: "}, _EMPTY_, 0),
+		Addr:              hp,
+		Handler:           mux,
+		MaxHeaderBytes:    1 << 20,
+		ErrorLog:          log.New(&captureHTTPServerLog{s, "monitoring: "}, _EMPTY_, 0),
+		ReadHeaderTimeout: time.Second * 5,
 	}
 	s.mu.Lock()
 	s.http = httpListener
@@ -3059,7 +3150,16 @@ func (s *Server) createClientEx(conn net.Conn, inProcess bool) *client {
 	}
 	now := time.Now()
 
-	c := &client{srv: s, nc: conn, opts: defaultOpts, mpay: maxPay, msubs: maxSubs, start: now, last: now}
+	c := &client{
+		srv:   s,
+		nc:    conn,
+		opts:  defaultOpts,
+		mpay:  maxPay,
+		msubs: maxSubs,
+		start: now,
+		last:  now,
+		iproc: inProcess,
+	}
 
 	c.registerWithAccount(s.globalAccount())
 
@@ -3294,7 +3394,7 @@ func (s *Server) createClientEx(conn net.Conn, inProcess bool) *client {
 
 // This will save off a closed client in a ring buffer such that
 // /connz can inspect. Useful for debugging, etc.
-func (s *Server) saveClosedClient(c *client, nc net.Conn, reason ClosedState) {
+func (s *Server) saveClosedClient(c *client, nc net.Conn, subs map[string]*subscription, reason ClosedState) {
 	now := time.Now()
 
 	s.accountDisconnectEvent(c, now, reason.String())
@@ -3303,17 +3403,18 @@ func (s *Server) saveClosedClient(c *client, nc net.Conn, reason ClosedState) {
 
 	cc := &closedClient{}
 	cc.fill(c, nc, now, false)
+	// Note that cc.fill is using len(c.subs), which may have been set to nil by now,
+	// so replace cc.NumSubs with len(subs).
+	cc.NumSubs = uint32(len(subs))
 	cc.Stop = &now
 	cc.Reason = reason.String()
 
 	// Do subs, do not place by default in main ConnInfo
-	if len(c.subs) > 0 {
-		cc.subs = make([]SubDetail, 0, len(c.subs))
-		for _, sub := range c.subs {
+	if len(subs) > 0 {
+		cc.subs = make([]SubDetail, 0, len(subs))
+		for _, sub := range subs {
 			cc.subs = append(cc.subs, newSubDetail(sub))
 		}
-		// Now set this to nil to allow connection to be released.
-		c.subs = nil
 	}
 	// Hold user as well.
 	cc.user = c.getRawAuthUser()
@@ -3425,6 +3526,20 @@ func tlsVersion(ver uint16) string {
 		return "1.3"
 	}
 	return fmt.Sprintf("Unknown [0x%x]", ver)
+}
+
+func tlsVersionFromString(ver string) (uint16, error) {
+	switch ver {
+	case "1.0":
+		return tls.VersionTLS10, nil
+	case "1.1":
+		return tls.VersionTLS11, nil
+	case "1.2":
+		return tls.VersionTLS12, nil
+	case "1.3":
+		return tls.VersionTLS13, nil
+	}
+	return 0, fmt.Errorf("unknown version: %v", ver)
 }
 
 // We use hex here so we don't need multiple versions

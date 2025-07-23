@@ -1,4 +1,4 @@
-// Copyright 2018-2022 The NATS Authors
+// Copyright 2018-2025 The NATS Authors
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -69,6 +69,10 @@ func wipeSlice(buf []byte) {
 // will expand the trusted keys in options.
 func validateTrustedOperators(o *Options) error {
 	if len(o.TrustedOperators) == 0 {
+		// if we have no operator, default sentinel shouldn't be set
+		if o.DefaultSentinel != "" {
+			return fmt.Errorf("default sentinel requires operators and accounts")
+		}
 		return nil
 	}
 	if o.AccountResolver == nil {
@@ -106,8 +110,8 @@ func validateTrustedOperators(o *Options) error {
 			return fmt.Errorf("using nats based account resolver - the system account needs to be specified in configuration or the operator jwt")
 		}
 	}
-	ver := strings.Split(strings.Split(strings.Split(VERSION, "-")[0], ".RC")[0], ".beta")[0]
-	srvMajor, srvMinor, srvUpdate, _ := jwt.ParseServerVersion(ver)
+
+	srvMajor, srvMinor, srvUpdate, _ := versionComponents(VERSION)
 	for _, opc := range o.TrustedOperators {
 		if major, minor, update, err := jwt.ParseServerVersion(opc.AssertServerVersion); err != nil {
 			return fmt.Errorf("operator %s expects version %s got error instead: %s",
