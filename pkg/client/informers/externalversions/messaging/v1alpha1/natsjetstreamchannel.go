@@ -19,24 +19,24 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
+	context "context"
 	time "time"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
 	cache "k8s.io/client-go/tools/cache"
-	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	apismessagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	versioned "knative.dev/eventing-natss/pkg/client/clientset/versioned"
 	internalinterfaces "knative.dev/eventing-natss/pkg/client/informers/externalversions/internalinterfaces"
-	v1alpha1 "knative.dev/eventing-natss/pkg/client/listers/messaging/v1alpha1"
+	messagingv1alpha1 "knative.dev/eventing-natss/pkg/client/listers/messaging/v1alpha1"
 )
 
 // NatsJetStreamChannelInformer provides access to a shared informer and lister for
 // NatsJetStreamChannels.
 type NatsJetStreamChannelInformer interface {
 	Informer() cache.SharedIndexInformer
-	Lister() v1alpha1.NatsJetStreamChannelLister
+	Lister() messagingv1alpha1.NatsJetStreamChannelLister
 }
 
 type natsJetStreamChannelInformer struct {
@@ -62,16 +62,28 @@ func NewFilteredNatsJetStreamChannelInformer(client versioned.Interface, namespa
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.MessagingV1alpha1().NatsJetStreamChannels(namespace).List(context.TODO(), options)
+				return client.MessagingV1alpha1().NatsJetStreamChannels(namespace).List(context.Background(), options)
 			},
 			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.MessagingV1alpha1().NatsJetStreamChannels(namespace).Watch(context.TODO(), options)
+				return client.MessagingV1alpha1().NatsJetStreamChannels(namespace).Watch(context.Background(), options)
+			},
+			ListWithContextFunc: func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+				if tweakListOptions != nil {
+					tweakListOptions(&options)
+				}
+				return client.MessagingV1alpha1().NatsJetStreamChannels(namespace).List(ctx, options)
+			},
+			WatchFuncWithContext: func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+				if tweakListOptions != nil {
+					tweakListOptions(&options)
+				}
+				return client.MessagingV1alpha1().NatsJetStreamChannels(namespace).Watch(ctx, options)
 			},
 		},
-		&messagingv1alpha1.NatsJetStreamChannel{},
+		&apismessagingv1alpha1.NatsJetStreamChannel{},
 		resyncPeriod,
 		indexers,
 	)
@@ -82,9 +94,9 @@ func (f *natsJetStreamChannelInformer) defaultInformer(client versioned.Interfac
 }
 
 func (f *natsJetStreamChannelInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&messagingv1alpha1.NatsJetStreamChannel{}, f.defaultInformer)
+	return f.factory.InformerFor(&apismessagingv1alpha1.NatsJetStreamChannel{}, f.defaultInformer)
 }
 
-func (f *natsJetStreamChannelInformer) Lister() v1alpha1.NatsJetStreamChannelLister {
-	return v1alpha1.NewNatsJetStreamChannelLister(f.Informer().GetIndexer())
+func (f *natsJetStreamChannelInformer) Lister() messagingv1alpha1.NatsJetStreamChannelLister {
+	return messagingv1alpha1.NewNatsJetStreamChannelLister(f.Informer().GetIndexer())
 }

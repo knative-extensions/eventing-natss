@@ -29,7 +29,7 @@ type FakeMessagingV1alpha1 struct {
 }
 
 func (c *FakeMessagingV1alpha1) NatsJetStreamChannels(namespace string) v1alpha1.NatsJetStreamChannelInterface {
-	return &FakeNatsJetStreamChannels{c, namespace}
+	return newFakeNatsJetStreamChannels(c, namespace)
 }
 
 // RESTClient returns a RESTClient that is used to communicate

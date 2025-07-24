@@ -19,13 +19,13 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
+	context "context"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	gentype "k8s.io/client-go/gentype"
-	v1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	scheme "knative.dev/eventing-natss/pkg/client/clientset/versioned/scheme"
 )
 
@@ -37,33 +37,36 @@ type NatsJetStreamChannelsGetter interface {
 
 // NatsJetStreamChannelInterface has methods to work with NatsJetStreamChannel resources.
 type NatsJetStreamChannelInterface interface {
-	Create(ctx context.Context, natsJetStreamChannel *v1alpha1.NatsJetStreamChannel, opts v1.CreateOptions) (*v1alpha1.NatsJetStreamChannel, error)
-	Update(ctx context.Context, natsJetStreamChannel *v1alpha1.NatsJetStreamChannel, opts v1.UpdateOptions) (*v1alpha1.NatsJetStreamChannel, error)
+	Create(ctx context.Context, natsJetStreamChannel *messagingv1alpha1.NatsJetStreamChannel, opts v1.CreateOptions) (*messagingv1alpha1.NatsJetStreamChannel, error)
+	Update(ctx context.Context, natsJetStreamChannel *messagingv1alpha1.NatsJetStreamChannel, opts v1.UpdateOptions) (*messagingv1alpha1.NatsJetStreamChannel, error)
 	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
-	UpdateStatus(ctx context.Context, natsJetStreamChannel *v1alpha1.NatsJetStreamChannel, opts v1.UpdateOptions) (*v1alpha1.NatsJetStreamChannel, error)
+	UpdateStatus(ctx context.Context, natsJetStreamChannel *messagingv1alpha1.NatsJetStreamChannel, opts v1.UpdateOptions) (*messagingv1alpha1.NatsJetStreamChannel, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
-	Get(ctx context.Context, name string, opts v1.GetOptions) (*v1alpha1.NatsJetStreamChannel, error)
-	List(ctx context.Context, opts v1.ListOptions) (*v1alpha1.NatsJetStreamChannelList, error)
+	Get(ctx context.Context, name string, opts v1.GetOptions) (*messagingv1alpha1.NatsJetStreamChannel, error)
+	List(ctx context.Context, opts v1.ListOptions) (*messagingv1alpha1.NatsJetStreamChannelList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
-	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1alpha1.NatsJetStreamChannel, err error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *messagingv1alpha1.NatsJetStreamChannel, err error)
 	NatsJetStreamChannelExpansion
 }
 
 // natsJetStreamChannels implements NatsJetStreamChannelInterface
 type natsJetStreamChannels struct {
-	*gentype.ClientWithList[*v1alpha1.NatsJetStreamChannel, *v1alpha1.NatsJetStreamChannelList]
+	*gentype.ClientWithList[*messagingv1alpha1.NatsJetStreamChannel, *messagingv1alpha1.NatsJetStreamChannelList]
 }
 
 // newNatsJetStreamChannels returns a NatsJetStreamChannels
 func newNatsJetStreamChannels(c *MessagingV1alpha1Client, namespace string) *natsJetStreamChannels {
 	return &natsJetStreamChannels{
-		gentype.NewClientWithList[*v1alpha1.NatsJetStreamChannel, *v1alpha1.NatsJetStreamChannelList](
+		gentype.NewClientWithList[*messagingv1alpha1.NatsJetStreamChannel, *messagingv1alpha1.NatsJetStreamChannelList](
 			"natsjetstreamchannels",
 			c.RESTClient(),
 			scheme.ParameterCodec,
 			namespace,
-			func() *v1alpha1.NatsJetStreamChannel { return &v1alpha1.NatsJetStreamChannel{} },
-			func() *v1alpha1.NatsJetStreamChannelList { return &v1alpha1.NatsJetStreamChannelList{} }),
+			func() *messagingv1alpha1.NatsJetStreamChannel { return &messagingv1alpha1.NatsJetStreamChannel{} },
+			func() *messagingv1alpha1.NatsJetStreamChannelList {
+				return &messagingv1alpha1.NatsJetStreamChannelList{}
+			},
+		),
 	}
 }

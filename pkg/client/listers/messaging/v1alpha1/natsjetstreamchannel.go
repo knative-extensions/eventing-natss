@@ -19,10 +19,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/listers"
-	"k8s.io/client-go/tools/cache"
-	v1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
+	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 )
 
 // NatsJetStreamChannelLister helps list NatsJetStreamChannels.
@@ -30,7 +30,7 @@ import (
 type NatsJetStreamChannelLister interface {
 	// List lists all NatsJetStreamChannels in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1alpha1.NatsJetStreamChannel, err error)
+	List(selector labels.Selector) (ret []*messagingv1alpha1.NatsJetStreamChannel, err error)
 	// NatsJetStreamChannels returns an object that can list and get NatsJetStreamChannels.
 	NatsJetStreamChannels(namespace string) NatsJetStreamChannelNamespaceLister
 	NatsJetStreamChannelListerExpansion
@@ -38,17 +38,17 @@ type NatsJetStreamChannelLister interface {
 
 // natsJetStreamChannelLister implements the NatsJetStreamChannelLister interface.
 type natsJetStreamChannelLister struct {
-	listers.ResourceIndexer[*v1alpha1.NatsJetStreamChannel]
+	listers.ResourceIndexer[*messagingv1alpha1.NatsJetStreamChannel]
 }
 
 // NewNatsJetStreamChannelLister returns a new NatsJetStreamChannelLister.
 func NewNatsJetStreamChannelLister(indexer cache.Indexer) NatsJetStreamChannelLister {
-	return &natsJetStreamChannelLister{listers.New[*v1alpha1.NatsJetStreamChannel](indexer, v1alpha1.Resource("natsjetstreamchannel"))}
+	return &natsJetStreamChannelLister{listers.New[*messagingv1alpha1.NatsJetStreamChannel](indexer, messagingv1alpha1.Resource("natsjetstreamchannel"))}
 }
 
 // NatsJetStreamChannels returns an object that can list and get NatsJetStreamChannels.
 func (s *natsJetStreamChannelLister) NatsJetStreamChannels(namespace string) NatsJetStreamChannelNamespaceLister {
-	return natsJetStreamChannelNamespaceLister{listers.NewNamespaced[*v1alpha1.NatsJetStreamChannel](s.ResourceIndexer, namespace)}
+	return natsJetStreamChannelNamespaceLister{listers.NewNamespaced[*messagingv1alpha1.NatsJetStreamChannel](s.ResourceIndexer, namespace)}
 }
 
 // NatsJetStreamChannelNamespaceLister helps list and get NatsJetStreamChannels.
@@ -56,15 +56,15 @@ func (s *natsJetStreamChannelLister) NatsJetStreamChannels(namespace string) Nat
 type NatsJetStreamChannelNamespaceLister interface {
 	// List lists all NatsJetStreamChannels in the indexer for a given namespace.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1alpha1.NatsJetStreamChannel, err error)
+	List(selector labels.Selector) (ret []*messagingv1alpha1.NatsJetStreamChannel, err error)
 	// Get retrieves the NatsJetStreamChannel from the indexer for a given namespace and name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1alpha1.NatsJetStreamChannel, error)
+	Get(name string) (*messagingv1alpha1.NatsJetStreamChannel, error)
 	NatsJetStreamChannelNamespaceListerExpansion
 }
 
 // natsJetStreamChannelNamespaceLister implements the NatsJetStreamChannelNamespaceLister
 // interface.
 type natsJetStreamChannelNamespaceLister struct {
-	listers.ResourceIndexer[*v1alpha1.NatsJetStreamChannel]
+	listers.ResourceIndexer[*messagingv1alpha1.NatsJetStreamChannel]
 }
