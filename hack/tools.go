@@ -29,4 +29,7 @@ import (
 
 	// eventshub is a cloudevents sender/receiver utility for e2e testing.
 	_ "knative.dev/reconciler-test/cmd/eventshub"
+
+	// K8s code generation tools
+	_ "k8s.io/code-generator/cmd/validation-gen"
 )
