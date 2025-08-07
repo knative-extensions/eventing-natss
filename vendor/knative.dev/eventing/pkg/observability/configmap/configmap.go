@@ -1,11 +1,11 @@
 /*
-Copyright 2019 The Knative Authors
+Copyright 2025 The Knative Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,19 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package helpers
+package configmap
 
 import (
-	"log"
+	corev1 "k8s.io/api/core/v1"
+	"knative.dev/eventing/pkg/observability"
+	o11yconfigmap "knative.dev/pkg/observability/configmap"
 )
 
-// Run can run functions that needs dryrun support.
-func Run(message string, call func() error, dryrun bool) error {
-	if dryrun {
-		log.Print("[dry run] ", message)
-		return nil
-	}
-	log.Print(message)
+func Name() string {
+	return o11yconfigmap.Name()
+}
 
-	return call()
+func Parse(c *corev1.ConfigMap) (*observability.Config, error) {
+	return observability.NewFromMap(c.Data)
 }
