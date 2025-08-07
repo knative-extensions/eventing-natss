@@ -33,7 +33,6 @@ import (
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/tracing"
 
 	"knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsjetstreamchannel"
 	"knative.dev/eventing-natss/pkg/common/constants"
@@ -54,11 +53,6 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 	env := &envConfig{}
 	if err := envconfig.Process("", env); err != nil {
 		logger.Panicf("unable to process required environment variables: %v", err)
-	}
-
-	_, err := tracing.SetupPublishingWithDynamicConfig(logger, cmw, "jetstream-ch-dispatcher", "config-tracing")
-	if err != nil {
-		logger.Fatalw("failed to setup tracing", zap.Error(err))
 	}
 
 	fsLoader, err := fsloader.Get(ctx)
