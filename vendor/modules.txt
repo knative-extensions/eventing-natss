@@ -1,6 +1,3 @@
-# contrib.go.opencensus.io/exporter/zipkin v0.1.2
-## explicit
-contrib.go.opencensus.io/exporter/zipkin
 # github.com/antlr/antlr4/runtime/Go/antlr v1.4.10
 ## explicit; go 1.16
 github.com/antlr/antlr4/runtime/Go/antlr
@@ -122,9 +119,6 @@ github.com/gobuffalo/flect
 ## explicit; go 1.15
 github.com/gogo/protobuf/proto
 github.com/gogo/protobuf/sortkeys
-# github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da
-## explicit
-github.com/golang/groupcache/lru
 # github.com/google/gnostic-models v0.6.9
 ## explicit; go 1.21
 github.com/google/gnostic-models/compiler
@@ -233,14 +227,6 @@ github.com/nats-io/nkeys
 # github.com/nats-io/nuid v1.0.1
 ## explicit
 github.com/nats-io/nuid
-# github.com/openzipkin/zipkin-go v0.4.3
-## explicit; go 1.20
-github.com/openzipkin/zipkin-go
-github.com/openzipkin/zipkin-go/idgenerator
-github.com/openzipkin/zipkin-go/model
-github.com/openzipkin/zipkin-go/propagation
-github.com/openzipkin/zipkin-go/reporter
-github.com/openzipkin/zipkin-go/reporter/http
 # github.com/pkg/errors v0.9.1
 ## explicit
 github.com/pkg/errors
@@ -293,25 +279,6 @@ github.com/valyala/bytebufferpool
 # github.com/x448/float16 v0.8.4
 ## explicit; go 1.11
 github.com/x448/float16
-# go.opencensus.io v0.24.0
-## explicit; go 1.13
-go.opencensus.io
-go.opencensus.io/internal
-go.opencensus.io/internal/tagencoding
-go.opencensus.io/metric/metricdata
-go.opencensus.io/metric/metricproducer
-go.opencensus.io/plugin/ochttp
-go.opencensus.io/plugin/ochttp/propagation/b3
-go.opencensus.io/plugin/ochttp/propagation/tracecontext
-go.opencensus.io/resource
-go.opencensus.io/stats
-go.opencensus.io/stats/internal
-go.opencensus.io/stats/view
-go.opencensus.io/tag
-go.opencensus.io/trace
-go.opencensus.io/trace/internal
-go.opencensus.io/trace/propagation
-go.opencensus.io/trace/tracestate
 # go.opentelemetry.io/auto/sdk v1.1.0
 ## explicit; go 1.22.0
 go.opentelemetry.io/auto/sdk
@@ -1207,7 +1174,7 @@ k8s.io/utils/net
 k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/trace
-# knative.dev/eventing v0.46.1-0.20250805061645-51710e296f74
+# knative.dev/eventing v0.46.1-0.20250807145849-50a65f4eec4d
 ## explicit; go 1.24.0
 knative.dev/eventing/pkg/apis
 knative.dev/eventing/pkg/apis/common/integration/v1alpha1
@@ -1275,6 +1242,9 @@ knative.dev/eventing/pkg/eventtype
 knative.dev/eventing/pkg/kncloudevents
 knative.dev/eventing/pkg/kncloudevents/attributes
 knative.dev/eventing/pkg/observability
+knative.dev/eventing/pkg/observability/configmap
+knative.dev/eventing/pkg/observability/otel
+knative.dev/eventing/pkg/observability/resource
 knative.dev/eventing/pkg/tracing
 knative.dev/eventing/pkg/utils
 knative.dev/eventing/test/lib/sender
@@ -1284,7 +1254,7 @@ knative.dev/eventing/test/test_images/print
 # knative.dev/hack v0.0.0-20250708013849-70d4b00da6ba
 ## explicit; go 1.21
 knative.dev/hack
-# knative.dev/pkg v0.0.0-20250804212045-2a0abb7b5eb3
+# knative.dev/pkg v0.0.0-20250807143752-9402b8ca51f1
 ## explicit; go 1.24.0
 knative.dev/pkg/apis
 knative.dev/pkg/apis/duck
@@ -1356,17 +1326,11 @@ knative.dev/pkg/system
 knative.dev/pkg/system/testing
 knative.dev/pkg/test
 knative.dev/pkg/test/environment
-knative.dev/pkg/test/helpers
 knative.dev/pkg/test/ingress
 knative.dev/pkg/test/logging
-knative.dev/pkg/test/monitoring
 knative.dev/pkg/test/security
 knative.dev/pkg/test/spoof
-knative.dev/pkg/test/zipkin
-knative.dev/pkg/tracing
 knative.dev/pkg/tracing/config
-knative.dev/pkg/tracing/propagation
-knative.dev/pkg/tracing/propagation/tracecontextb3
 knative.dev/pkg/tracker
 knative.dev/pkg/version
 knative.dev/pkg/webhook
@@ -1376,7 +1340,7 @@ knative.dev/pkg/webhook/json
 knative.dev/pkg/webhook/resourcesemantics
 knative.dev/pkg/webhook/resourcesemantics/defaulting
 knative.dev/pkg/webhook/resourcesemantics/validation
-# knative.dev/reconciler-test v0.0.0-20250805131045-bc8fcf423e5e
+# knative.dev/reconciler-test v0.0.0-20250807143851-ca38d94fc94f
 ## explicit; go 1.24.0
 knative.dev/reconciler-test/cmd/eventshub
 knative.dev/reconciler-test/pkg/environment
