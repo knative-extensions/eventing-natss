@@ -7,9 +7,9 @@ require (
 	github.com/cloudevents/sdk-go/v2 v2.16.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
-	github.com/hashicorp/go-cleanhttp v0.5.2
+	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.7
-	github.com/hashicorp/golang-lru v1.0.2
+	github.com/hashicorp/golang-lru v1.0.2 // indirect
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/nats-io/nats-server/v2 v2.11.6
 	github.com/nats-io/nats.go v1.43.0
