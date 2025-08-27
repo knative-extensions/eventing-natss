@@ -29,10 +29,10 @@ require (
 	k8s.io/client-go v0.33.4
 	k8s.io/code-generator v0.33.4
 	k8s.io/utils v0.0.0-20241210054802-24370beab758
-	knative.dev/eventing v0.46.1-0.20250819120547-8b0ad5e50960
+	knative.dev/eventing v0.46.1-0.20250827115136-841dfae2b2b2
 	knative.dev/hack v0.0.0-20250819212547-d496a6e708d3
 	knative.dev/pkg v0.0.0-20250820014848-e9c87121ec4c
-	knative.dev/reconciler-test v0.0.0-20250818021647-3bf376b1f1ce
+	knative.dev/reconciler-test v0.0.0-20250820021449-022fc4c64d88
 )
 
 require (
