@@ -59,11 +59,11 @@ const (
 // - Creates a HTTP listener which publishes received events to the Stream
 // - Creates a consumer for each .spec.subscribers[] and forwards events to the subscriber address
 type Reconciler struct {
-	checkOrphanedSubscriptions bool
-	msgingClient               msgingversioned.Interface
-	clientSet                  versioned.Interface
-	js                         nats.JetStreamManager
-	dispatcher                 *Dispatcher
+	skipOrphanedSubscriptions bool
+	msgingClient              msgingversioned.Interface
+	clientSet                 versioned.Interface
+	js                        nats.JetStreamManager
+	dispatcher                *Dispatcher
 
 	streamNameFunc   StreamNameFunc
 	consumerNameFunc ConsumerNameFunc
@@ -97,7 +97,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatsJetStre
 
 func (r *Reconciler) reconcileOrphanedSubscriptions(ctx context.Context, nc *v1alpha1.NatsJetStreamChannel) error {
 	logger := logging.FromContext(ctx)
-	if r.checkOrphanedSubscriptions == false {
+	if r.skipOrphanedSubscriptions {
 		return nil
 	}
 	var allSubsInNs, err = r.msgingClient.MessagingV1().Subscriptions(nc.Namespace).List(ctx, metav1.ListOptions{})

@@ -102,13 +102,13 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 	}
 
 	r := &Reconciler{
-		checkOrphanedSubscriptions: true,
-		msgingClient:               messagingv1client.Get(ctx),
-		clientSet:                  clientinject.Get(ctx),
-		js:                         js,
-		dispatcher:                 dispatcher,
-		streamNameFunc:             utils.StreamName,
-		consumerNameFunc:           dispatcher.consumerNameFunc,
+		skipOrphanedSubscriptions: true,
+		msgingClient:              messagingv1client.Get(ctx),
+		clientSet:                 clientinject.Get(ctx),
+		js:                        js,
+		dispatcher:                dispatcher,
+		streamNameFunc:            utils.StreamName,
+		consumerNameFunc:          dispatcher.consumerNameFunc,
 	}
 
 	impl := natsjetstreamchannel.NewImpl(ctx, r)
