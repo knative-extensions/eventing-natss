@@ -176,7 +176,7 @@ func createReconciler(ctx context.Context, listers *reconciletesting.Listers, js
 		listers.GetNatsJetstreamChannelLister(),
 		controller.GetEventRecorder(ctx),
 		&Reconciler{
-			skipOrphanedSubscriptions: false,
+			skipOrphanedSubscriptions: true,
 			msgingClient:              messagingv1client.Get(ctx),
 			clientSet:                 client.Get(ctx),
 			js:                        js,
