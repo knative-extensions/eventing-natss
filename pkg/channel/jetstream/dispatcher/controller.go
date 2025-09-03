@@ -96,7 +96,7 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 	}
 
 	r := &Reconciler{
-		skipOrphanedSubscriptions: true,
+		skipOrphanedSubscriptions: false,
 		msgingClient:              messagingv1client.Get(ctx),
 		clientSet:                 clientinject.Get(ctx),
 		js:                        js,
