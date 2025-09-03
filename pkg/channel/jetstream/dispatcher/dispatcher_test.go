@@ -139,12 +139,13 @@ func TestDispatcher_ReconcileConsumers(t *testing.T) {
 	require.NoError(t, err)
 
 	reconciler := &Reconciler{
-		msgingClient:     messagingv1client.Get(ctx),
-		clientSet:        client.Get(ctx),
-		js:               js,
-		dispatcher:       d,
-		streamNameFunc:   utils.StreamName,
-		consumerNameFunc: utils.ConsumerName,
+		checkOrphanedSubscriptions: false,
+		msgingClient:               messagingv1client.Get(ctx),
+		clientSet:                  client.Get(ctx),
+		js:                         js,
+		dispatcher:                 d,
+		streamNameFunc:             utils.StreamName,
+		consumerNameFunc:           utils.ConsumerName,
 	}
 	_ = reconciler.reconcileStream(ctx, nc)
 
