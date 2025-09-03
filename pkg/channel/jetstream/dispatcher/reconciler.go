@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	v1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/eventing/pkg/channel"
 	"knative.dev/eventing/pkg/channel/fanout"
@@ -38,6 +39,7 @@ import (
 
 	"knative.dev/eventing-natss/pkg/client/clientset/versioned"
 	commonerr "knative.dev/eventing-natss/pkg/common/error"
+	msgingversioned "knative.dev/eventing/pkg/client/clientset/versioned"
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	jsmreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsjetstreamchannel"
@@ -57,9 +59,10 @@ const (
 // - Creates a HTTP listener which publishes received events to the Stream
 // - Creates a consumer for each .spec.subscribers[] and forwards events to the subscriber address
 type Reconciler struct {
-	clientSet  versioned.Interface
-	js         nats.JetStreamManager
-	dispatcher *Dispatcher
+	msgingClient msgingversioned.Interface
+	clientSet    versioned.Interface
+	js           nats.JetStreamManager
+	dispatcher   *Dispatcher
 
 	streamNameFunc   StreamNameFunc
 	consumerNameFunc ConsumerNameFunc
@@ -78,12 +81,94 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatsJetStre
 		return err
 	}
 
+	if err := r.reconcileOrphanedSubscriptions(ctx, nc); err != nil {
+		logger.Errorw("failed to reconcile orphaned subscriptions", zap.Error(err))
+		return err
+	}
+
 	if err := r.syncChannel(ctx, nc, true); err != nil {
 		logger.Errorw("failed to syncChannel", zap.Error(err))
 		return err
 	}
 
 	return r.reconcileSubscriberStatuses(ctx, nc)
+}
+
+func (r *Reconciler) reconcileOrphanedSubscriptions(ctx context.Context, nc *v1alpha1.NatsJetStreamChannel) error {
+	logger := logging.FromContext(ctx)
+	var allSubsInNs, err = r.msgingClient.MessagingV1().Subscriptions(nc.Namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		logger.Errorw("failed to get subs", zap.Error(err))
+		return err
+	}
+
+	allSubsInNsUids := sets.New[string]()
+	for _, s := range allSubsInNs.Items {
+		allSubsInNsUids.Insert(string(s.UID))
+	}
+
+	subsUids := sets.New[string]()
+	for _, s := range nc.Spec.Subscribers {
+		subsUids.Insert(string(s.UID))
+	}
+
+	orphanedSubs := subsUids.Difference(allSubsInNsUids)
+	if len(orphanedSubs) == 0 {
+		return nil
+	}
+	logger.Warnw("orpaned subscriptions found", zap.Any("orphaned_subs", orphanedSubs))
+
+	after := nc.DeepCopy()
+	after.Status.Subscribers = make([]v1.SubscriberStatus, len(nc.Status.Subscribers)-len(orphanedSubs))
+	after.Spec.Subscribers = make([]v1.SubscriberSpec, len(nc.Spec.Subscribers)-len(orphanedSubs))
+	i := 0
+	for _, s := range nc.Spec.Subscribers {
+		if orphanedSubs.Has(string(s.UID)) {
+			continue
+		}
+
+		after.Spec.Subscribers[i] = *s.DeepCopy()
+		i = i + 1
+	}
+
+	i = 0
+	for _, s := range nc.Status.Subscribers {
+		if orphanedSubs.Has(string(s.UID)) {
+			continue
+		}
+
+		after.Status.Subscribers[i] = *s.DeepCopy()
+		i = i + 1
+	}
+
+	logger.Debugw("reconciling orphaned subscribers")
+
+	jsonPatch, err := duck.CreatePatch(nc, after)
+	if err != nil {
+		return fmt.Errorf("failed to create JSON patch: %w", err)
+	}
+
+	// If there is nothing to patch, we are good, just return.
+	// Empty patch is [], hence we check for that.
+	if len(jsonPatch) == 0 {
+		return nil
+	}
+
+	patch, err := jsonPatch.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch to JSON: %w", err)
+	}
+
+	patched, err := r.clientSet.MessagingV1alpha1().
+		NatsJetStreamChannels(nc.Namespace).
+		Patch(ctx, nc.Name, types.JSONPatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to patch subscriber: %w", err)
+	}
+
+	logger.Debugw("patched resource", zap.Any("patch", patch), zap.Any("patched", patched))
+
+	return nil
 }
 
 func (r *Reconciler) reconcileSubscriberStatuses(ctx context.Context, nc *v1alpha1.NatsJetStreamChannel) error {
