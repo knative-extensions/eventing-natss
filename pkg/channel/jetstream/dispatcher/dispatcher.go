@@ -145,6 +145,8 @@ func (d *Dispatcher) ReconcileConsumers(ctx context.Context, config ChannelConfi
 		currentSubs = sets.New[string]()
 	}
 	expectedSubs := sets.New[string](config.SubscriptionsUIDs()...)
+	logger.Infow("expected", zap.Any("expected_subs", expectedSubs))
+	logger.Infow("current", zap.Any("current_subs", currentSubs))
 
 	toAddSubs := expectedSubs.Difference(currentSubs)
 	toRemoveSubs := currentSubs.Difference(expectedSubs)

@@ -27,6 +27,7 @@ import (
 	jsminformer "knative.dev/eventing-natss/pkg/client/injection/informers/messaging/v1alpha1/natsjetstreamchannel"
 	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 	"knative.dev/eventing/pkg/apis/eventing"
+	messagingv1client "knative.dev/eventing/pkg/client/injection/client"
 	"knative.dev/pkg/injection"
 	pkgreconciler "knative.dev/pkg/reconciler"
 
@@ -95,6 +96,7 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 	}
 
 	r := &Reconciler{
+		msgingClient:     messagingv1client.Get(ctx),
 		clientSet:        clientinject.Get(ctx),
 		js:               js,
 		dispatcher:       dispatcher,
