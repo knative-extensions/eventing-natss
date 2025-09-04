@@ -39,6 +39,7 @@ import (
 	"knative.dev/eventing-natss/pkg/client/injection/client"
 	natsjschannelreconciler "knative.dev/eventing-natss/pkg/client/injection/reconciler/messaging/v1alpha1/natsjetstreamchannel"
 	reconciletesting "knative.dev/eventing-natss/pkg/reconciler/testing"
+	messagingv1client "knative.dev/eventing/pkg/client/injection/client"
 )
 
 const (
@@ -175,11 +176,13 @@ func createReconciler(ctx context.Context, listers *reconciletesting.Listers, js
 		listers.GetNatsJetstreamChannelLister(),
 		controller.GetEventRecorder(ctx),
 		&Reconciler{
-			clientSet:        client.Get(ctx),
-			js:               js,
-			dispatcher:       dispatcherFactory(),
-			streamNameFunc:   utils.StreamName,
-			consumerNameFunc: utils.ConsumerName,
+			skipOrphanedSubscriptions: true,
+			msgingClient:              messagingv1client.Get(ctx),
+			clientSet:                 client.Get(ctx),
+			js:                        js,
+			dispatcher:                dispatcherFactory(),
+			streamNameFunc:            utils.StreamName,
+			consumerNameFunc:          utils.ConsumerName,
 		},
 		controller.Options{
 			FinalizerName: "jetstream-ch-dispatcher",
