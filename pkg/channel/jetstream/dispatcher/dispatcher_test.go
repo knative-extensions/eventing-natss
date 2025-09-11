@@ -139,7 +139,7 @@ func TestDispatcher_ReconcileConsumers(t *testing.T) {
 	require.NoError(t, err)
 
 	reconciler := &Reconciler{
-		skipOrphanedSubscriptions: true,
+		skipOrphanedSubscriptions: false,
 		msgingClient:              messagingv1client.Get(ctx),
 		clientSet:                 client.Get(ctx),
 		js:                        js,
