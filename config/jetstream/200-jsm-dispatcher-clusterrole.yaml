@@ -24,12 +24,20 @@ rules:
     resources:
       - natsjetstreamchannels
       - natsjetstreamchannels/status
+      - natsjetstreamchannels/spec
     verbs:
       - get
       - list
       - watch
       - update
       - patch
+  - apiGroups:
+      - messaging.knative.dev
+    resources:
+      - subscriptions
+    verbs:
+      - get
+      - list
   - apiGroups:
       - eventing.knative.dev
     resources:
