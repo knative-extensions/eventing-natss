@@ -35,6 +35,7 @@ import (
 	"knative.dev/eventing-natss/pkg/client/injection/client"
 	fakeclientset "knative.dev/eventing-natss/pkg/client/injection/client/fake"
 	reconcilertesting "knative.dev/eventing-natss/pkg/reconciler/testing"
+	messagingv1client "knative.dev/eventing/pkg/client/injection/client"
 	fakeeventingclient "knative.dev/eventing/pkg/client/injection/client/fake"
 	fakekubeclient "knative.dev/pkg/client/injection/kube/client/fake"
 	"knative.dev/pkg/controller"
@@ -138,11 +139,13 @@ func TestDispatcher_ReconcileConsumers(t *testing.T) {
 	require.NoError(t, err)
 
 	reconciler := &Reconciler{
-		clientSet:        client.Get(ctx),
-		js:               js,
-		dispatcher:       d,
-		streamNameFunc:   utils.StreamName,
-		consumerNameFunc: utils.ConsumerName,
+		skipOrphanedSubscriptions: false,
+		msgingClient:              messagingv1client.Get(ctx),
+		clientSet:                 client.Get(ctx),
+		js:                        js,
+		dispatcher:                d,
+		streamNameFunc:            utils.StreamName,
+		consumerNameFunc:          utils.ConsumerName,
 	}
 	_ = reconciler.reconcileStream(ctx, nc)
 
