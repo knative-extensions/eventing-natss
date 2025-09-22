@@ -123,7 +123,6 @@ func (r *Reconciler) reconcileOrphanedSubscriptions(ctx context.Context, nc *v1a
 	logger.Warnw("orpaned subscriptions found", zap.Any("orphaned_subs", orphanedSubs))
 
 	after := nc.DeepCopy()
-	after.Status.Subscribers = make([]v1.SubscriberStatus, len(nc.Status.Subscribers)-len(orphanedSubs))
 	after.Spec.Subscribers = make([]v1.SubscriberSpec, len(nc.Spec.Subscribers)-len(orphanedSubs))
 	i := 0
 	for _, s := range nc.Spec.Subscribers {
@@ -132,16 +131,6 @@ func (r *Reconciler) reconcileOrphanedSubscriptions(ctx context.Context, nc *v1a
 		}
 
 		after.Spec.Subscribers[i] = *s.DeepCopy()
-		i = i + 1
-	}
-
-	i = 0
-	for _, s := range nc.Status.Subscribers {
-		if orphanedSubs.Has(string(s.UID)) {
-			continue
-		}
-
-		after.Status.Subscribers[i] = *s.DeepCopy()
 		i = i + 1
 	}
 
