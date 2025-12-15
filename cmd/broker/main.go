@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Knative Authors
+Copyright 2024 The Knative Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,14 +17,26 @@ limitations under the License.
 package main
 
 import (
+	// Import GCP auth plugin for authentication with GKE clusters
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
-	"knative.dev/eventing-natss/pkg/broker/controller"
+
+	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/injection/sharedmain"
+	"knative.dev/pkg/signals"
+
+	"knative.dev/eventing-natss/pkg/broker/controller"
+	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 )
 
 func main() {
-	sharedmain.Main(controller.ComponentName,
+	ctx := signals.NewContext()
+
+	// nats-config is volume mounted so initialize the fsloader
+	ctx = fsloader.WithLoader(ctx, configmap.Load)
+
+	sharedmain.MainWithContext(ctx, controller.ComponentName,
 		controller.NewController,
+		// TODO: Add trigger controller when implemented
 		// trigger.NewController,
 	)
 }
