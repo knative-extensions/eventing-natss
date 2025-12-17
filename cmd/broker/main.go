@@ -25,6 +25,7 @@ import (
 	"knative.dev/pkg/signals"
 
 	"knative.dev/eventing-natss/pkg/broker/controller"
+	"knative.dev/eventing-natss/pkg/broker/trigger"
 	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 )
 
@@ -36,7 +37,6 @@ func main() {
 
 	sharedmain.MainWithContext(ctx, controller.ComponentName,
 		controller.NewController,
-		// TODO: Add trigger controller when implemented
-		// trigger.NewController,
+		trigger.NewController,
 	)
 }
