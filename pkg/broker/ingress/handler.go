@@ -138,7 +138,8 @@ func (h *Handler) publishToJetStream(ctx context.Context, event *ce.Event) error
 	}
 
 	// Build the subject name for publishing
-	subject := brokerutils.BrokerPublishSubjectName(h.namespace, h.brokerName)
+	// Add .events suffix to match the stream's subject pattern (publishSubject.>)
+	subject := brokerutils.BrokerPublishSubjectName(h.namespace, h.brokerName) + ".events"
 
 	// Publish to JetStream with message ID for deduplication
 	_, err := h.js.Publish(subject, writer.Bytes(), nats.MsgId(string(eventID)))

@@ -144,14 +144,18 @@ func (m *ConsumerManager) SubscribeTrigger(
 		return fmt.Errorf("failed to get consumer info: %w", err)
 	}
 
+	// Get the filter subject from the consumer's configuration
+	filterSubject := brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
+
 	logger.Infow("creating pull subscription for trigger consumer",
 		zap.String("stream", streamName),
 		zap.String("consumer", consumerName),
+		zap.String("filter_subject", filterSubject),
 	)
 
 	// Create pull subscription bound to the existing consumer
 	sub, err := m.js.PullSubscribe(
-		"", // subject is ignored when binding to existing consumer
+		filterSubject,
 		consumerName,
 		nats.Bind(streamName, consumerName),
 	)
