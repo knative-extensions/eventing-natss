@@ -34,7 +34,6 @@ import (
 
 	brokerinformer "knative.dev/eventing/pkg/client/injection/informers/eventing/v1/broker"
 	deploymentinformer "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment"
-	endpointsinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/endpoints"
 	serviceinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/service"
 
 	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
@@ -112,7 +111,6 @@ func NewController(
 	brokerInformer := brokerinformer.Get(ctx)
 	deploymentInformer := deploymentinformer.Get(ctx)
 	serviceInformer := serviceinformer.Get(ctx)
-	endpointsInformer := endpointsinformer.Get(ctx)
 
 	// Create reconciler
 	r := &Reconciler{
@@ -120,7 +118,6 @@ func NewController(
 
 		deploymentLister: deploymentInformer.Lister(),
 		serviceLister:    serviceInformer.Lister(),
-		endpointsLister:  endpointsInformer.Lister(),
 
 		js: js,
 
@@ -147,12 +144,6 @@ func NewController(
 
 	// Watch services owned by brokers
 	serviceInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: controller.FilterControllerGK(eventingv1.Kind("Broker")),
-		Handler:    controller.HandleAll(impl.EnqueueControllerOf),
-	})
-
-	// Watch endpoints for broker services
-	endpointsInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: controller.FilterControllerGK(eventingv1.Kind("Broker")),
 		Handler:    controller.HandleAll(impl.EnqueueControllerOf),
 	})

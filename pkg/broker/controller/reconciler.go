@@ -68,7 +68,6 @@ type Reconciler struct {
 	// Listers for Kubernetes resources
 	deploymentLister appsv1listers.DeploymentLister
 	serviceLister    corev1listers.ServiceLister
-	endpointsLister  corev1listers.EndpointsLister
 
 	// NATS JetStream connection
 	js nats.JetStreamContext
@@ -104,7 +103,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 		return err
 	}
 
-	// Step 4: Check ingress endpoints readiness
+	// Step 4: Check ingress deployment readiness
 	if err := r.propagateIngressAvailability(ctx, b, ingressService); err != nil {
 		return err
 	}
@@ -120,7 +119,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 		return err
 	}
 
-	// Step 7: Check filter endpoints readiness
+	// Step 7: Check filter deployment readiness
 	if err := r.propagateFilterAvailability(ctx, b, filterService); err != nil {
 		return err
 	}
@@ -133,6 +132,20 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 			Host:   network.GetServiceHostname(ingressService.Name, ingressService.Namespace),
 		},
 	})
+
+	// Step 9: Mark TriggerChannel as ready (we use JetStream instead of a channel)
+	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionTriggerChannel)
+
+	// Step 10: Mark DeadLetterSink condition
+	if b.Spec.Delivery == nil || b.Spec.Delivery.DeadLetterSink == nil {
+		b.Status.MarkDeadLetterSinkNotConfigured()
+	} else {
+		// TODO: Resolve dead letter sink URI and mark as succeeded
+		b.Status.MarkDeadLetterSinkNotConfigured()
+	}
+
+	// Step 11: Mark EventPolicies as ready (not using OIDC authentication)
+	b.Status.MarkEventPoliciesTrueWithReason("EventPoliciesSkipped", "Feature %q is disabled", "OIDC")
 
 	logger.Infow("Broker reconciliation completed successfully", zap.String("broker", b.Name))
 	return nil
@@ -266,79 +279,55 @@ func (r *Reconciler) reconcileIngressService(ctx context.Context, b *eventingv1.
 	return existing, nil
 }
 
-// propagateIngressAvailability checks if the ingress endpoints are available
+// propagateIngressAvailability checks if the ingress deployment is available
 func (r *Reconciler) propagateIngressAvailability(ctx context.Context, b *eventingv1.Broker, svc *corev1.Service) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
-	endpoints, err := r.endpointsLister.Endpoints(svc.Namespace).Get(svc.Name)
+	deploymentName := resources.IngressName(b.Name)
+	deployment, err := r.deploymentLister.Deployments(b.Namespace).Get(deploymentName)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			b.Status.MarkIngressFailed("EndpointsNotFound", "Ingress endpoints do not exist")
+			b.Status.MarkIngressFailed("DeploymentNotFound", "Ingress deployment does not exist")
 			return nil // Don't return error, let controller requeue
 		}
-		logger.Errorw("Failed to get ingress endpoints", zap.Error(err))
-		b.Status.MarkIngressFailed("EndpointsGetFailed", "Failed to get ingress endpoints: %v", err)
-		return fmt.Errorf("failed to get ingress endpoints: %w", err)
+		logger.Errorw("Failed to get ingress deployment", zap.Error(err))
+		b.Status.MarkIngressFailed("DeploymentGetFailed", "Failed to get ingress deployment: %v", err)
+		return fmt.Errorf("failed to get ingress deployment: %w", err)
 	}
 
-	if len(endpoints.Subsets) == 0 {
-		b.Status.MarkIngressFailed("EndpointsNotReady", "Ingress endpoints are not ready")
+	if deployment.Status.ReadyReplicas == 0 {
+		b.Status.MarkIngressFailed("DeploymentNotReady", "Ingress deployment has no ready replicas")
 		return nil // Don't return error, let controller requeue
 	}
 
-	// Check if we have at least one ready address
-	hasReadyAddress := false
-	for _, subset := range endpoints.Subsets {
-		if len(subset.Addresses) > 0 {
-			hasReadyAddress = true
-			break
-		}
-	}
-
-	if !hasReadyAddress {
-		b.Status.MarkIngressFailed("EndpointsNotReady", "Ingress endpoints have no ready addresses")
-		return nil
-	}
-
-	b.Status.PropagateIngressAvailability(endpoints)
+	// Mark ingress as ready using condition set manager
+	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionIngress)
 	return nil
 }
 
-// propagateFilterAvailability checks if the filter endpoints are available
+// propagateFilterAvailability checks if the filter deployment is available
 func (r *Reconciler) propagateFilterAvailability(ctx context.Context, b *eventingv1.Broker, svc *corev1.Service) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
-	endpoints, err := r.endpointsLister.Endpoints(svc.Namespace).Get(svc.Name)
+	deploymentName := resources.FilterName(b.Name)
+	deployment, err := r.deploymentLister.Deployments(b.Namespace).Get(deploymentName)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			b.Status.MarkFilterFailed("EndpointsNotFound", "Filter endpoints do not exist")
+			b.Status.MarkFilterFailed("DeploymentNotFound", "Filter deployment does not exist")
 			return nil // Don't return error, let controller requeue
 		}
-		logger.Errorw("Failed to get filter endpoints", zap.Error(err))
-		b.Status.MarkFilterFailed("EndpointsGetFailed", "Failed to get filter endpoints: %v", err)
-		return fmt.Errorf("failed to get filter endpoints: %w", err)
+		logger.Errorw("Failed to get filter deployment", zap.Error(err))
+		b.Status.MarkFilterFailed("DeploymentGetFailed", "Failed to get filter deployment: %v", err)
+		return fmt.Errorf("failed to get filter deployment: %w", err)
 	}
 
-	if len(endpoints.Subsets) == 0 {
-		b.Status.MarkFilterFailed("EndpointsNotReady", "Filter endpoints are not ready")
+	if deployment.Status.ReadyReplicas == 0 {
+		b.Status.MarkFilterFailed("DeploymentNotReady", "Filter deployment has no ready replicas")
 		return nil // Don't return error, let controller requeue
 	}
 
-	// Check if we have at least one ready address
-	hasReadyAddress := false
-	for _, subset := range endpoints.Subsets {
-		if len(subset.Addresses) > 0 {
-			hasReadyAddress = true
-			break
-		}
-	}
-
-	if !hasReadyAddress {
-		b.Status.MarkFilterFailed("EndpointsNotReady", "Filter endpoints have no ready addresses")
-		return nil
-	}
-
-	b.Status.PropagateFilterAvailability(endpoints)
+	// Mark filter as ready using condition set manager
+	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionFilter)
 	return nil
 }
 

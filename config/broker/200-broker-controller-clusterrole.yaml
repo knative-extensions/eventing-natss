@@ -98,6 +98,14 @@ rules:
       - delete
   # Manage services for ingress and filter
   - apiGroups:
+      - "serving.knative.dev"
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
       - ""
     resources:
       - services
@@ -108,15 +116,6 @@ rules:
       - create
       - update
       - delete
-  # Watch endpoints for service resolution
-  - apiGroups:
-      - ""
-    resources:
-      - endpoints
-    verbs:
-      - get
-      - list
-      - watch
   # Leader election
   - apiGroups:
       - coordination.k8s.io

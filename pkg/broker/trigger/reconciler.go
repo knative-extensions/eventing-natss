@@ -29,9 +29,11 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 
 	"knative.dev/pkg/apis"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
+	"knative.dev/pkg/resolver"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	triggerreconciler "knative.dev/eventing/pkg/client/injection/reconciler/eventing/v1/trigger"
@@ -55,6 +57,9 @@ type Reconciler struct {
 
 	// NATS JetStream connection
 	js nats.JetStreamContext
+
+	// URI resolver for resolving subscriber and dead letter sink addresses
+	uriResolver *resolver.URIResolver
 
 	// Configuration
 	filterServiceName string
@@ -132,6 +137,9 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, trigger *eventingv1.Trig
 	// Mark dependency as succeeded (we don't have external dependencies)
 	trigger.Status.MarkDependencySucceeded()
 
+	// Mark OIDC identity as not needed (OIDC authentication is not enabled)
+	trigger.Status.MarkOIDCIdentityCreatedSucceededWithReason("OIDCIdentitySkipped", "OIDC authentication is not enabled")
+
 	logger.Infow("Trigger reconciliation completed successfully", zap.String("trigger", trigger.Name))
 	return nil
 }
@@ -171,35 +179,24 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, trigger *eventingv1.Trigg
 func (r *Reconciler) resolveSubscriberURI(ctx context.Context, trigger *eventingv1.Trigger) (*apis.URL, error) {
 	dest := trigger.Spec.Subscriber
 
-	// If URI is specified directly
-	if dest.URI != nil && dest.URI.URL().IsAbs() && dest.URI.Host != "" {
-		return dest.URI, nil
+	// Convert to duckv1.Destination for the resolver
+	destination := duckv1.Destination{
+		URI: dest.URI,
 	}
-
-	// If it's a reference, we need to resolve it
 	if dest.Ref != nil {
-		// For K8s Services, construct the URL directly
-		if dest.Ref.APIVersion == "v1" && dest.Ref.Kind == "Service" {
-			namespace := dest.Ref.Namespace
-			if namespace == "" {
-				namespace = trigger.Namespace
-			}
-			url := &apis.URL{
-				Scheme: "http",
-				Host:   fmt.Sprintf("%s.%s.svc.cluster.local", dest.Ref.Name, namespace),
-			}
-			if dest.URI != nil {
-				url = url.ResolveReference(dest.URI)
-			}
-			return url, nil
+		namespace := dest.Ref.Namespace
+		if namespace == "" {
+			namespace = trigger.Namespace
 		}
-
-		// For other references, we would need to look up the addressable
-		// This is a simplified implementation
-		return nil, fmt.Errorf("unsupported reference kind: %s/%s", dest.Ref.APIVersion, dest.Ref.Kind)
+		destination.Ref = &duckv1.KReference{
+			Kind:       dest.Ref.Kind,
+			Namespace:  namespace,
+			Name:       dest.Ref.Name,
+			APIVersion: dest.Ref.APIVersion,
+		}
 	}
 
-	return nil, errors.New("subscriber must have either a URI or a Ref")
+	return r.uriResolver.URIFromDestinationV1(ctx, destination, trigger)
 }
 
 // resolveDeadLetterURI resolves the dead letter sink URI from the trigger spec
@@ -210,33 +207,24 @@ func (r *Reconciler) resolveDeadLetterURI(ctx context.Context, trigger *eventing
 
 	dest := trigger.Spec.Delivery.DeadLetterSink
 
-	// If URI is specified directly
-	if dest.URI != nil && dest.URI.URL().IsAbs() && dest.URI.Host != "" {
-		return dest.URI, nil
+	// Convert to duckv1.Destination for the resolver
+	destination := duckv1.Destination{
+		URI: dest.URI,
 	}
-
-	// If it's a reference, we need to resolve it
 	if dest.Ref != nil {
-		// For K8s Services, construct the URL directly
-		if dest.Ref.APIVersion == "v1" && dest.Ref.Kind == "Service" {
-			namespace := dest.Ref.Namespace
-			if namespace == "" {
-				namespace = trigger.Namespace
-			}
-			url := &apis.URL{
-				Scheme: "http",
-				Host:   fmt.Sprintf("%s.%s.svc.cluster.local", dest.Ref.Name, namespace),
-			}
-			if dest.URI != nil {
-				url = url.ResolveReference(dest.URI)
-			}
-			return url, nil
+		namespace := dest.Ref.Namespace
+		if namespace == "" {
+			namespace = trigger.Namespace
 		}
-
-		return nil, fmt.Errorf("unsupported dead letter sink reference kind: %s/%s", dest.Ref.APIVersion, dest.Ref.Kind)
+		destination.Ref = &duckv1.KReference{
+			Kind:       dest.Ref.Kind,
+			Namespace:  namespace,
+			Name:       dest.Ref.Name,
+			APIVersion: dest.Ref.APIVersion,
+		}
 	}
 
-	return nil, errors.New("dead letter sink must have either a URI or a Ref")
+	return r.uriResolver.URIFromDestinationV1(ctx, destination, trigger)
 }
 
 // reconcileConsumer creates or updates the JetStream consumer for the trigger

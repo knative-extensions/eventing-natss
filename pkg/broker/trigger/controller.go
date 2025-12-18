@@ -27,6 +27,7 @@ import (
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
+	"knative.dev/pkg/resolver"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	brokerinformer "knative.dev/eventing/pkg/client/injection/informers/eventing/v1/broker"
@@ -120,6 +121,9 @@ func NewController(
 			PromoteFilterFunc: filterTriggersByBrokerClass(r),
 		}
 	})
+
+	// Create URI resolver for resolving subscriber and dead letter sink addresses
+	r.uriResolver = resolver.NewURIResolverFromTracker(ctx, impl.Tracker)
 
 	// Set up event handlers for Trigger resources
 	triggerInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
