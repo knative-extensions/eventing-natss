@@ -284,7 +284,7 @@ func (r *Reconciler) reconcileConsumer(ctx context.Context, trigger *eventingv1.
 	return nil
 }
 
-// buildConsumerConfig creates a NATS JetStream consumer configuration for the trigger
+// buildConsumerConfig creates a NATS JetStream pull consumer configuration for the trigger
 func (r *Reconciler) buildConsumerConfig(trigger *eventingv1.Trigger, broker *eventingv1.Broker, consumerName string) *nats.ConsumerConfig {
 	// The filter subject matches all events published to the broker
 	filterSubject := brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
@@ -306,19 +306,15 @@ func (r *Reconciler) buildConsumerConfig(trigger *eventingv1.Trigger, broker *ev
 		}
 	}
 
-	// Build the deliver subject for push delivery to the filter service
-	deliverSubject := brokerutils.TriggerConsumerSubjectName(trigger.Namespace, broker.Name, string(trigger.UID))
-
+	// Pull consumer configuration (no DeliverSubject or DeliverGroup)
 	return &nats.ConsumerConfig{
-		Durable:        consumerName,
-		Name:           consumerName,
-		DeliverSubject: deliverSubject,
-		DeliverGroup:   consumerName, // Queue group for load balancing across filter replicas
-		FilterSubject:  filterSubject,
-		AckPolicy:      nats.AckExplicitPolicy,
-		AckWait:        ackWait,
-		MaxDeliver:     maxDeliver,
-		DeliverPolicy:  nats.DeliverAllPolicy,
-		ReplayPolicy:   nats.ReplayInstantPolicy,
+		Durable:       consumerName,
+		Name:          consumerName,
+		FilterSubject: filterSubject,
+		AckPolicy:     nats.AckExplicitPolicy,
+		AckWait:       ackWait,
+		MaxDeliver:    maxDeliver,
+		DeliverPolicy: nats.DeliverAllPolicy,
+		ReplayPolicy:  nats.ReplayInstantPolicy,
 	}
 }
