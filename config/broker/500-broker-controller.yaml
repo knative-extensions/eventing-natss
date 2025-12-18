@@ -50,6 +50,14 @@ spec:
               value: config-observability
             - name: METRICS_DOMAIN
               value: knative.dev/eventing
+            - name: BROKER_INGRESS_IMAGE
+              value: ko://knative.dev/eventing-natss/cmd/ingress
+            - name: BROKER_FILTER_IMAGE
+              value: ko://knative.dev/eventing-natss/cmd/filter
+            - name: BROKER_INGRESS_SERVICE_ACCOUNT
+              value: natsjetstream-broker-dataplane
+            - name: BROKER_FILTER_SERVICE_ACCOUNT
+              value: natsjetstream-broker-dataplane
           ports:
             - containerPort: 9090
               name: metrics
@@ -70,3 +78,11 @@ spec:
                 - ALL
             seccompProfile:
               type: RuntimeDefault
+          volumeMounts:
+            - name: config-nats
+              mountPath: /etc/config-nats
+              readOnly: true
+      volumes:
+        - name: config-nats
+          configMap:
+            name: config-nats

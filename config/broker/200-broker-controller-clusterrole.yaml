@@ -37,6 +37,24 @@ rules:
       - brokers/finalizers
     verbs:
       - update
+  # Watch and update Triggers
+  - apiGroups:
+      - eventing.knative.dev
+    resources:
+      - triggers
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+  # Update Trigger status and finalizers
+  - apiGroups:
+      - eventing.knative.dev
+    resources:
+      - triggers/status
+      - triggers/finalizers
+    verbs:
+      - update
   # Create and manage events
   - apiGroups:
       - ""
@@ -64,6 +82,30 @@ rules:
       - get
       - list
       - watch
+  # Manage deployments for ingress and filter
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - delete
+  # Manage services for ingress and filter
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - delete
   # Watch endpoints for service resolution
   - apiGroups:
       - ""
@@ -73,3 +115,15 @@ rules:
       - get
       - list
       - watch
+  # Leader election
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - delete

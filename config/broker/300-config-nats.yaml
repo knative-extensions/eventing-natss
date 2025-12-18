@@ -12,17 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: natsjetstream-trigger-controller
+  name: config-nats
+  namespace: knative-eventing
   labels:
     nats.eventing.knative.dev/release: devel
-subjects:
-  - kind: ServiceAccount
-    name: natsjetstream-trigger-controller
-    namespace: knative-eventing
-roleRef:
-  kind: ClusterRole
-  name: natsjetstream-trigger-controller
-  apiGroup: rbac.authorization.k8s.io
+data:
+  eventing-nats: |
+    url: nats://nats.nats-io.svc.cluster.local:4222
+    connOpts:
+      retryOnFailedConnect: true
+      maxReconnects: 5
+      reconnectWaitMilliseconds: 2000
+      reconnectJitterMilliseconds: 100
+      reconnectJitterTLSMilliseconds: 1000
