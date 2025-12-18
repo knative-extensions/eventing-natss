@@ -29,6 +29,7 @@ rules:
       - list
       - watch
       - update
+      - patch
   # Update Broker status and finalizers
   - apiGroups:
       - eventing.knative.dev
@@ -47,6 +48,7 @@ rules:
       - list
       - watch
       - update
+      - patch
   # Update Trigger status and finalizers
   - apiGroups:
       - eventing.knative.dev

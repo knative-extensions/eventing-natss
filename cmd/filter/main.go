@@ -32,7 +32,6 @@ import (
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/injection"
-	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/signals"
 
@@ -59,7 +58,8 @@ func main() {
 	ctx := signals.NewContext()
 
 	// Setup logging
-	cfg, err := sharedmain.GetLoggingConfig(ctx)
+	// cfg, err := sharedmain.GetLoggingConfig(ctx)
+	cfg, err := logging.NewConfigFromMap(map[string]string{})
 	if err != nil {
 		panic(err)
 	}

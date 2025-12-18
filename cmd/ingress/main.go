@@ -50,7 +50,7 @@ func main() {
 	ctx := signals.NewContext()
 
 	// Set up logging
-	loggingConfig, err := logging.NewConfigFromMap(nil)
+	loggingConfig, err := logging.NewConfigFromMap(map[string]string{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create logging config: %v\n", err)
 		os.Exit(1)

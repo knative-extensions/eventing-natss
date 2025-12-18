@@ -28,6 +28,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/system"
 
@@ -57,7 +58,17 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 		url = constants.DefaultNatsURL
 	}
 
-	coreV1Client, err := clientsetcorev1.NewForConfig(injection.GetConfig(ctx))
+	// Try to get config from injection, fall back to in-cluster config
+	cfg := injection.GetConfig(ctx)
+	if cfg == nil {
+		var err error
+		cfg, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get kubernetes config: %w", err)
+		}
+	}
+
+	coreV1Client, err := clientsetcorev1.NewForConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
