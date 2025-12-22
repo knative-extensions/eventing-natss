@@ -27,7 +27,6 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
-	"knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/logging"
 
@@ -60,7 +59,7 @@ type TriggerHandler struct {
 	retryConfig *kncloudevents.RetryConfig
 
 	// Dead letter sink
-	deadLetterSinkURI string
+	deadLetterSink *duckv1.Addressable
 
 	natsSub          *nats.Subscription
 	natsConsumerInfo *nats.ConsumerInfo
@@ -72,7 +71,7 @@ func NewTriggerHandler(
 	trigger *eventingv1.Trigger,
 	subscriber duckv1.Addressable,
 	brokerIngressURL *duckv1.Addressable,
-	deadLetterSinkURI string,
+	deadLetterSink *duckv1.Addressable,
 	retryConfig *kncloudevents.RetryConfig,
 	dispatcher *kncloudevents.Dispatcher,
 ) (*TriggerHandler, error) {
@@ -88,15 +87,15 @@ func NewTriggerHandler(
 	}
 
 	return &TriggerHandler{
-		logger:            logger,
-		ctx:               ctx,
-		trigger:           trigger,
-		subscriber:        subscriber,
-		filter:            filter,
-		brokerIngressURL:  brokerIngressURL,
-		dispatcher:        dispatcher,
-		retryConfig:       retryConfig,
-		deadLetterSinkURI: deadLetterSinkURI,
+		logger:           logger,
+		ctx:              ctx,
+		trigger:          trigger,
+		subscriber:       subscriber,
+		filter:           filter,
+		brokerIngressURL: brokerIngressURL,
+		dispatcher:       dispatcher,
+		retryConfig:      retryConfig,
+		deadLetterSink:   deadLetterSink,
 	}, nil
 }
 
@@ -160,15 +159,6 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		zap.String("id", event.ID()),
 	)
 
-
-	// Build dead letter sink addressable
-	var deadLetterSink *duckv1.Addressable
-	if h.deadLetterSinkURI != "" {
-		if dlsURL, err := apis.ParseURL(h.deadLetterSinkURI); err == nil {
-			deadLetterSink = &duckv1.Addressable{URL: dlsURL}
-		}
-	}
-
 	te := dispatcher.TypeExtractorTransformer("")
 
 	dispatchInfo, err := dispatcher.SendMessage(
@@ -179,7 +169,7 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		h.natsConsumerInfo.Config.AckWait,
 		msg,
 		dispatcher.WithReply(h.brokerIngressURL),
-		dispatcher.WithDeadLetterSink(deadLetterSink),
+		dispatcher.WithDeadLetterSink(h.deadLetterSink),
 		dispatcher.WithRetryConfig(h.retryConfig),
 		dispatcher.WithTransformers(&te),
 		dispatcher.WithHeader(additionalHeaders),
@@ -201,14 +191,6 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 // dispatchEvent sends the event to the subscriber and handles ack/nack
 func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.Event, msg *nats.Msg) (*kncloudevents.DispatchInfo, error) {
 	logger := logging.FromContext(ctx)
-
-	// Build dead letter sink addressable
-	var deadLetterSink *duckv1.Addressable
-	if h.deadLetterSinkURI != "" {
-		if dlsURL, err := apis.ParseURL(h.deadLetterSinkURI); err == nil {
-			deadLetterSink = &duckv1.Addressable{URL: dlsURL}
-		}
-	}
 
 	// Get retry number from message metadata
 	retryNumber := 1
@@ -249,9 +231,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 			logger.Errorw("failed to ack message", zap.Error(err))
 		}
 	case protocol.IsNACK(result):
-		if lastTry && deadLetterSink != nil {
+		if lastTry && h.deadLetterSink != nil {
 			// Send to dead letter sink
-			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *deadLetterSink)
+			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *h.deadLetterSink)
 			if dlsErr != nil {
 				logger.Errorw("failed to send to dead letter sink",
 					zap.Error(dlsErr),
@@ -271,9 +253,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 		}
 	default:
 		// Terminate - non-retriable error
-		if lastTry && deadLetterSink != nil {
+		if lastTry && h.deadLetterSink != nil {
 			// Send to dead letter sink
-			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *deadLetterSink)
+			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *h.deadLetterSink)
 			if dlsErr != nil {
 				logger.Errorw("failed to send to dead letter sink",
 					zap.Error(dlsErr),

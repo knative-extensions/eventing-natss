@@ -105,10 +105,10 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 		brokerIngressURL = &duckv1.Addressable{URL: broker.Status.Address.URL.DeepCopy()}
 	}
 
-	// Get dead letter sink URI if configured
-	var deadLetterSinkURI string
+	// Get dead letter sink if configured
+	var deadLetterSink *duckv1.Addressable
 	if trigger.Status.DeadLetterSinkURI != nil {
-		deadLetterSinkURI = trigger.Status.DeadLetterSinkURI.String()
+		deadLetterSink = &duckv1.Addressable{URL: trigger.Status.DeadLetterSinkURI.DeepCopy()}
 	}
 
 	// Build retry config from trigger delivery spec
@@ -128,7 +128,7 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 		broker,
 		subscriber,
 		brokerIngressURL,
-		deadLetterSinkURI,
+		deadLetterSink,
 		retryConfig,
 	)
 	if err != nil {

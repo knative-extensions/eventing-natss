@@ -92,7 +92,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	broker *eventingv1.Broker,
 	subscriber duckv1.Addressable,
 	brokerIngressURL *duckv1.Addressable,
-	deadLetterSinkURI string,
+	deadLetterSink *duckv1.Addressable,
 	retryConfig *kncloudevents.RetryConfig,
 ) error {
 	m.mu.Lock()
@@ -125,7 +125,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 		trigger,
 		subscriber,
 		brokerIngressURL,
-		deadLetterSinkURI,
+		deadLetterSink,
 		retryConfig,
 		m.dispatcher,
 	)
