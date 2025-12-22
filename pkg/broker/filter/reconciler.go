@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/logging"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
@@ -95,8 +96,8 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 		return nil
 	}
 
-	// Get subscriber URI from trigger status
-	subscriberURI := trigger.Status.SubscriberURI.String()
+	// Build subscriber addressable from trigger status
+	subscriber := duckv1.Addressable{URL: trigger.Status.SubscriberURI}
 
 	// Get broker ingress URL for reply events
 	var brokerIngressURL string
@@ -125,7 +126,7 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 	err = r.consumerManager.SubscribeTrigger(
 		trigger,
 		broker,
-		subscriberURI,
+		subscriber,
 		brokerIngressURL,
 		deadLetterSinkURI,
 		retryConfig,

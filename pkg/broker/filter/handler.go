@@ -46,9 +46,9 @@ type TriggerHandler struct {
 	ctx    context.Context
 
 	// Trigger configuration
-	trigger       *eventingv1.Trigger
-	subscriberURI string
-	filter        eventfilter.Filter
+	trigger    *eventingv1.Trigger
+	subscriber duckv1.Addressable
+	filter     eventfilter.Filter
 
 	// Broker ingress URL for reply events
 	brokerIngressURL string
@@ -70,7 +70,7 @@ type TriggerHandler struct {
 func NewTriggerHandler(
 	ctx context.Context,
 	trigger *eventingv1.Trigger,
-	subscriberURI string,
+	subscriber duckv1.Addressable,
 	brokerIngressURL string,
 	deadLetterSinkURI string,
 	retryConfig *kncloudevents.RetryConfig,
@@ -91,7 +91,7 @@ func NewTriggerHandler(
 		logger:            logger,
 		ctx:               ctx,
 		trigger:           trigger,
-		subscriberURI:     subscriberURI,
+		subscriber:        subscriber,
 		filter:            filter,
 		brokerIngressURL:  brokerIngressURL,
 		dispatcher:        dispatcher,
@@ -154,22 +154,11 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 
 	// Dispatch to subscriber
 	logger.Debugw("dispatching event to subscriber",
-		zap.String("subscriber", h.subscriberURI),
+		zap.String("subscriber", h.subscriber.URL.String()),
 		zap.String("type", event.Type()),
 		zap.String("source", event.Source()),
 		zap.String("id", event.ID()),
 	)
-
-	// Build destination addressable
-	subscriberURL, err := apis.ParseURL(h.subscriberURI)
-	if err != nil {
-		logger.Errorw("failed to parse subscriber URI", zap.Error(err))
-		if err := msg.Term(); err != nil {
-			logger.Errorw("failed to terminate message", zap.Error(err))
-		}
-		return
-	}
-	destination := duckv1.Addressable{URL: subscriberURL}
 
 	// Build reply addressable for broker ingress
 	var reply *duckv1.Addressable
@@ -193,7 +182,7 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		h.dispatcher,
 		ctx,
 		message,
-		destination,
+		h.subscriber,
 		h.natsConsumerInfo.Config.AckWait,
 		msg,
 		dispatcher.WithReply(reply),
@@ -220,13 +209,6 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.Event, msg *nats.Msg) (*kncloudevents.DispatchInfo, error) {
 	logger := logging.FromContext(ctx)
 
-	// Build destination
-	subscriberURL, err := apis.ParseURL(h.subscriberURI)
-	if err != nil {
-		return &kncloudevents.DispatchInfo{}, err
-	}
-	destination := duckv1.Addressable{URL: subscriberURL}
-
 	// Build dead letter sink addressable
 	var deadLetterSink *duckv1.Addressable
 	if h.deadLetterSinkURI != "" {
@@ -249,7 +231,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	lastTry := retryNumber > maxRetries
 
 	// Dispatch the message
-	dispatchInfo, err := h.dispatcher.SendEvent(ctx, *event, destination)
+	dispatchInfo, err := h.dispatcher.SendEvent(ctx, *event, h.subscriber)
 	if dispatchInfo == nil {
 		dispatchInfo = &kncloudevents.DispatchInfo{}
 	}

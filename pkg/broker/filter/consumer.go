@@ -26,6 +26,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/logging"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
@@ -89,7 +90,7 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 func (m *ConsumerManager) SubscribeTrigger(
 	trigger *eventingv1.Trigger,
 	broker *eventingv1.Broker,
-	subscriberURI string,
+	subscriber duckv1.Addressable,
 	brokerIngressURL string,
 	deadLetterSinkURI string,
 	retryConfig *kncloudevents.RetryConfig,
@@ -107,7 +108,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	// Check if we already have a subscription for this trigger
 	if existing, ok := m.subscriptions[triggerUID]; ok {
 		// Check if configuration has changed
-		if existing.handler.subscriberURI == subscriberURI {
+		if existing.handler.subscriber.URL.String() == subscriber.URL.String() {
 			logger.Debugw("trigger subscription already exists and is up to date")
 			return nil
 		}
@@ -122,7 +123,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	handler, err := NewTriggerHandler(
 		m.ctx,
 		trigger,
-		subscriberURI,
+		subscriber,
 		brokerIngressURL,
 		deadLetterSinkURI,
 		retryConfig,
