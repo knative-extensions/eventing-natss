@@ -98,6 +98,12 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 	// Get subscriber URI from trigger status
 	subscriberURI := trigger.Status.SubscriberURI.String()
 
+	// Get broker ingress URL for reply events
+	var brokerIngressURL string
+	if broker.Status.Address != nil && broker.Status.Address.URL != nil {
+		brokerIngressURL = broker.Status.Address.URL.String()
+	}
+
 	// Get dead letter sink URI if configured
 	var deadLetterSinkURI string
 	if trigger.Status.DeadLetterSinkURI != nil {
@@ -120,6 +126,7 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 		trigger,
 		broker,
 		subscriberURI,
+		brokerIngressURL,
 		deadLetterSinkURI,
 		retryConfig,
 	)

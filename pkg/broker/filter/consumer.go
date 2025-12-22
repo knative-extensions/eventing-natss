@@ -90,6 +90,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	trigger *eventingv1.Trigger,
 	broker *eventingv1.Broker,
 	subscriberURI string,
+	brokerIngressURL string,
 	deadLetterSinkURI string,
 	retryConfig *kncloudevents.RetryConfig,
 ) error {
@@ -122,6 +123,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 		m.ctx,
 		trigger,
 		subscriberURI,
+		brokerIngressURL,
 		deadLetterSinkURI,
 		retryConfig,
 		m.dispatcher,

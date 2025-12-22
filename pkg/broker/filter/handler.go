@@ -50,6 +50,9 @@ type TriggerHandler struct {
 	subscriberURI string
 	filter        eventfilter.Filter
 
+	// Broker ingress URL for reply events
+	brokerIngressURL string
+
 	// Dispatcher for sending events
 	dispatcher *kncloudevents.Dispatcher
 
@@ -57,7 +60,7 @@ type TriggerHandler struct {
 	retryConfig *kncloudevents.RetryConfig
 
 	// Dead letter sink
-	deadLetterSink *duckv1.Addressable
+	deadLetterSinkURI string
 
 	natsSub          *nats.Subscription
 	natsConsumerInfo *nats.ConsumerInfo
@@ -68,6 +71,7 @@ func NewTriggerHandler(
 	ctx context.Context,
 	trigger *eventingv1.Trigger,
 	subscriberURI string,
+	brokerIngressURL string,
 	deadLetterSinkURI string,
 	retryConfig *kncloudevents.RetryConfig,
 	dispatcher *kncloudevents.Dispatcher,
@@ -83,26 +87,16 @@ func NewTriggerHandler(
 		filter = attributes.NewAttributesFilter(trigger.Spec.Filter.Attributes)
 	}
 
-	// Build dead letter sink addressable if configured
-	var deadLetterSink *duckv1.Addressable
-	if deadLetterSinkURI != "" {
-		parsedURL, err := apis.ParseURL(deadLetterSinkURI)
-		if err == nil {
-			deadLetterSink = &duckv1.Addressable{
-				URL: parsedURL,
-			}
-		}
-	}
-
 	return &TriggerHandler{
-		logger:         logger,
-		ctx:            ctx,
-		trigger:        trigger,
-		subscriberURI:  subscriberURI,
-		filter:         filter,
-		dispatcher:     dispatcher,
-		retryConfig:    retryConfig,
-		deadLetterSink: deadLetterSink,
+		logger:            logger,
+		ctx:               ctx,
+		trigger:           trigger,
+		subscriberURI:     subscriberURI,
+		filter:            filter,
+		brokerIngressURL:  brokerIngressURL,
+		dispatcher:        dispatcher,
+		retryConfig:       retryConfig,
+		deadLetterSinkURI: deadLetterSinkURI,
 	}, nil
 }
 
@@ -166,15 +160,34 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		zap.String("id", event.ID()),
 	)
 
-	te := dispatcher.TypeExtractorTransformer("")
-	// Build destination
-	parsedURL, err := apis.ParseURL(h.subscriberURI)
+	// Build destination addressable
+	subscriberURL, err := apis.ParseURL(h.subscriberURI)
 	if err != nil {
+		logger.Errorw("failed to parse subscriber URI", zap.Error(err))
+		if err := msg.Term(); err != nil {
+			logger.Errorw("failed to terminate message", zap.Error(err))
+		}
 		return
 	}
-	destination := duckv1.Addressable{
-		URL: parsedURL,
+	destination := duckv1.Addressable{URL: subscriberURL}
+
+	// Build reply addressable for broker ingress
+	var reply *duckv1.Addressable
+	if h.brokerIngressURL != "" {
+		if replyURL, err := apis.ParseURL(h.brokerIngressURL); err == nil {
+			reply = &duckv1.Addressable{URL: replyURL}
+		}
 	}
+
+	// Build dead letter sink addressable
+	var deadLetterSink *duckv1.Addressable
+	if h.deadLetterSinkURI != "" {
+		if dlsURL, err := apis.ParseURL(h.deadLetterSinkURI); err == nil {
+			deadLetterSink = &duckv1.Addressable{URL: dlsURL}
+		}
+	}
+
+	te := dispatcher.TypeExtractorTransformer("")
 
 	dispatchInfo, err := dispatcher.SendMessage(
 		h.dispatcher,
@@ -183,8 +196,8 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		destination,
 		h.natsConsumerInfo.Config.AckWait,
 		msg,
-		// dispatcher.WithReply(h.),
-		dispatcher.WithDeadLetterSink(h.deadLetterSink),
+		dispatcher.WithReply(reply),
+		dispatcher.WithDeadLetterSink(deadLetterSink),
 		dispatcher.WithRetryConfig(h.retryConfig),
 		dispatcher.WithTransformers(&te),
 		dispatcher.WithHeader(additionalHeaders),
@@ -208,12 +221,18 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	logger := logging.FromContext(ctx)
 
 	// Build destination
-	parsedURL, err := apis.ParseURL(h.subscriberURI)
+	subscriberURL, err := apis.ParseURL(h.subscriberURI)
 	if err != nil {
 		return &kncloudevents.DispatchInfo{}, err
 	}
-	destination := duckv1.Addressable{
-		URL: parsedURL,
+	destination := duckv1.Addressable{URL: subscriberURL}
+
+	// Build dead letter sink addressable
+	var deadLetterSink *duckv1.Addressable
+	if h.deadLetterSinkURI != "" {
+		if dlsURL, err := apis.ParseURL(h.deadLetterSinkURI); err == nil {
+			deadLetterSink = &duckv1.Addressable{URL: dlsURL}
+		}
 	}
 
 	// Get retry number from message metadata
@@ -255,9 +274,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 			logger.Errorw("failed to ack message", zap.Error(err))
 		}
 	case protocol.IsNACK(result):
-		if lastTry && h.deadLetterSink != nil {
+		if lastTry && deadLetterSink != nil {
 			// Send to dead letter sink
-			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *h.deadLetterSink)
+			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *deadLetterSink)
 			if dlsErr != nil {
 				logger.Errorw("failed to send to dead letter sink",
 					zap.Error(dlsErr),
@@ -277,9 +296,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 		}
 	default:
 		// Terminate - non-retriable error
-		if lastTry && h.deadLetterSink != nil {
+		if lastTry && deadLetterSink != nil {
 			// Send to dead letter sink
-			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *h.deadLetterSink)
+			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *deadLetterSink)
 			if dlsErr != nil {
 				logger.Errorw("failed to send to dead letter sink",
 					zap.Error(dlsErr),
