@@ -61,8 +61,8 @@ type TriggerHandler struct {
 	// Dead letter sink
 	deadLetterSink *duckv1.Addressable
 
-	natsSub          *nats.Subscription
-	natsConsumerInfo *nats.ConsumerInfo
+	subscription *nats.Subscription
+	consumer     *nats.ConsumerInfo
 }
 
 // NewTriggerHandler creates a new handler for a trigger
@@ -166,7 +166,7 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		ctx,
 		message,
 		h.subscriber,
-		h.natsConsumerInfo.Config.AckWait,
+		h.consumer.Config.AckWait,
 		msg,
 		dispatcher.WithReply(h.brokerIngressURL),
 		dispatcher.WithDeadLetterSink(h.deadLetterSink),

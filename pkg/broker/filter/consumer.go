@@ -137,8 +137,8 @@ func (m *ConsumerManager) SubscribeTrigger(
 	streamName := brokerutils.BrokerStreamName(broker)
 	consumerName := brokerutils.TriggerConsumerName(triggerUID)
 
-	// Verify consumer exists
-	_, err = m.js.ConsumerInfo(streamName, consumerName)
+	// Get consumer info (also verifies consumer exists)
+	consumerInfo, err := m.js.ConsumerInfo(streamName, consumerName)
 	if err != nil {
 		handler.Cleanup()
 		if errors.Is(err, nats.ErrConsumerNotFound) {
@@ -166,6 +166,10 @@ func (m *ConsumerManager) SubscribeTrigger(
 		handler.Cleanup()
 		return fmt.Errorf("failed to create pull subscription: %w", err)
 	}
+
+	// Set subscription and consumer info on handler
+	handler.subscription = sub
+	handler.consumer = consumerInfo
 
 	// Create cancellable context for the fetch loop
 	ctx, cancel := context.WithCancel(m.ctx)
