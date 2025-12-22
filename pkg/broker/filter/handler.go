@@ -19,7 +19,6 @@ package filter
 import (
 	"context"
 	"net/http"
-	"time"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -32,14 +31,13 @@ import (
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/logging"
 
+	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher"
+	jsutils "knative.dev/eventing-natss/pkg/channel/jetstream/utils"
+	"knative.dev/eventing-natss/pkg/tracing"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/eventing/pkg/eventfilter"
 	"knative.dev/eventing/pkg/eventfilter/attributes"
 	"knative.dev/eventing/pkg/kncloudevents"
-)
-
-const (
-	defaultAckWait = 30 * time.Second
 )
 
 // TriggerHandler handles message dispatch for a single trigger
@@ -60,6 +58,9 @@ type TriggerHandler struct {
 
 	// Dead letter sink
 	deadLetterSink *duckv1.Addressable
+
+	natsSub          *nats.Subscription
+	natsConsumerInfo *nats.ConsumerInfo
 }
 
 // NewTriggerHandler creates a new handler for a trigger
@@ -138,6 +139,9 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
+	// event := tracing.ConvertNatsMsgToEvent(c.logger.Desugar(), msg)
+	additionalHeaders := tracing.ConvertEventToHttpHeader(event)
+
 	// Apply filter
 	if h.filter != nil {
 		filterResult := h.filter.Filter(ctx, *event)
@@ -162,7 +166,30 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		zap.String("id", event.ID()),
 	)
 
-	dispatchInfo, err := h.dispatchEvent(ctx, event, msg)
+	te := dispatcher.TypeExtractorTransformer("")
+	// Build destination
+	parsedURL, err := apis.ParseURL(h.subscriberURI)
+	if err != nil {
+		return
+	}
+	destination := duckv1.Addressable{
+		URL: parsedURL,
+	}
+
+	dispatchInfo, err := dispatcher.SendMessage(
+		h.dispatcher,
+		ctx,
+		message,
+		destination,
+		h.natsConsumerInfo.Config.AckWait,
+		msg,
+		// dispatcher.WithReply(h.),
+		dispatcher.WithDeadLetterSink(h.deadLetterSink),
+		dispatcher.WithRetryConfig(h.retryConfig),
+		dispatcher.WithTransformers(&te),
+		dispatcher.WithHeader(additionalHeaders),
+	)
+	// dispatchInfo, err := h.dispatchEvent(ctx, event, msg)
 	if err != nil {
 		logger.Errorw("failed to dispatch event",
 			zap.Error(err),
@@ -243,7 +270,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 			}
 		} else {
 			// Nack for retry
-			nakDelay := calculateNakDelay(retryNumber, h.retryConfig)
+			nakDelay := jsutils.CalculateNakDelayForRetryNumber(retryNumber, h.retryConfig)
 			if err := msg.NakWithDelay(nakDelay, nats.Context(ctx)); err != nil {
 				logger.Errorw("failed to nack message", zap.Error(err))
 			}
@@ -273,19 +300,4 @@ func (h *TriggerHandler) Cleanup() {
 	if h.filter != nil {
 		h.filter.Cleanup()
 	}
-}
-
-// Helper functions
-
-func calculateNakDelay(retryNumber int, retryConfig *kncloudevents.RetryConfig) time.Duration {
-	// Default exponential backoff
-	baseDelay := 1 * time.Second
-	delay := baseDelay * time.Duration(1<<uint(retryNumber-1))
-
-	// Cap at 1 minute
-	if delay > time.Minute {
-		delay = time.Minute
-	}
-
-	return delay
 }
