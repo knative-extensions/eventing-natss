@@ -100,9 +100,9 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 	subscriber := duckv1.Addressable{URL: trigger.Status.SubscriberURI}
 
 	// Get broker ingress URL for reply events
-	var brokerIngressURL string
+	var brokerIngressURL *duckv1.Addressable
 	if broker.Status.Address != nil && broker.Status.Address.URL != nil {
-		brokerIngressURL = broker.Status.Address.URL.String()
+		brokerIngressURL = &duckv1.Addressable{URL: broker.Status.Address.URL.DeepCopy()}
 	}
 
 	// Get dead letter sink URI if configured

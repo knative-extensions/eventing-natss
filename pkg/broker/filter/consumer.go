@@ -91,7 +91,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	trigger *eventingv1.Trigger,
 	broker *eventingv1.Broker,
 	subscriber duckv1.Addressable,
-	brokerIngressURL string,
+	brokerIngressURL *duckv1.Addressable,
 	deadLetterSinkURI string,
 	retryConfig *kncloudevents.RetryConfig,
 ) error {

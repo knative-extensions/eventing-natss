@@ -51,7 +51,7 @@ type TriggerHandler struct {
 	filter     eventfilter.Filter
 
 	// Broker ingress URL for reply events
-	brokerIngressURL string
+	brokerIngressURL *duckv1.Addressable
 
 	// Dispatcher for sending events
 	dispatcher *kncloudevents.Dispatcher
@@ -71,7 +71,7 @@ func NewTriggerHandler(
 	ctx context.Context,
 	trigger *eventingv1.Trigger,
 	subscriber duckv1.Addressable,
-	brokerIngressURL string,
+	brokerIngressURL *duckv1.Addressable,
 	deadLetterSinkURI string,
 	retryConfig *kncloudevents.RetryConfig,
 	dispatcher *kncloudevents.Dispatcher,
@@ -160,13 +160,6 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		zap.String("id", event.ID()),
 	)
 
-	// Build reply addressable for broker ingress
-	var reply *duckv1.Addressable
-	if h.brokerIngressURL != "" {
-		if replyURL, err := apis.ParseURL(h.brokerIngressURL); err == nil {
-			reply = &duckv1.Addressable{URL: replyURL}
-		}
-	}
 
 	// Build dead letter sink addressable
 	var deadLetterSink *duckv1.Addressable
@@ -185,7 +178,7 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		h.subscriber,
 		h.natsConsumerInfo.Config.AckWait,
 		msg,
-		dispatcher.WithReply(reply),
+		dispatcher.WithReply(h.brokerIngressURL),
 		dispatcher.WithDeadLetterSink(deadLetterSink),
 		dispatcher.WithRetryConfig(h.retryConfig),
 		dispatcher.WithTransformers(&te),
