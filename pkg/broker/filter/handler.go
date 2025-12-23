@@ -33,11 +33,23 @@ import (
 	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher"
 	jsutils "knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/tracing"
+	v1 "knative.dev/eventing/pkg/apis/duck/v1"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/eventing/pkg/eventfilter"
 	"knative.dev/eventing/pkg/eventfilter/attributes"
 	"knative.dev/eventing/pkg/kncloudevents"
 )
+
+var retryMax int32 = 3
+var retryTimeout = "PT1S"
+var retryBackoffDelay = "PT0.5S"
+var retryDelivery = v1.BackoffPolicyLinear
+var defaultRetry, _ = kncloudevents.RetryConfigFromDeliverySpec(v1.DeliverySpec{
+	Retry:         &retryMax,
+	Timeout:       &retryTimeout,
+	BackoffPolicy: &retryDelivery,
+	BackoffDelay:  &retryBackoffDelay,
+})
 
 // TriggerHandler handles message dispatch for a single trigger
 type TriggerHandler struct {
@@ -132,9 +144,6 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	// event := tracing.ConvertNatsMsgToEvent(c.logger.Desugar(), msg)
-	additionalHeaders := tracing.ConvertEventToHttpHeader(event)
-
 	// Apply filter
 	if h.filter != nil {
 		filterResult := h.filter.Filter(ctx, *event)
@@ -159,22 +168,20 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		zap.String("id", event.ID()),
 	)
 
-	te := dispatcher.TypeExtractorTransformer("")
-
-	dispatchInfo, err := dispatcher.SendMessage(
-		h.dispatcher,
-		ctx,
-		message,
-		h.subscriber,
-		h.consumer.Config.AckWait,
-		msg,
-		dispatcher.WithReply(h.brokerIngressURL),
-		dispatcher.WithDeadLetterSink(h.deadLetterSink),
-		dispatcher.WithRetryConfig(h.retryConfig),
-		dispatcher.WithTransformers(&te),
-		dispatcher.WithHeader(additionalHeaders),
-	)
-	// dispatchInfo, err := h.dispatchEvent(ctx, event, msg)
+	// dispatchInfo, err := dispatcher.SendMessage(
+	// 	h.dispatcher,
+	// 	ctx,
+	// 	message,
+	// 	h.subscriber,
+	// 	h.consumer.Config.AckWait,
+	// 	msg,
+	// 	dispatcher.WithReply(h.brokerIngressURL),
+	// 	dispatcher.WithDeadLetterSink(h.deadLetterSink),
+	// 	dispatcher.WithRetryConfig(h.retryConfig),
+	// 	dispatcher.WithTransformers(&te),
+	// 	dispatcher.WithHeader(additionalHeaders),
+	// )
+	dispatchInfo, err := h.dispatchEvent(ctx, event, msg)
 	if err != nil {
 		logger.Errorw("failed to dispatch event",
 			zap.Error(err),
@@ -192,6 +199,9 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.Event, msg *nats.Msg) (*kncloudevents.DispatchInfo, error) {
 	logger := logging.FromContext(ctx)
 
+	additionalHeaders := tracing.ConvertEventToHttpHeader(event)
+	te := dispatcher.TypeExtractorTransformer("")
+
 	// Get retry number from message metadata
 	retryNumber := 1
 	if meta, err := msg.Metadata(); err == nil {
@@ -199,50 +209,60 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	}
 
 	// Determine if this is the last try
-	maxRetries := 3
+	maxRetries := 1
 	if h.retryConfig != nil {
 		maxRetries = h.retryConfig.RetryMax
 	}
 	lastTry := retryNumber > maxRetries
 
-	// Dispatch the message
-	dispatchInfo, err := h.dispatcher.SendEvent(ctx, *event, h.subscriber)
-	if dispatchInfo == nil {
-		dispatchInfo = &kncloudevents.DispatchInfo{}
-	}
-
-	// Process the result
-	result := protocol.ResultACK
-	if err != nil {
-		code := dispatchInfo.ResponseCode
-		if code/100 == 5 || code == http.StatusTooManyRequests || code == http.StatusRequestTimeout {
-			// Retriable error
-			result = protocol.NewReceipt(false, "%w", err)
-		} else {
-			// Non-retriable error
-			result = err
-		}
-	}
+	// Dispatch the message to tirgger's destination
+	dispatchInfo, err := h.dispatcher.SendEvent(ctx, *event, h.subscriber,
+		kncloudevents.WithHeader(additionalHeaders),
+		kncloudevents.WithTransformers(&te),
+	)
+	result := determineNatsResult(dispatchInfo.ResponseCode, err)
 
 	// Handle ack/nack/term based on result
 	switch {
 	case protocol.IsACK(result):
+		// process reply url case first
+		if h.brokerIngressURL != nil {
+			// TODO: should we retry in-memory reply url or go with re-delivery of the message?
+			replyDispatchInfo, replyErr := h.dispatcher.SendEvent(ctx, *event, *h.brokerIngressURL,
+				kncloudevents.WithRetryConfig(&defaultRetry),
+				kncloudevents.WithHeader(additionalHeaders),
+				kncloudevents.WithTransformers(&te),
+			)
+			if replyErr != nil {
+				logger.Errorw("failed to send to dead letter sink",
+					zap.Error(replyErr),
+					zap.Int("response_code", replyDispatchInfo.ResponseCode),
+				)
+			}
+		}
 		if err := msg.Ack(nats.Context(ctx)); err != nil {
 			logger.Errorw("failed to ack message", zap.Error(err))
 		}
 	case protocol.IsNACK(result):
-		if lastTry && h.deadLetterSink != nil {
-			// Send to dead letter sink
-			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *h.deadLetterSink)
-			if dlsErr != nil {
-				logger.Errorw("failed to send to dead letter sink",
-					zap.Error(dlsErr),
-					zap.Int("response_code", dlsDispatchInfo.ResponseCode),
+		if lastTry {
+			if h.deadLetterSink != nil {
+				// Send to dead letter sink
+				dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *h.deadLetterSink,
+					kncloudevents.WithRetryConfig(&defaultRetry),
+					kncloudevents.WithHeader(additionalHeaders),
+					kncloudevents.WithTransformers(&te),
 				)
+				if dlsErr != nil {
+					logger.Errorw("failed to send to dead letter sink",
+						zap.Error(dlsErr),
+						zap.Int("response_code", dlsDispatchInfo.ResponseCode),
+					)
+				}
 			}
+
 			// Ack after DLS attempt
 			if err := msg.Ack(nats.Context(ctx)); err != nil {
-				logger.Errorw("failed to ack message after DLS", zap.Error(err))
+				logger.Errorw("failed to ack message after last retry", zap.Error(err))
 			}
 		} else {
 			// Nack for retry
@@ -255,7 +275,11 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 		// Terminate - non-retriable error
 		if lastTry && h.deadLetterSink != nil {
 			// Send to dead letter sink
-			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *h.deadLetterSink)
+			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *h.deadLetterSink,
+				kncloudevents.WithRetryConfig(&defaultRetry),
+				kncloudevents.WithHeader(additionalHeaders),
+				kncloudevents.WithTransformers(&te),
+			)
 			if dlsErr != nil {
 				logger.Errorw("failed to send to dead letter sink",
 					zap.Error(dlsErr),
@@ -276,4 +300,19 @@ func (h *TriggerHandler) Cleanup() {
 	if h.filter != nil {
 		h.filter.Cleanup()
 	}
+}
+
+func determineNatsResult(responseCode int, err error) protocol.Result {
+	result := protocol.ResultACK
+	if err != nil {
+		code := responseCode
+		if code/100 == 5 || code == http.StatusTooManyRequests || code == http.StatusRequestTimeout {
+			// Retriable error, effectively this is nats protocol NACK
+			result = protocol.NewReceipt(false, "%w", err)
+		} else {
+			// Non-retriable error
+			result = err
+		}
+	}
+	return result
 }
