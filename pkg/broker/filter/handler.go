@@ -23,17 +23,18 @@ import (
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
+	"github.com/cloudevents/sdk-go/v2/binding/spec"
 	"github.com/cloudevents/sdk-go/v2/protocol"
+	"github.com/cloudevents/sdk-go/v2/types"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/logging"
 
-	"knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher"
 	jsutils "knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/tracing"
-	v1 "knative.dev/eventing/pkg/apis/duck/v1"
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/eventing/pkg/eventfilter"
 	"knative.dev/eventing/pkg/eventfilter/attributes"
@@ -43,8 +44,26 @@ import (
 var retryMax int32 = 3
 var retryTimeout = "PT1S"
 var retryBackoffDelay = "PT0.5S"
-var retryDelivery = v1.BackoffPolicyLinear
-var defaultRetry, _ = kncloudevents.RetryConfigFromDeliverySpec(v1.DeliverySpec{
+
+// TypeExtractorTransformer extracts the CloudEvent type from a message.
+// Copied from channel/jetstream/dispatcher to avoid importing that package
+// which registers channel informers.
+type TypeExtractorTransformer string
+
+func (a *TypeExtractorTransformer) Transform(reader binding.MessageMetadataReader, _ binding.MessageMetadataWriter) error {
+	_, ty := reader.GetAttribute(spec.Type)
+	if ty != nil {
+		tyParsed, err := types.ToString(ty)
+		if err != nil {
+			return err
+		}
+		*a = TypeExtractorTransformer(tyParsed)
+	}
+	return nil
+}
+
+var retryDelivery = eventingduckv1.BackoffPolicyLinear
+var defaultRetry, _ = kncloudevents.RetryConfigFromDeliverySpec(eventingduckv1.DeliverySpec{
 	Retry:         &retryMax,
 	Timeout:       &retryTimeout,
 	BackoffPolicy: &retryDelivery,
@@ -200,7 +219,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	logger := logging.FromContext(ctx)
 
 	additionalHeaders := tracing.ConvertEventToHttpHeader(event)
-	te := dispatcher.TypeExtractorTransformer("")
+	te := TypeExtractorTransformer("")
 
 	// Get retry number from message metadata
 	retryNumber := 1
