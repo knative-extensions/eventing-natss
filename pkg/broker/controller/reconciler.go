@@ -206,7 +206,7 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 	if cfg, err := brokerconfig.GetConfigFromAnnotation(b.Annotations); err != nil {
 		return nil, err
 	} else if cfg != nil {
-		logger.Infow("Using broker-specific config from annotation")
+		logger.Debugw("Using broker-specific config from annotation")
 		return cfg, nil
 	}
 
@@ -217,7 +217,7 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 			return nil, fmt.Errorf("failed to get config map: %w", err)
 		}
 		// ConfigMap not found, use hardcoded defaults
-		logger.Infow("Broker config ConfigMap not found, using hardcoded defaults",
+		logger.Debugw("Broker config ConfigMap not found, using hardcoded defaults",
 			zap.String("configmap", brokerconfig.ConfigMapName),
 			zap.String("namespace", b.Namespace))
 		return brokerconfig.DefaultBrokerConfig(), nil
