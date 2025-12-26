@@ -356,3 +356,30 @@ func (*NatsJetStreamChannel) GetGroupVersionKind() schema.GroupVersionKind {
 func (c *NatsJetStreamChannel) GetStatus() *duckv1.Status {
 	return &c.Status.Status
 }
+
+// NatsJetStreamBrokerConfig contains configuration for NatsJetStreamBroker.
+// This can be specified at cluster level, namespace level, or per-broker level.
+type NatsJetStreamBrokerConfig struct {
+	// Stream defines the StreamConfig for the broker's JetStream stream.
+	// +optional
+	Stream *StreamConfig `json:"stream,omitempty"`
+
+	// Consumer defines the default ConsumerConfigTemplate for triggers.
+	// Individual triggers can override these settings.
+	// +optional
+	Consumer *ConsumerConfigTemplate `json:"consumer,omitempty"`
+}
+
+// NatsJetStreamBrokerDefaults contains the default configuration for NatsJetStreamBroker
+// at different scopes (cluster, namespace).
+type NatsJetStreamBrokerDefaults struct {
+	// ClusterDefault is the default configuration for all namespaces
+	// that don't have a specific configuration.
+	// +optional
+	ClusterDefault *NatsJetStreamBrokerConfig `json:"clusterDefault,omitempty"`
+
+	// NamespaceDefaults contains namespace-specific configurations.
+	// The key is the namespace name.
+	// +optional
+	NamespaceDefaults map[string]*NatsJetStreamBrokerConfig `json:"namespaceDefaults,omitempty"`
+}

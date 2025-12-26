@@ -41,6 +41,8 @@ import (
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 
+	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 	"knative.dev/eventing-natss/pkg/broker/controller/resources"
 	brokerutils "knative.dev/eventing-natss/pkg/broker/utils"
 )
@@ -157,8 +159,16 @@ func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, 
 
 	publishSubject := brokerutils.BrokerPublishSubjectName(b.Namespace, b.Name)
 
+	// Load broker configuration
+	brokerCfg, err := r.getBrokerConfig(ctx, b)
+	if err != nil {
+		logger.Errorw("Failed to get broker config", zap.Error(err))
+		b.Status.MarkIngressFailed("ConfigLoadFailed", "Failed to load broker configuration: %v", err)
+		return fmt.Errorf("failed to get broker config: %w", err)
+	}
+
 	// Check if stream exists
-	_, err := r.js.StreamInfo(streamName)
+	_, err = r.js.StreamInfo(streamName)
 	if err != nil {
 		if !errors.Is(err, nats.ErrStreamNotFound) {
 			logger.Errorw("Failed to get stream info", zap.Error(err), zap.String("stream", streamName))
@@ -167,15 +177,7 @@ func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, 
 		}
 
 		// Stream doesn't exist, create it
-		streamConfig := &nats.StreamConfig{
-			Name:      streamName,
-			Subjects:  []string{publishSubject + ".>"},
-			Retention: nats.InterestPolicy,
-			Storage:   nats.FileStorage,
-			Replicas:  1,
-			Discard:   nats.DiscardOld,
-			MaxAge:    0, // No max age by default
-		}
+		streamConfig := brokerconfig.BuildNatsStreamConfig(streamName, publishSubject, brokerCfg)
 
 		_, err = r.js.AddStream(streamConfig)
 		if err != nil {
@@ -190,6 +192,39 @@ func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, 
 	}
 
 	return nil
+}
+
+// getBrokerConfig loads the broker configuration with the following precedence:
+// 1. Broker-specific config from annotation (if present, use it entirely)
+// 2. Namespace-specific config from ConfigMap (if present, use it entirely)
+// 3. Cluster default config from ConfigMap (if present, use it entirely)
+// 4. Hardcoded defaults
+func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*messagingv1alpha1.NatsJetStreamBrokerConfig, error) {
+	logger := logging.FromContext(ctx)
+
+	// Check for broker-specific annotation first (highest priority)
+	if cfg, err := brokerconfig.GetConfigFromAnnotation(b.Annotations); err != nil {
+		return nil, err
+	} else if cfg != nil {
+		logger.Infow("Using broker-specific config from annotation")
+		return cfg, nil
+	}
+
+	// No annotation config, try to load from ConfigMap
+	cm, err := r.kubeClientSet.CoreV1().ConfigMaps(b.Namespace).Get(ctx, brokerconfig.ConfigMapName, metav1.GetOptions{})
+	if err != nil {
+		if !apierrs.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to get config map: %w", err)
+		}
+		// ConfigMap not found, use hardcoded defaults
+		logger.Infow("Broker config ConfigMap not found, using hardcoded defaults",
+			zap.String("configmap", brokerconfig.ConfigMapName),
+			zap.String("namespace", b.Namespace))
+		return brokerconfig.DefaultBrokerConfig(), nil
+	}
+
+	// Load and return config from ConfigMap
+	return brokerconfig.GetConfigFromConfigMap(cm, b.Namespace)
 }
 
 // reconcileIngressDeployment ensures the ingress deployment exists
