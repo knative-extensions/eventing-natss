@@ -59,14 +59,15 @@ func main() {
 
 	// Setup logging
 	// cfg, err := sharedmain.GetLoggingConfig(ctx)
-	cfg, err := logging.NewConfigFromMap(map[string]string{})
-	if err != nil {
-		panic(err)
-	}
-	logger, _ := logging.NewLoggerFromConfig(cfg, component)
-	defer logger.Sync()
-	ctx = logging.WithLogger(ctx, logger)
+	// cfg, err := logging.NewConfigFromMap(map[string]string{})
+	// if err != nil {
+	// panic(err)
+	// }
+	// logger, _ := logging.NewLoggerFromConfig(cfg, component)
+	// defer logger.Sync()
+	// ctx = logging.WithLogger(ctx, logger)
 
+	logger := logging.FromContext(ctx)
 	// Load environment configuration
 	var env envConfig
 	if err := envconfig.Process("", &env); err != nil {

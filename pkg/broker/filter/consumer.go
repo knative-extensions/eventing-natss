@@ -41,7 +41,7 @@ const (
 	// fetchBatchSize is the number of messages to fetch in each batch
 	fetchBatchSize = 10
 	// fetchTimeout is the timeout for fetching messages
-	fetchTimeout = 5 * time.Second
+	fetchTimeout = 500 * time.Millisecond
 )
 
 // ConsumerManager manages JetStream consumer subscriptions for triggers
@@ -148,7 +148,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	}
 
 	// Get the filter subject from the consumer's configuration
-	filterSubject := brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
+	filterSubject := ".>" //brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
 
 	logger.Infow("creating pull subscription for trigger consumer",
 		zap.String("stream", streamName),
@@ -161,6 +161,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 		filterSubject,
 		consumerName,
 		nats.Bind(streamName, consumerName),
+		nats.ManualAck(),
 	)
 	if err != nil {
 		handler.Cleanup()
@@ -212,7 +213,7 @@ func (m *ConsumerManager) fetchLoop(
 					// No messages available, continue polling
 					continue
 				}
-				if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrConsumerDeleted) {
+				if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrConsumerDeleted) || errors.Is(err, nats.ErrBadSubscription) {
 					logger.Warnw("subscription closed, stopping fetch loop", zap.Error(err))
 					return
 				}

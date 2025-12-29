@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
@@ -50,17 +49,19 @@ func main() {
 	ctx := signals.NewContext()
 
 	// Set up logging
-	loggingConfig, err := logging.NewConfigFromMap(map[string]string{})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create logging config: %v\n", err)
-		os.Exit(1)
-	}
+	// loggingConfig, err := sharedmain.GetLoggingConfig(ctx)
+	// loggingConfig, err := logging.NewConfigFromMap(map[string]string{})
+	// if err != nil {
+	// fmt.Fprintf(os.Stderr, "Failed to create logging config: %v\n", err)
+	// os.Exit(1)
+	// }
 
-	logger, _ := logging.NewLoggerFromConfig(loggingConfig, component)
-	defer logger.Sync()
+	// logger, _ := logging.NewLoggerFromConfig(loggingConfig, component)
+	// defer logger.Sync()
 
-	ctx = logging.WithLogger(ctx, logger)
+	// ctx = logging.WithLogger(ctx, logger)
 
+	logger := logging.FromContext(ctx)
 	// Load environment configuration
 	var env envConfig
 	if err := envconfig.Process("", &env); err != nil {

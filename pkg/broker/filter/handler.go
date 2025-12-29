@@ -187,19 +187,6 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		zap.String("id", event.ID()),
 	)
 
-	// dispatchInfo, err := dispatcher.SendMessage(
-	// 	h.dispatcher,
-	// 	ctx,
-	// 	message,
-	// 	h.subscriber,
-	// 	h.consumer.Config.AckWait,
-	// 	msg,
-	// 	dispatcher.WithReply(h.brokerIngressURL),
-	// 	dispatcher.WithDeadLetterSink(h.deadLetterSink),
-	// 	dispatcher.WithRetryConfig(h.retryConfig),
-	// 	dispatcher.WithTransformers(&te),
-	// 	dispatcher.WithHeader(additionalHeaders),
-	// )
 	dispatchInfo, err := h.dispatchEvent(ctx, event, msg)
 	if err != nil {
 		logger.Errorw("failed to dispatch event",
