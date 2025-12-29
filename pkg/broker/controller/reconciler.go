@@ -89,13 +89,21 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 	// Get stream name for this broker
 	streamName := brokerutils.BrokerStreamName(b)
 
+	// Load broker configuration (once for the entire reconciliation)
+	brokerCfg, err := r.getBrokerConfig(ctx, b)
+	if err != nil {
+		logger.Errorw("Failed to get broker config", zap.Error(err))
+		b.Status.MarkIngressFailed("ConfigLoadFailed", "Failed to load broker configuration: %v", err)
+		return fmt.Errorf("failed to get broker config: %w", err)
+	}
+
 	// Step 1: Reconcile JetStream stream
-	if err := r.reconcileStream(ctx, b, streamName); err != nil {
+	if err := r.reconcileStream(ctx, b, streamName, brokerCfg); err != nil {
 		return err
 	}
 
 	// Step 2: Reconcile ingress deployment
-	if err := r.reconcileIngressDeployment(ctx, b, streamName); err != nil {
+	if err := r.reconcileIngressDeployment(ctx, b, streamName, brokerCfg); err != nil {
 		return err
 	}
 
@@ -111,7 +119,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 	}
 
 	// Step 5: Reconcile filter deployment
-	if err := r.reconcileFilterDeployment(ctx, b, streamName); err != nil {
+	if err := r.reconcileFilterDeployment(ctx, b, streamName, brokerCfg); err != nil {
 		return err
 	}
 
@@ -154,21 +162,13 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 }
 
 // reconcileStream ensures the JetStream stream exists for the broker
-func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName string) pkgreconciler.Event {
+func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *messagingv1alpha1.NatsJetStreamBrokerConfig) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
 	publishSubject := brokerutils.BrokerPublishSubjectName(b.Namespace, b.Name)
 
-	// Load broker configuration
-	brokerCfg, err := r.getBrokerConfig(ctx, b)
-	if err != nil {
-		logger.Errorw("Failed to get broker config", zap.Error(err))
-		b.Status.MarkIngressFailed("ConfigLoadFailed", "Failed to load broker configuration: %v", err)
-		return fmt.Errorf("failed to get broker config: %w", err)
-	}
-
 	// Check if stream exists
-	_, err = r.js.StreamInfo(streamName)
+	_, err := r.js.StreamInfo(streamName)
 	if err != nil {
 		if !errors.Is(err, nats.ErrStreamNotFound) {
 			logger.Errorw("Failed to get stream info", zap.Error(err), zap.String("stream", streamName))
@@ -228,14 +228,21 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 }
 
 // reconcileIngressDeployment ensures the ingress deployment exists
-func (r *Reconciler) reconcileIngressDeployment(ctx context.Context, b *eventingv1.Broker, streamName string) pkgreconciler.Event {
+func (r *Reconciler) reconcileIngressDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *messagingv1alpha1.NatsJetStreamBrokerConfig) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
+
+	// Get ingress deployment template if configured
+	var ingressTemplate *messagingv1alpha1.DeploymentTemplate
+	if brokerCfg != nil {
+		ingressTemplate = brokerCfg.Ingress
+	}
 
 	expected := resources.MakeIngressDeployment(&resources.IngressArgs{
 		Broker:             b,
 		Image:              r.ingressImage,
 		ServiceAccountName: r.ingressServiceAccount,
 		StreamName:         streamName,
+		Template:           ingressTemplate,
 	})
 
 	name := resources.IngressName(b.Name)
@@ -367,14 +374,21 @@ func (r *Reconciler) propagateFilterAvailability(ctx context.Context, b *eventin
 }
 
 // reconcileFilterDeployment ensures the filter deployment exists
-func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string) pkgreconciler.Event {
+func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *messagingv1alpha1.NatsJetStreamBrokerConfig) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
+
+	// Get filter deployment template if configured
+	var filterTemplate *messagingv1alpha1.DeploymentTemplate
+	if brokerCfg != nil {
+		filterTemplate = brokerCfg.Filter
+	}
 
 	expected := resources.MakeFilterDeployment(&resources.FilterArgs{
 		Broker:             b,
 		Image:              r.filterImage,
 		ServiceAccountName: r.filterServiceAccount,
 		StreamName:         streamName,
+		Template:           filterTemplate,
 	})
 
 	name := resources.FilterName(b.Name)

@@ -368,6 +368,49 @@ type NatsJetStreamBrokerConfig struct {
 	// Individual triggers can override these settings.
 	// +optional
 	Consumer *ConsumerConfigTemplate `json:"consumer,omitempty"`
+
+	// Ingress defines the deployment template for the broker ingress.
+	// +optional
+	Ingress *DeploymentTemplate `json:"ingress,omitempty"`
+
+	// Filter defines the deployment template for the broker filter.
+	// +optional
+	Filter *DeploymentTemplate `json:"filter,omitempty"`
+}
+
+// DeploymentTemplate defines customization options for broker deployments.
+type DeploymentTemplate struct {
+	// Replicas is the number of replicas for the deployment.
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// Annotations to add to the deployment.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// Labels to add to the deployment.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// PodAnnotations to add to the pod template.
+	// +optional
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
+
+	// PodLabels to add to the pod template.
+	// +optional
+	PodLabels map[string]string `json:"podLabels,omitempty"`
+
+	// NodeSelector for pod scheduling.
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// Resources for the container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Affinity for pod scheduling.
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
 }
 
 // NatsJetStreamBrokerDefaults contains the default configuration for NatsJetStreamBroker

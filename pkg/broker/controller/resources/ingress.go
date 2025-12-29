@@ -26,6 +26,7 @@ import (
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 
+	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/common/constants"
 )
 
@@ -35,6 +36,7 @@ type IngressArgs struct {
 	Image              string
 	ServiceAccountName string
 	StreamName         string
+	Template           *messagingv1alpha1.DeploymentTemplate
 }
 
 // MakeIngressDeployment creates a Deployment for the broker ingress
@@ -43,31 +45,76 @@ func MakeIngressDeployment(args *IngressArgs) *appsv1.Deployment {
 	name := IngressName(broker.Name)
 	labels := IngressLabels(broker.Name)
 
-	one := int32(1)
+	// Default replicas
+	replicas := int32(1)
+
+	// Deployment labels and annotations
+	deploymentLabels := labels
+	var deploymentAnnotations map[string]string
+
+	// Pod labels and annotations
+	podLabels := labels
+	var podAnnotations map[string]string
+
+	// Pod spec customization
+	var nodeSelector map[string]string
+	var affinity *corev1.Affinity
+	var resources corev1.ResourceRequirements
+
+	// Apply template if provided
+	if args.Template != nil {
+		if args.Template.Replicas != nil {
+			replicas = *args.Template.Replicas
+		}
+		if args.Template.Annotations != nil {
+			deploymentAnnotations = args.Template.Annotations
+		}
+		if args.Template.Labels != nil {
+			deploymentLabels = mergeMaps(labels, args.Template.Labels)
+		}
+		if args.Template.PodAnnotations != nil {
+			podAnnotations = args.Template.PodAnnotations
+		}
+		if args.Template.PodLabels != nil {
+			podLabels = mergeMaps(labels, args.Template.PodLabels)
+		}
+		if args.Template.NodeSelector != nil {
+			nodeSelector = args.Template.NodeSelector
+		}
+		if args.Template.Affinity != nil {
+			affinity = args.Template.Affinity
+		}
+		resources = args.Template.Resources
+	}
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            name,
 			Namespace:       broker.Namespace,
-			Labels:          labels,
+			Labels:          deploymentLabels,
+			Annotations:     deploymentAnnotations,
 			OwnerReferences: []metav1.OwnerReference{*kmeta.NewControllerRef(broker)},
 		},
 		Spec: appsv1.DeploymentSpec{
-			Replicas: &one,
+			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      podLabels,
+					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: args.ServiceAccountName,
+					NodeSelector:       nodeSelector,
+					Affinity:           affinity,
 					Containers: []corev1.Container{
 						{
-							Name:  IngressContainerName,
-							Image: args.Image,
-							Env:   makeIngressEnv(args),
+							Name:      IngressContainerName,
+							Image:     args.Image,
+							Env:       makeIngressEnv(args),
+							Resources: resources,
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          IngressPortName,
