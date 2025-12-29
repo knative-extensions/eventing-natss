@@ -66,6 +66,10 @@ func main() {
 	// logger, _ := logging.NewLoggerFromConfig(cfg, component)
 	// defer logger.Sync()
 	// ctx = logging.WithLogger(ctx, logger)
+	ns := os.Getenv("NAMESPACE")
+	if ns != "" {
+		ctx = injection.WithNamespaceScope(ctx, ns)
+	}
 
 	logger := logging.FromContext(ctx)
 	// Load environment configuration

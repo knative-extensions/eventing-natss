@@ -18,7 +18,7 @@ package constants
 
 const (
 	// SettingsConfigMapName is the name of the configmap used to hold eventing-nats settings
-	SettingsConfigMapName = "config-nats"
+	SettingsConfigMapName = "config-nats-broker"
 
 	// SettingsConfigMapMountPath is the mount path of the configmap used to hold eventing-nats settings
 	SettingsConfigMapMountPath = "/etc/" + SettingsConfigMapName

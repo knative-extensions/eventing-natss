@@ -20,11 +20,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
 
 	"knative.dev/pkg/configmap"
+	"knative.dev/pkg/injection"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/signals"
 
@@ -60,7 +62,10 @@ func main() {
 	// defer logger.Sync()
 
 	// ctx = logging.WithLogger(ctx, logger)
-
+	ns := os.Getenv("NAMESPACE")
+	if ns != "" {
+		ctx = injection.WithNamespaceScope(ctx, ns)
+	}
 	logger := logging.FromContext(ctx)
 	// Load environment configuration
 	var env envConfig
