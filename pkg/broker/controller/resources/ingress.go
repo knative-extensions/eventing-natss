@@ -27,7 +27,7 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 
 	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	"knative.dev/eventing-natss/pkg/common/constants"
+	"knative.dev/eventing-natss/pkg/broker/constants"
 )
 
 // IngressArgs contains arguments for creating ingress resources

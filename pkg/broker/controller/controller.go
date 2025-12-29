@@ -36,17 +36,14 @@ import (
 	deploymentinformer "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment"
 	serviceinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/service"
 
+	"knative.dev/eventing-natss/pkg/broker/constants"
 	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
-	"knative.dev/eventing-natss/pkg/common/constants"
 	commonnats "knative.dev/eventing-natss/pkg/common/nats"
 )
 
 const (
 	// ComponentName is the name of this controller component
 	ComponentName = "natsjs-broker-controller"
-
-	// BrokerClass is the annotation value that identifies brokers managed by this controller
-	BrokerClass = "NatsJetStreamBroker"
 )
 
 // envConfig holds configuration from environment variables
@@ -128,11 +125,11 @@ func NewController(
 	}
 
 	// Create controller implementation
-	impl := broker.NewImpl(ctx, r, BrokerClass)
+	impl := broker.NewImpl(ctx, r, constants.BrokerClassName)
 
 	// Set up event handlers for Broker resources
 	brokerInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: pkgreconciler.AnnotationFilterFunc(broker.ClassAnnotationKey, BrokerClass, false /*allowUnset*/),
+		FilterFunc: pkgreconciler.AnnotationFilterFunc(broker.ClassAnnotationKey, constants.BrokerClassName, false /*allowUnset*/),
 		Handler:    controller.HandleAll(impl.Enqueue),
 	})
 

@@ -79,10 +79,10 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           volumeMounts:
-            - name: config-nats
-              mountPath: /etc/config-nats
+            - name: config-nats-broker
+              mountPath: /etc/config-nats-broker
               readOnly: true
       volumes:
-        - name: config-nats
+        - name: config-nats-broker
           configMap:
-            name: config-nats
+            name: config-nats-broker

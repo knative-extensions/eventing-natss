@@ -39,6 +39,7 @@ import (
 	triggerreconciler "knative.dev/eventing/pkg/client/injection/reconciler/eventing/v1/trigger"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
+	"knative.dev/eventing-natss/pkg/broker/constants"
 	brokerutils "knative.dev/eventing-natss/pkg/broker/utils"
 )
 
@@ -86,8 +87,8 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, trigger *eventingv1.Trig
 	}
 
 	// Check broker class
-	if broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] != BrokerClass {
-		trigger.Status.MarkBrokerFailed("BrokerClassMismatch", "Broker %q is not of class %s", trigger.Spec.Broker, BrokerClass)
+	if broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] != constants.BrokerClassName {
+		trigger.Status.MarkBrokerFailed("BrokerClassMismatch", "Broker %q is not of class %s", trigger.Spec.Broker, constants.BrokerClassName)
 		return nil
 	}
 

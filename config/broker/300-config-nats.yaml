@@ -15,7 +15,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: config-nats
+  name: config-nats-broker
   namespace: knative-eventing
   labels:
     nats.eventing.knative.dev/release: devel

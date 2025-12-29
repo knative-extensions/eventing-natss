@@ -35,17 +35,14 @@ import (
 	triggerreconciler "knative.dev/eventing/pkg/client/injection/reconciler/eventing/v1/trigger"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
+	"knative.dev/eventing-natss/pkg/broker/constants"
 	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
-	"knative.dev/eventing-natss/pkg/common/constants"
 	commonnats "knative.dev/eventing-natss/pkg/common/nats"
 )
 
 const (
 	// ComponentName is the name of this controller component
 	ComponentName = "natsjs-trigger-controller"
-
-	// BrokerClass is the annotation value that identifies brokers managed by this controller
-	BrokerClass = "NatsJetStreamBroker"
 )
 
 // envConfig holds configuration from environment variables
@@ -159,7 +156,7 @@ func filterTriggersByBrokerClass(r *Reconciler) func(obj interface{}) bool {
 		}
 
 		// Check if the broker is of class NatsJetStreamBroker
-		return broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] == BrokerClass
+		return broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] == constants.BrokerClassName
 	}
 }
 
@@ -169,7 +166,7 @@ func filterBrokersByClass(obj interface{}) bool {
 	if !ok {
 		return false
 	}
-	return broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] == BrokerClass
+	return broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] == constants.BrokerClassName
 }
 
 // enqueueTriggerOfBroker returns a handler that enqueues all triggers associated with a broker

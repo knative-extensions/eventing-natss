@@ -29,11 +29,8 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 	"knative.dev/eventing/pkg/kncloudevents"
-)
 
-const (
-	// BrokerClass is the annotation value that identifies brokers managed by this controller
-	BrokerClass = "NatsJetStreamBroker"
+	"knative.dev/eventing-natss/pkg/broker/constants"
 )
 
 // FilterReconciler reconciles triggers and manages consumer subscriptions
@@ -79,7 +76,7 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 	}
 
 	// Check broker class
-	if broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] != BrokerClass {
+	if broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] != constants.BrokerClassName {
 		logger.Debugw("broker is not NatsJetStreamBroker, skipping")
 		return nil
 	}
