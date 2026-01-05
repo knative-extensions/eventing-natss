@@ -251,7 +251,6 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 				)
 			}
 		}
-		logger.Debugw(">>> ACKing")
 		if err := msg.Ack(nats.Context(ctx)); err != nil {
 			logger.Errorw("failed to ack message", zap.Error(err))
 		}
@@ -272,13 +271,11 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 				}
 			}
 
-			logger.Debugw(">>> last retry, ACKing")
 			// Ack after DLS attempt
 			if err := msg.Ack(nats.Context(ctx)); err != nil {
 				logger.Errorw("failed to ack message after last retry", zap.Error(err))
 			}
 		} else {
-			logger.Debugw(">>> NACKing")
 			// Nack for retry
 			nakDelay := jsutils.CalculateNakDelayForRetryNumber(retryNumber, h.retryConfig)
 			if err := msg.NakWithDelay(nakDelay, nats.Context(ctx)); err != nil {
@@ -302,7 +299,6 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 			}
 		}
 
-		logger.Debugw(">>> TERMing")
 		if err := msg.Term(nats.Context(ctx)); err != nil {
 			logger.Errorw("failed to term message", zap.Error(err))
 		}
