@@ -163,8 +163,6 @@ func (m *ConsumerManager) SubscribeTrigger(
 		filterSubject,
 		consumerName,
 		nats.Bind(streamName, consumerName),
-		// nats.ManualAck(),
-		// nats.DeliverNew(),
 	)
 	if err != nil {
 		handler.Cleanup()
