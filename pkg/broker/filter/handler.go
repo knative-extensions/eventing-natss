@@ -245,7 +245,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 				kncloudevents.WithTransformers(&te),
 			)
 			if replyErr != nil {
-				logger.Errorw("failed to send to dead letter sink",
+				logger.Errorw("failed to send reply to broker ingress",
 					zap.Error(replyErr),
 					zap.Int("response_code", replyDispatchInfo.ResponseCode),
 				)
