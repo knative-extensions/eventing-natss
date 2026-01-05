@@ -128,7 +128,7 @@ func NewTriggerHandler(
 		brokerIngressURL: brokerIngressURL,
 		dispatcher:       dispatcher,
 		retryConfig:      retryConfig,
-		noRetryConfig:    retryConfig,
+		noRetryConfig:    noRetryConfig,
 		deadLetterSink:   deadLetterSink,
 	}, nil
 }
@@ -224,14 +224,12 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	}
 	lastTry := retryNumber > maxRetries
 
-	// ctxWithTimeout, cancel := context.WithTimeout(ctx, h.noRetryConfig.RequestTimeout)
 	// Dispatch the message to tirgger's destination
 	dispatchInfo, err := h.dispatcher.SendEvent(ctx, *event, h.subscriber,
 		kncloudevents.WithHeader(additionalHeaders),
 		kncloudevents.WithTransformers(&te),
 		kncloudevents.WithRetryConfig(h.noRetryConfig),
 	)
-	// cancel()
 
 	result := determineNatsResult(dispatchInfo.ResponseCode, err)
 
