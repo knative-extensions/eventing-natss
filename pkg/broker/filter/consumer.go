@@ -94,6 +94,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	brokerIngressURL *duckv1.Addressable,
 	deadLetterSink *duckv1.Addressable,
 	retryConfig *kncloudevents.RetryConfig,
+	noRetryConfig *kncloudevents.RetryConfig,
 ) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -127,6 +128,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 		brokerIngressURL,
 		deadLetterSink,
 		retryConfig,
+		noRetryConfig,
 		m.dispatcher,
 	)
 	if err != nil {
@@ -148,7 +150,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	}
 
 	// Get the filter subject from the consumer's configuration
-	filterSubject := ".>" //brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
+	filterSubject := brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
 
 	logger.Infow("creating pull subscription for trigger consumer",
 		zap.String("stream", streamName),
@@ -161,7 +163,8 @@ func (m *ConsumerManager) SubscribeTrigger(
 		filterSubject,
 		consumerName,
 		nats.Bind(streamName, consumerName),
-		nats.ManualAck(),
+		// nats.ManualAck(),
+		// nats.DeliverNew(),
 	)
 	if err != nil {
 		handler.Cleanup()

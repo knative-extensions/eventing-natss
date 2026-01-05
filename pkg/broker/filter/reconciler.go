@@ -19,6 +19,8 @@ package filter
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"time"
 
 	"go.uber.org/zap"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -118,6 +120,16 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 			retryConfig = &config
 		}
 	}
+	var noRetryConfig = kncloudevents.RetryConfig{
+		RetryMax: 0,
+		CheckRetry: func(ctx context.Context, resp *http.Response, err error) (bool, error) {
+			return false, nil
+		},
+		Backoff: func(attemptNum int, resp *http.Response) time.Duration {
+			return 0
+		},
+		RequestTimeout: retryConfig.RequestTimeout,
+	}
 
 	// Subscribe to the trigger's consumer
 	err = r.consumerManager.SubscribeTrigger(
@@ -127,6 +139,7 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 		brokerIngressURL,
 		deadLetterSink,
 		retryConfig,
+		&noRetryConfig,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to trigger: %w", err)

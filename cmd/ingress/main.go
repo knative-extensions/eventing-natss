@@ -17,7 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"os"
+
 	"knative.dev/pkg/configmap"
+	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/signals"
 
@@ -29,10 +32,10 @@ func main() {
 	component := "natsjs-broker-ingress"
 
 	ctx := signals.NewContext()
-	// ns := os.Getenv("NAMESPACE")
-	// if ns != "" {
-	// 	ctx = injection.WithNamespaceScope(ctx, ns)
-	// }
+	ns := os.Getenv("NAMESPACE")
+	if ns != "" {
+		ctx = injection.WithNamespaceScope(ctx, ns)
+	}
 
 	// nats-config is volume mounted so initialize the fsloader
 	ctx = fsloader.WithLoader(ctx, configmap.Load)

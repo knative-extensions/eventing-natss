@@ -303,7 +303,7 @@ func (r *Reconciler) buildConsumerConfig(trigger *eventingv1.Trigger, broker *ev
 		AckPolicy:     nats.AckExplicitPolicy,
 		AckWait:       ackWait,
 		MaxDeliver:    maxDeliver,
-		DeliverPolicy: nats.DeliverAllPolicy,
+		DeliverPolicy: nats.DeliverNewPolicy,
 		ReplayPolicy:  nats.ReplayInstantPolicy,
 	}
 }
