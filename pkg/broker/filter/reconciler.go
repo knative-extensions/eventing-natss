@@ -120,6 +120,12 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 			retryConfig = &config
 		}
 	}
+
+	// Build no-retry config (JetStream handles retries via redelivery)
+	var requestTimeout time.Duration
+	if retryConfig != nil {
+		requestTimeout = retryConfig.RequestTimeout
+	}
 	var noRetryConfig = kncloudevents.RetryConfig{
 		RetryMax: 0,
 		CheckRetry: func(ctx context.Context, resp *http.Response, err error) (bool, error) {
@@ -128,7 +134,7 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 		Backoff: func(attemptNum int, resp *http.Response) time.Duration {
 			return 0
 		},
-		RequestTimeout: retryConfig.RequestTimeout,
+		RequestTimeout: requestTimeout,
 	}
 
 	// Subscribe to the trigger's consumer
