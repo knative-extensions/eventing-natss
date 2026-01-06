@@ -23,6 +23,10 @@ import (
 	"context"
 	"testing"
 
+	// For our e2e testing, we want this linked first so that our
+	// system namespace environment variable is defaulted prior to
+	// logstream initialization.
+	_ "knative.dev/eventing-natss/test/defaultsystem"
 	"knative.dev/pkg/system"
 	_ "knative.dev/pkg/system/testing"
 	"knative.dev/reconciler-test/pkg/eventshub"

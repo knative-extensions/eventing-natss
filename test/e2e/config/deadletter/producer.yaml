@@ -16,7 +16,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: dls-producer
-  namespace: {{ .namespace }}
+  namespace: "{{ .namespace }}"
 spec:
   backoffLimit: 3
   template:
@@ -27,8 +27,8 @@ spec:
           image: ko://knative.dev/eventing-natss/test/e2e/cmd/natsbroker-producer
           env:
             - name: COUNT
-              value: '{{ .producerCount }}'
+              value: "{{ .producerCount }}"
             - name: EVENT_TYPE
-              value: 'dls.test.event'
+              value: "dls.test.event"
             - name: K_SINK
-              value: http://dls-test-broker-broker-ingress.{{ .namespace }}.svc.cluster.local:8080/{{ .namespace }}/dls-test-broker
+              value: http://dls-test-broker-broker-ingress.{{ .namespace }}.svc.cluster.local

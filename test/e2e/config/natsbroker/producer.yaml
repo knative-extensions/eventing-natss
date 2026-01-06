@@ -16,7 +16,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: producer
-  namespace: {{ .namespace }}
+  namespace: "{{ .namespace }}"
 spec:
   backoffLimit: 3
   template:
@@ -27,6 +27,6 @@ spec:
           image: ko://knative.dev/eventing-natss/test/e2e/cmd/natsbroker-producer
           env:
             - name: COUNT
-              value: '{{ .producerCount }}'
+              value: "{{ .producerCount }}"
             - name: K_SINK
-              value: http://test-nats-broker-broker-ingress.{{ .namespace }}.svc.cluster.local:8080/{{ .namespace }}/test-nats-broker
+              value: http://test-nats-broker-broker-ingress.{{ .namespace }}.svc.cluster.local

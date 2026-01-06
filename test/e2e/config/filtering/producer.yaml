@@ -17,7 +17,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: producer-type-a
-  namespace: {{ .namespace }}
+  namespace: "{{ .namespace }}"
 spec:
   backoffLimit: 3
   template:
@@ -28,18 +28,18 @@ spec:
           image: ko://knative.dev/eventing-natss/test/e2e/cmd/natsbroker-producer
           env:
             - name: COUNT
-              value: '{{ .producerCountTypeA }}'
+              value: "{{ .producerCountTypeA }}"
             - name: EVENT_TYPE
-              value: 'type-a'
+              value: "type-a"
             - name: K_SINK
-              value: http://filter-test-broker-broker-ingress.{{ .namespace }}.svc.cluster.local:8080/{{ .namespace }}/filter-test-broker
+              value: http://filter-test-broker-broker-ingress.{{ .namespace }}.svc.cluster.local
 ---
 # Producer for type-b events
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: producer-type-b
-  namespace: {{ .namespace }}
+  namespace: "{{ .namespace }}"
 spec:
   backoffLimit: 3
   template:
@@ -50,8 +50,8 @@ spec:
           image: ko://knative.dev/eventing-natss/test/e2e/cmd/natsbroker-producer
           env:
             - name: COUNT
-              value: '{{ .producerCountTypeB }}'
+              value: "{{ .producerCountTypeB }}"
             - name: EVENT_TYPE
-              value: 'type-b'
+              value: "type-b"
             - name: K_SINK
-              value: http://filter-test-broker-broker-ingress.{{ .namespace }}.svc.cluster.local:8080/{{ .namespace }}/filter-test-broker
+              value: http://filter-test-broker-broker-ingress.{{ .namespace }}.svc.cluster.local
