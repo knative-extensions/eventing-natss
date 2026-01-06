@@ -25,6 +25,7 @@ import (
 	fakekubeclientset "k8s.io/client-go/kubernetes/fake"
 	appsv1listers "k8s.io/client-go/listers/apps/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	discoveryv1listers "k8s.io/client-go/listers/discovery/v1"
 	rbacv1listers "k8s.io/client-go/listers/rbac/v1"
 	"k8s.io/client-go/tools/cache"
 	fakenatsslientset "knative.dev/eventing-natss/pkg/client/clientset/versioned/fake"
@@ -97,8 +98,8 @@ func (l *Listers) GetServiceAccountLister() corev1listers.ServiceAccountLister {
 	return corev1listers.NewServiceAccountLister(l.indexerFor(&corev1.ServiceAccount{}))
 }
 
-func (l *Listers) GetEndpointsLister() corev1listers.EndpointsLister {
-	return corev1listers.NewEndpointsLister(l.indexerFor(&discoveryv1.EndpointSlice{}))
+func (l *Listers) GetEndpointSliceLister() discoveryv1listers.EndpointSliceLister {
+	return discoveryv1listers.NewEndpointSliceLister(l.indexerFor(&discoveryv1.EndpointSlice{}))
 }
 
 func (l *Listers) GetRoleBindingLister() rbacv1listers.RoleBindingLister {

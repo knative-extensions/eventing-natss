@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	clientgotesting "k8s.io/client-go/testing"
 	kubeclient "knative.dev/pkg/client/injection/kube/client"
 	"knative.dev/pkg/kmeta"
@@ -172,7 +173,7 @@ func TestAllCases(t *testing.T) {
 			Objects: []runtime.Object{
 				makeReadyDispatcherDeployment(),
 				makeDispatcherService(),
-				makeReadyEndpoints(),
+				makeReadyEndpointSlice(),
 				reconciletesting.NewNatsJetStreamChannel(ncName, testNS),
 			},
 			WantStatusUpdates: []clientgotesting.UpdateActionImpl{{
@@ -203,7 +204,7 @@ func TestAllCases(t *testing.T) {
 			Objects: []runtime.Object{
 				makeReadyDispatcherDeployment(),
 				makeDispatcherService(),
-				makeReadyEndpoints(),
+				makeReadyEndpointSlice(),
 				reconciletesting.NewNatsJetStreamChannel(ncName, testNS),
 				makeChannelService(reconciletesting.NewNatsJetStreamChannel(ncName, testNS)),
 			},
@@ -266,7 +267,6 @@ func TestAllCases(t *testing.T) {
 			dispatcherServiceAccount: dispatcherServiceAccount,
 			deploymentLister:         listers.GetDeploymentLister(),
 			serviceLister:            listers.GetServiceLister(),
-			endpointsLister:          listers.GetEndpointsLister(),
 			serviceAccountLister:     listers.GetServiceAccountLister(),
 			roleBindingLister:        listers.GetRoleBindingLister(),
 			jsmChannelLister:         listers.GetNatsJetstreamChannelLister(),
@@ -308,25 +308,34 @@ func makeDispatcherDeploymentWithSpec() *appsv1.Deployment {
 	}).Build()
 }
 
-func makeEmptyEndpoints() *discoveryv1.EndpointSlice {
+func makeEmptyEndpointSlice() *discoveryv1.EndpointSlice {
 	return &discoveryv1.EndpointSlice{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
-			Kind:       "Endpoints",
+			APIVersion: "discovery.k8s.io/v1",
+			Kind:       "EndpointSlice",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: testNS,
-			Name:      dispatcherServiceName,
+			Name:      dispatcherServiceName + "-abc",
+			Labels: map[string]string{
+				discoveryv1.LabelServiceName: dispatcherServiceName,
+			},
 		},
+		AddressType: discoveryv1.AddressTypeIPv4,
 	}
 }
 
-func makeReadyEndpoints() *discoveryv1.EndpointSlice {
-	e := makeEmptyEndpoints()
-	e.Endpoints = []discoveryv1.Endpoint{{
-		Addresses: []string{"1.1.1.1"},
-	}}
-	return e
+func makeReadyEndpointSlice() *discoveryv1.EndpointSlice {
+	es := makeEmptyEndpointSlice()
+	es.Endpoints = []discoveryv1.Endpoint{
+		{
+			Addresses: []string{"1.1.1.1"},
+			Conditions: discoveryv1.EndpointConditions{
+				Ready: ptr.To(true),
+			},
+		},
+	}
+	return es
 }
 
 func makeReadyDispatcherDeployment() *appsv1.Deployment {
