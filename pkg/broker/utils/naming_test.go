@@ -25,9 +25,9 @@ import (
 
 func TestBrokerStreamName(t *testing.T) {
 	tests := []struct {
-		name      string
-		broker    *eventingv1.Broker
-		wantName  string
+		name     string
+		broker   *eventingv1.Broker
+		wantName string
 	}{
 		{
 			name: "simple names",
@@ -83,10 +83,10 @@ func TestBrokerStreamName(t *testing.T) {
 
 func TestBrokerPublishSubjectName(t *testing.T) {
 	tests := []struct {
-		name      string
-		namespace string
+		name       string
+		namespace  string
 		brokerName string
-		want      string
+		want       string
 	}{
 		{
 			name:       "simple names",

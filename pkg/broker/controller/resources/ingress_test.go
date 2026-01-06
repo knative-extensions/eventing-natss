@@ -38,13 +38,13 @@ func TestMakeIngressDeployment(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		args           *IngressArgs
-		wantName       string
-		wantNamespace  string
-		wantReplicas   int32
-		wantImage      string
-		wantLabels     map[string]string
+		name          string
+		args          *IngressArgs
+		wantName      string
+		wantNamespace string
+		wantReplicas  int32
+		wantImage     string
+		wantLabels    map[string]string
 	}{
 		{
 			name: "basic deployment",

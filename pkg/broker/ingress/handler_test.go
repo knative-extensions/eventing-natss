@@ -23,9 +23,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/nats-io/nats.go"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natstest "github.com/nats-io/nats-server/v2/test"
+	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 )
 
@@ -271,7 +271,6 @@ func TestServeHTTP_BinaryCloudEvent(t *testing.T) {
 		t.Errorf("Status code = %v, want %v", w.Code, http.StatusAccepted)
 	}
 }
-
 
 func TestReadinessChecker(t *testing.T) {
 	s := runBasicJetStreamServer(t)
