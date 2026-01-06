@@ -24,6 +24,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,6 +62,9 @@ const (
 	ReasonFilterServiceFailed      = "FilterServiceFailed"
 	ReasonStreamCreated            = "JetStreamStreamCreated"
 	ReasonStreamFailed             = "JetStreamStreamFailed"
+
+	// DataplaneClusterRoleName is the name of the ClusterRole for dataplane components
+	DataplaneClusterRoleName = "natsjetstream-broker-dataplane"
 )
 
 // Reconciler implements controller.Reconciler for Broker resources.
@@ -100,44 +104,49 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 		return fmt.Errorf("failed to get broker config: %w", err)
 	}
 
-	// Step 1: Reconcile JetStream stream
+	// Step 1: Reconcile dataplane RBAC (service account and role binding)
+	if err := r.reconcileDataplaneRBAC(ctx, b); err != nil {
+		return err
+	}
+
+	// Step 2: Reconcile JetStream stream
 	if err := r.reconcileStream(ctx, b, streamName, brokerCfg); err != nil {
 		return err
 	}
 
-	// Step 2: Reconcile ingress deployment
+	// Step 3: Reconcile ingress deployment
 	if err := r.reconcileIngressDeployment(ctx, b, streamName, brokerCfg); err != nil {
 		return err
 	}
 
-	// Step 3: Reconcile ingress service
+	// Step 4: Reconcile ingress service
 	ingressService, err := r.reconcileIngressService(ctx, b)
 	if err != nil {
 		return err
 	}
 
-	// Step 4: Check ingress deployment readiness
+	// Step 5: Check ingress deployment readiness
 	if err := r.propagateIngressAvailability(ctx, b, ingressService); err != nil {
 		return err
 	}
 
-	// Step 5: Reconcile filter deployment
+	// Step 6: Reconcile filter deployment
 	if err := r.reconcileFilterDeployment(ctx, b, streamName, brokerCfg); err != nil {
 		return err
 	}
 
-	// Step 6: Reconcile filter service
+	// Step 7: Reconcile filter service
 	filterService, err := r.reconcileFilterService(ctx, b)
 	if err != nil {
 		return err
 	}
 
-	// Step 7: Check filter deployment readiness
+	// Step 8: Check filter deployment readiness
 	if err := r.propagateFilterAvailability(ctx, b, filterService); err != nil {
 		return err
 	}
 
-	// Step 8: Set broker address
+	// Step 9: Set broker address
 	b.Status.SetAddress(&duckv1.Addressable{
 		Name: ptr.To("http"),
 		URL: &apis.URL{
@@ -146,10 +155,10 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 		},
 	})
 
-	// Step 9: Mark TriggerChannel as ready (we use JetStream instead of a channel)
+	// Step 10: Mark TriggerChannel as ready (we use JetStream instead of a channel)
 	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionTriggerChannel)
 
-	// Step 10: Mark DeadLetterSink condition
+	// Step 11: Mark DeadLetterSink condition
 	if b.Spec.Delivery == nil || b.Spec.Delivery.DeadLetterSink == nil {
 		b.Status.MarkDeadLetterSinkNotConfigured()
 	} else {
@@ -157,7 +166,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 		b.Status.MarkDeadLetterSinkNotConfigured()
 	}
 
-	// Step 11: Mark EventPolicies as ready (not using OIDC authentication)
+	// Step 12: Mark EventPolicies as ready (not using OIDC authentication)
 	b.Status.MarkEventPoliciesTrueWithReason("EventPoliciesSkipped", "Feature %q is disabled", "OIDC")
 
 	logger.Infow("Broker reconciliation completed successfully", zap.String("broker", b.Name))
@@ -487,5 +496,77 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, b *eventingv1.Broker) pkg
 	}
 
 	logger.Infow("Broker finalization completed", zap.String("broker", b.Name))
+	return nil
+}
+
+// reconcileDataplaneRBAC ensures the service account and cluster role binding exist
+// for the dataplane components (filter and ingress) in the broker's namespace.
+func (r *Reconciler) reconcileDataplaneRBAC(ctx context.Context, b *eventingv1.Broker) pkgreconciler.Event {
+	logger := logging.FromContext(ctx)
+
+	// Create the service account if it doesn't exist
+	saName := r.filterServiceAccount // Same SA is used for both filter and ingress
+	_, err := r.kubeClientSet.CoreV1().ServiceAccounts(b.Namespace).Get(ctx, saName, metav1.GetOptions{})
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			sa := &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      saName,
+					Namespace: b.Namespace,
+					Labels: map[string]string{
+						"nats.eventing.knative.dev/release": "devel",
+					},
+				},
+			}
+			_, err = r.kubeClientSet.CoreV1().ServiceAccounts(b.Namespace).Create(ctx, sa, metav1.CreateOptions{})
+			if err != nil && !apierrs.IsAlreadyExists(err) {
+				logger.Errorw("Failed to create dataplane service account", zap.Error(err))
+				return fmt.Errorf("failed to create dataplane service account: %w", err)
+			}
+			logger.Infow("Created dataplane service account", zap.String("name", saName), zap.String("namespace", b.Namespace))
+		} else {
+			logger.Errorw("Failed to get dataplane service account", zap.Error(err))
+			return fmt.Errorf("failed to get dataplane service account: %w", err)
+		}
+	}
+
+	// Create the cluster role binding if it doesn't exist
+	// Each namespace gets its own ClusterRoleBinding
+	crbName := fmt.Sprintf("%s-%s", DataplaneClusterRoleName, b.Namespace)
+	_, err = r.kubeClientSet.RbacV1().ClusterRoleBindings().Get(ctx, crbName, metav1.GetOptions{})
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			crb := &rbacv1.ClusterRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: crbName,
+					Labels: map[string]string{
+						"nats.eventing.knative.dev/release": "devel",
+					},
+				},
+				Subjects: []rbacv1.Subject{
+					{
+						Kind:      "ServiceAccount",
+						Name:      saName,
+						Namespace: b.Namespace,
+					},
+				},
+				RoleRef: rbacv1.RoleRef{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "ClusterRole",
+					Name:     DataplaneClusterRoleName,
+				},
+			}
+			_, err = r.kubeClientSet.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
+			if err != nil && !apierrs.IsAlreadyExists(err) {
+				logger.Errorw("Failed to create dataplane cluster role binding", zap.Error(err))
+				return fmt.Errorf("failed to create dataplane cluster role binding: %w", err)
+			}
+			logger.Infow("Created dataplane cluster role binding", zap.String("name", crbName))
+		} else {
+			logger.Errorw("Failed to get dataplane cluster role binding", zap.Error(err))
+			return fmt.Errorf("failed to get dataplane cluster role binding: %w", err)
+		}
+	}
+
 	return nil
 }

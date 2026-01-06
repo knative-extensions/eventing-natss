@@ -127,4 +127,25 @@ rules:
       - watch
       - create
       - update
+      - patch
       - delete
+  # Manage service accounts for dataplane components
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+  # Manage cluster role bindings for dataplane components
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterrolebindings
+    verbs:
+      - get
+      - list
+      - watch
+      - create
