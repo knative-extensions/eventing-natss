@@ -38,11 +38,22 @@ import (
 )
 
 const (
-	// fetchBatchSize is the number of messages to fetch in each batch
-	fetchBatchSize = 10
-	// fetchTimeout is the timeout for fetching messages
-	fetchTimeout = 500 * time.Millisecond
+	// DefaultFetchBatchSize is the default number of messages to fetch in each batch
+	DefaultFetchBatchSize = 10
+	// DefaultFetchTimeout is the default timeout for fetching messages
+	DefaultFetchTimeout = 500 * time.Millisecond
 )
+
+// ConsumerManagerConfig holds configuration for the ConsumerManager
+type ConsumerManagerConfig struct {
+	// FetchBatchSize is the number of messages to fetch in each batch.
+	// Defaults to DefaultFetchBatchSize if not set.
+	FetchBatchSize int
+
+	// FetchTimeout is the timeout for fetching messages.
+	// Defaults to DefaultFetchTimeout if not set.
+	FetchTimeout time.Duration
+}
 
 // ConsumerManager manages JetStream consumer subscriptions for triggers
 type ConsumerManager struct {
@@ -51,6 +62,10 @@ type ConsumerManager struct {
 
 	js   nats.JetStreamContext
 	conn *nats.Conn
+
+	// Configuration
+	fetchBatchSize int
+	fetchTimeout   time.Duration
 
 	// Event dispatcher
 	dispatcher *kncloudevents.Dispatcher
@@ -71,18 +86,33 @@ type TriggerSubscription struct {
 }
 
 // NewConsumerManager creates a new consumer manager
-func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamContext) *ConsumerManager {
+func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamContext, config *ConsumerManagerConfig) *ConsumerManager {
 	// Create OIDC token provider and dispatcher
 	oidcTokenProvider := auth.NewOIDCTokenProvider(ctx)
 	dispatcher := kncloudevents.NewDispatcher(eventingtls.ClientConfig{}, oidcTokenProvider)
 
+	// Apply defaults
+	fetchBatchSize := DefaultFetchBatchSize
+	fetchTimeout := DefaultFetchTimeout
+
+	if config != nil {
+		if config.FetchBatchSize > 0 {
+			fetchBatchSize = config.FetchBatchSize
+		}
+		if config.FetchTimeout > 0 {
+			fetchTimeout = config.FetchTimeout
+		}
+	}
+
 	return &ConsumerManager{
-		logger:        logging.FromContext(ctx),
-		ctx:           ctx,
-		js:            js,
-		conn:          conn,
-		dispatcher:    dispatcher,
-		subscriptions: make(map[string]*TriggerSubscription),
+		logger:         logging.FromContext(ctx),
+		ctx:            ctx,
+		js:             js,
+		conn:           conn,
+		fetchBatchSize: fetchBatchSize,
+		fetchTimeout:   fetchTimeout,
+		dispatcher:     dispatcher,
+		subscriptions:  make(map[string]*TriggerSubscription),
 	}
 }
 
@@ -208,7 +238,7 @@ func (m *ConsumerManager) fetchLoop(
 			return
 		default:
 			// Fetch a batch of messages
-			msgs, err := sub.Fetch(fetchBatchSize, nats.MaxWait(fetchTimeout))
+			msgs, err := sub.Fetch(m.fetchBatchSize, nats.MaxWait(m.fetchTimeout))
 			if err != nil {
 				if errors.Is(err, nats.ErrTimeout) {
 					// No messages available, continue polling

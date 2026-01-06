@@ -19,6 +19,7 @@ package filter
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/kelseyhightower/envconfig"
 	"github.com/nats-io/nats.go"
@@ -40,9 +41,11 @@ import (
 )
 
 type envConfig struct {
-	PodName       string `envconfig:"POD_NAME" required:"true"`
-	ContainerName string `envconfig:"CONTAINER_NAME" required:"true"`
-	NatsURL       string `envconfig:"NATS_URL" required:"true"`
+	PodName        string        `envconfig:"POD_NAME" required:"true"`
+	ContainerName  string        `envconfig:"CONTAINER_NAME" required:"true"`
+	NatsURL        string        `envconfig:"NATS_URL" required:"true"`
+	FetchBatchSize int           `envconfig:"CONSUMER_FETCH_BATCH_SIZE" default:"0"`
+	FetchTimeout   time.Duration `envconfig:"CONSUMER_FETCH_TIMEOUT" default:"0"`
 }
 
 // NewController creates a new filter controller
@@ -70,8 +73,12 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	triggerInformer := triggerinformer.Get(ctx)
 	brokerInformer := brokerinformer.Get(ctx)
 
-	// Create consumer manager
-	consumerManager := NewConsumerManager(ctx, natsConn, js)
+	// Create consumer manager with optional configuration from environment
+	consumerConfig := &ConsumerManagerConfig{
+		FetchBatchSize: env.FetchBatchSize,
+		FetchTimeout:   env.FetchTimeout,
+	}
+	consumerManager := NewConsumerManager(ctx, natsConn, js, consumerConfig)
 
 	// Create filter reconciler
 	reconciler := NewFilterReconciler(
