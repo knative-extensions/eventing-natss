@@ -23,6 +23,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -307,8 +308,8 @@ func makeDispatcherDeploymentWithSpec() *appsv1.Deployment {
 	}).Build()
 }
 
-func makeEmptyEndpoints() *v1.Endpoints {
-	return &v1.Endpoints{
+func makeEmptyEndpoints() *discoveryv1.EndpointSlice {
+	return &discoveryv1.EndpointSlice{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
 			Kind:       "Endpoints",
@@ -320,9 +321,11 @@ func makeEmptyEndpoints() *v1.Endpoints {
 	}
 }
 
-func makeReadyEndpoints() *v1.Endpoints {
+func makeReadyEndpoints() *discoveryv1.EndpointSlice {
 	e := makeEmptyEndpoints()
-	e.Subsets = []v1.EndpointSubset{{Addresses: []v1.EndpointAddress{{IP: "1.1.1.1"}}}}
+	e.Endpoints = []discoveryv1.Endpoint{{
+		Addresses: []string{"1.1.1.1"},
+	}}
 	return e
 }
 

@@ -19,6 +19,7 @@ package testing
 import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	fakekubeclientset "k8s.io/client-go/kubernetes/fake"
@@ -97,7 +98,7 @@ func (l *Listers) GetServiceAccountLister() corev1listers.ServiceAccountLister {
 }
 
 func (l *Listers) GetEndpointsLister() corev1listers.EndpointsLister {
-	return corev1listers.NewEndpointsLister(l.indexerFor(&corev1.Endpoints{}))
+	return corev1listers.NewEndpointsLister(l.indexerFor(&discoveryv1.EndpointSlice{}))
 }
 
 func (l *Listers) GetRoleBindingLister() rbacv1listers.RoleBindingLister {
