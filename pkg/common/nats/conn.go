@@ -50,6 +50,31 @@ var (
 	ErrBadTLSOption            = errors.New("bad tls option")
 )
 
+// NewNatsConnFromURL creates a NATS connection using just the URL.
+// This is useful when the NATS URL is passed via environment variable.
+func NewNatsConnFromURL(ctx context.Context, url string) (*nats.Conn, error) {
+	logger := logging.FromContext(ctx)
+
+	if url == "" {
+		url = constants.DefaultNatsURL
+	}
+
+	opts := []nats.Option{
+		nats.Name("kn jsm broker component"),
+		nats.DisconnectErrHandler(func(conn *nats.Conn, err error) {
+			logger.Warnf("Disconnected from NATS: err=%v", err)
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			logger.Infof("Reconnected to NATS [%s]", nc.ConnectedUrl())
+		}),
+		nats.ClosedHandler(func(nc *nats.Conn) {
+			logger.Warnf("NATS connection closed")
+		}),
+	}
+
+	return nats.Connect(url, opts...)
+}
+
 func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*nats.Conn, error) {
 	logger := logging.FromContext(ctx)
 

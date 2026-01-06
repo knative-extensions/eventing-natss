@@ -74,6 +74,9 @@ type Reconciler struct {
 	// NATS JetStream connection
 	js nats.JetStreamContext
 
+	// NATS URL for data plane components
+	natsURL string
+
 	// Image configuration
 	ingressImage          string
 	filterImage           string
@@ -242,6 +245,7 @@ func (r *Reconciler) reconcileIngressDeployment(ctx context.Context, b *eventing
 		Image:              r.ingressImage,
 		ServiceAccountName: r.ingressServiceAccount,
 		StreamName:         streamName,
+		NatsURL:            r.natsURL,
 		Template:           ingressTemplate,
 	})
 
@@ -388,6 +392,7 @@ func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv
 		Image:              r.filterImage,
 		ServiceAccountName: r.filterServiceAccount,
 		StreamName:         streamName,
+		NatsURL:            r.natsURL,
 		Template:           filterTemplate,
 	})
 

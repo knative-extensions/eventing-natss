@@ -27,7 +27,6 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 
 	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	"knative.dev/eventing-natss/pkg/broker/constants"
 )
 
 const (
@@ -41,6 +40,7 @@ type FilterArgs struct {
 	Image              string
 	ServiceAccountName string
 	StreamName         string
+	NatsURL            string
 	Template           *messagingv1alpha1.DeploymentTemplate
 }
 
@@ -132,12 +132,6 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      constants.SettingsConfigMapName,
-									MountPath: constants.SettingsConfigMapMountPath,
-								},
-							},
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
@@ -157,18 +151,6 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 								},
 								InitialDelaySeconds: 5,
 								PeriodSeconds:       10,
-							},
-						},
-					},
-					Volumes: []corev1.Volume{
-						{
-							Name: constants.SettingsConfigMapName,
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: constants.SettingsConfigMapName,
-									},
-								},
 							},
 						},
 					},
@@ -221,6 +203,10 @@ func makeFilterEnv(args *FilterArgs) []corev1.EnvVar {
 		{
 			Name:  "STREAM_NAME",
 			Value: args.StreamName,
+		},
+		{
+			Name:  "NATS_URL",
+			Value: args.NatsURL,
 		},
 		{
 			Name:  "METRICS_DOMAIN",

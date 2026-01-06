@@ -19,13 +19,11 @@ package main
 import (
 	"os"
 
-	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/signals"
 
 	"knative.dev/eventing-natss/pkg/broker/ingress"
-	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 )
 
 func main() {
@@ -36,9 +34,6 @@ func main() {
 	if ns != "" {
 		ctx = injection.WithNamespaceScope(ctx, ns)
 	}
-
-	// nats-config is volume mounted so initialize the fsloader
-	ctx = fsloader.WithLoader(ctx, configmap.Load)
 
 	sharedmain.MainWithContext(ctx, component, ingress.NewController)
 }

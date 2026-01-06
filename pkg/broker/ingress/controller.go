@@ -29,8 +29,6 @@ import (
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/reconciler"
 
-	"knative.dev/eventing-natss/pkg/broker/constants"
-	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 	commonnats "knative.dev/eventing-natss/pkg/common/nats"
 )
 
@@ -38,6 +36,7 @@ type envConfig struct {
 	BrokerName string `envconfig:"BROKER_NAME" required:"true"`
 	Namespace  string `envconfig:"BROKER_NAMESPACE" required:"true"`
 	StreamName string `envconfig:"STREAM_NAME" required:"true"`
+	NatsURL    string `envconfig:"NATS_URL" required:"true"`
 	Port       int    `envconfig:"PORT" default:"8080"`
 }
 
@@ -55,29 +54,12 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		zap.String("broker", env.BrokerName),
 		zap.String("namespace", env.Namespace),
 		zap.String("stream", env.StreamName),
+		zap.String("nats_url", env.NatsURL),
 		zap.Int("port", env.Port),
 	)
 
-	// Get the config loader
-	fsLoader, err := fsloader.Get(ctx)
-	if err != nil {
-		logger.Fatalw("Failed to get ConfigmapLoader from context", zap.Error(err))
-	}
-
-	// Load NATS configuration from mounted ConfigMap
-	configMap, err := fsLoader(constants.SettingsConfigMapMountPath)
-	if err != nil {
-		logger.Fatalw("Failed to load NATS configmap", zap.Error(err))
-	}
-
-	// Parse NATS configuration
-	natsConfig, err := commonnats.LoadEventingNatsConfig(configMap)
-	if err != nil {
-		logger.Fatalw("Failed to parse NATS configuration", zap.Error(err))
-	}
-
-	// Create NATS connection
-	natsConn, err := commonnats.NewNatsConn(ctx, natsConfig)
+	// Create NATS connection using URL from environment variable
+	natsConn, err := commonnats.NewNatsConnFromURL(ctx, env.NatsURL)
 	if err != nil {
 		logger.Fatalw("Failed to create NATS connection", zap.Error(err))
 	}

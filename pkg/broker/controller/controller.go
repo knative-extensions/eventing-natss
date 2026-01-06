@@ -118,6 +118,8 @@ func NewController(
 
 		js: js,
 
+		natsURL: natsConfig.URL,
+
 		ingressImage:          env.IngressImage,
 		filterImage:           env.FilterImage,
 		ingressServiceAccount: env.IngressServiceAccount,

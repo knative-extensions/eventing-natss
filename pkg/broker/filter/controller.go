@@ -36,13 +36,13 @@ import (
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
 	"knative.dev/eventing-natss/pkg/broker/constants"
-	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 	commonnats "knative.dev/eventing-natss/pkg/common/nats"
 )
 
 type envConfig struct {
 	PodName       string `envconfig:"POD_NAME" required:"true"`
 	ContainerName string `envconfig:"CONTAINER_NAME" required:"true"`
+	NatsURL       string `envconfig:"NATS_URL" required:"true"`
 }
 
 // NewController creates a new filter controller
@@ -54,26 +54,8 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		logger.Fatalw("Failed to process environment variables", zap.Error(err))
 	}
 
-	// Get the config loader
-	fsLoader, err := fsloader.Get(ctx)
-	if err != nil {
-		logger.Fatalw("Failed to get ConfigmapLoader from context", zap.Error(err))
-	}
-
-	// Load NATS configuration from mounted ConfigMap
-	configMap, err := fsLoader(constants.SettingsConfigMapMountPath)
-	if err != nil {
-		logger.Fatalw("Failed to load NATS configmap", zap.Error(err))
-	}
-
-	// Parse NATS configuration
-	natsConfig, err := commonnats.LoadEventingNatsConfig(configMap)
-	if err != nil {
-		logger.Fatalw("Failed to parse NATS configuration", zap.Error(err))
-	}
-
-	// Create NATS connection
-	natsConn, err := commonnats.NewNatsConn(ctx, natsConfig)
+	// Create NATS connection using URL from environment variable
+	natsConn, err := commonnats.NewNatsConnFromURL(ctx, env.NatsURL)
 	if err != nil {
 		logger.Fatalw("Failed to create NATS connection", zap.Error(err))
 	}
