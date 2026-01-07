@@ -17,11 +17,17 @@ limitations under the License.
 package filter
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"testing"
 
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/protocol"
+	"go.uber.org/zap"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
+	"knative.dev/eventing/pkg/eventfilter"
 )
 
 func TestDetermineNatsResult(t *testing.T) {
@@ -203,6 +209,228 @@ func TestDetermineNatsResult_EdgeCases(t *testing.T) {
 			isACK := protocol.IsACK(result)
 			if isACK != tt.wantACK {
 				t.Errorf("IsACK() = %v, want %v", isACK, tt.wantACK)
+			}
+		})
+	}
+}
+
+func TestBuildTriggerFilter(t *testing.T) {
+	logger := zap.NewNop().Sugar()
+
+	tests := []struct {
+		name           string
+		trigger        *eventingv1.Trigger
+		wantNilFilter  bool
+		testEvent      cloudevents.Event
+		wantFilterPass bool
+	}{
+		{
+			name: "no filter - passes all events",
+			trigger: &eventingv1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-trigger",
+					Namespace: "default",
+				},
+				Spec: eventingv1.TriggerSpec{
+					Broker: "test-broker",
+				},
+			},
+			wantNilFilter:  true,
+			wantFilterPass: true,
+		},
+		{
+			name: "legacy filter only - uses attributes filter",
+			trigger: &eventingv1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-trigger",
+					Namespace: "default",
+				},
+				Spec: eventingv1.TriggerSpec{
+					Broker: "test-broker",
+					Filter: &eventingv1.TriggerFilter{
+						Attributes: map[string]string{
+							"type": "test.event.type",
+						},
+					},
+				},
+			},
+			wantNilFilter: false,
+			testEvent: func() cloudevents.Event {
+				e := cloudevents.NewEvent()
+				e.SetType("test.event.type")
+				e.SetSource("test-source")
+				return e
+			}(),
+			wantFilterPass: true,
+		},
+		{
+			name: "legacy filter - event does not match",
+			trigger: &eventingv1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-trigger",
+					Namespace: "default",
+				},
+				Spec: eventingv1.TriggerSpec{
+					Broker: "test-broker",
+					Filter: &eventingv1.TriggerFilter{
+						Attributes: map[string]string{
+							"type": "test.event.type",
+						},
+					},
+				},
+			},
+			wantNilFilter: false,
+			testEvent: func() cloudevents.Event {
+				e := cloudevents.NewEvent()
+				e.SetType("different.type")
+				e.SetSource("test-source")
+				return e
+			}(),
+			wantFilterPass: false,
+		},
+		{
+			name: "new filters take priority over legacy filter",
+			trigger: &eventingv1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-trigger",
+					Namespace: "default",
+				},
+				Spec: eventingv1.TriggerSpec{
+					Broker: "test-broker",
+					// New filters - should take priority
+					Filters: []eventingv1.SubscriptionsAPIFilter{
+						{
+							Exact: map[string]string{
+								"type": "new.filter.type",
+							},
+						},
+					},
+					// Legacy filter - should be ignored
+					Filter: &eventingv1.TriggerFilter{
+						Attributes: map[string]string{
+							"type": "legacy.filter.type",
+						},
+					},
+				},
+			},
+			wantNilFilter: false,
+			testEvent: func() cloudevents.Event {
+				e := cloudevents.NewEvent()
+				e.SetType("new.filter.type")
+				e.SetSource("test-source")
+				return e
+			}(),
+			wantFilterPass: true,
+		},
+		{
+			name: "new filters - event matches legacy but not new filter",
+			trigger: &eventingv1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-trigger",
+					Namespace: "default",
+				},
+				Spec: eventingv1.TriggerSpec{
+					Broker: "test-broker",
+					Filters: []eventingv1.SubscriptionsAPIFilter{
+						{
+							Exact: map[string]string{
+								"type": "new.filter.type",
+							},
+						},
+					},
+					Filter: &eventingv1.TriggerFilter{
+						Attributes: map[string]string{
+							"type": "legacy.filter.type",
+						},
+					},
+				},
+			},
+			wantNilFilter: false,
+			testEvent: func() cloudevents.Event {
+				e := cloudevents.NewEvent()
+				e.SetType("legacy.filter.type") // matches legacy but not new
+				e.SetSource("test-source")
+				return e
+			}(),
+			wantFilterPass: false, // new filters take priority, so should fail
+		},
+		{
+			name: "new filters with prefix",
+			trigger: &eventingv1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-trigger",
+					Namespace: "default",
+				},
+				Spec: eventingv1.TriggerSpec{
+					Broker: "test-broker",
+					Filters: []eventingv1.SubscriptionsAPIFilter{
+						{
+							Prefix: map[string]string{
+								"type": "test.event.",
+							},
+						},
+					},
+				},
+			},
+			wantNilFilter: false,
+			testEvent: func() cloudevents.Event {
+				e := cloudevents.NewEvent()
+				e.SetType("test.event.created")
+				e.SetSource("test-source")
+				return e
+			}(),
+			wantFilterPass: true,
+		},
+		{
+			name: "new filters with suffix",
+			trigger: &eventingv1.Trigger{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-trigger",
+					Namespace: "default",
+				},
+				Spec: eventingv1.TriggerSpec{
+					Broker: "test-broker",
+					Filters: []eventingv1.SubscriptionsAPIFilter{
+						{
+							Suffix: map[string]string{
+								"type": ".created",
+							},
+						},
+					},
+				},
+			},
+			wantNilFilter: false,
+			testEvent: func() cloudevents.Event {
+				e := cloudevents.NewEvent()
+				e.SetType("order.created")
+				e.SetSource("test-source")
+				return e
+			}(),
+			wantFilterPass: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter := buildTriggerFilter(logger, tt.trigger)
+
+			if tt.wantNilFilter {
+				if filter != nil {
+					t.Errorf("expected nil filter, got %v", filter)
+				}
+				return
+			}
+
+			if filter == nil {
+				t.Fatal("expected non-nil filter")
+			}
+
+			// Test the filter with the test event
+			result := filter.Filter(context.Background(), tt.testEvent)
+			passed := result != eventfilter.FailFilter
+
+			if passed != tt.wantFilterPass {
+				t.Errorf("filter result = %v (passed=%v), want passed=%v", result, passed, tt.wantFilterPass)
 			}
 		})
 	}

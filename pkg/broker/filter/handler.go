@@ -38,6 +38,7 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/eventing/pkg/eventfilter"
 	"knative.dev/eventing/pkg/eventfilter/attributes"
+	"knative.dev/eventing/pkg/eventfilter/subscriptionsapi"
 	"knative.dev/eventing/pkg/kncloudevents"
 )
 
@@ -118,7 +119,7 @@ func NewTriggerHandler(
 		ctx:              ctx,
 		trigger:          trigger,
 		subscriber:       subscriber,
-		filter:           buildTriggerFilter(trigger),
+		filter:           buildTriggerFilter(logger, trigger),
 		brokerIngressURL: brokerIngressURL,
 		dispatcher:       dispatcher,
 		retryConfig:      retryConfig,
@@ -323,11 +324,28 @@ func determineNatsResult(responseCode int, err error) protocol.Result {
 	return result
 }
 
-func buildTriggerFilter(trigger *eventingv1.Trigger) eventfilter.Filter {
-	// Build the filter from trigger spec
-	var filter eventfilter.Filter
-	if trigger.Spec.Filter != nil && trigger.Spec.Filter.Attributes != nil {
-		filter = attributes.NewAttributesFilter(trigger.Spec.Filter.Attributes)
+// buildTriggerFilter builds a filter from the trigger spec.
+// Priority:
+// 1. trigger.Spec.Filters (new subscriptions API filters) - if defined
+// 2. trigger.Spec.Filter (legacy attributes filter) - if defined
+// 3. nil (pass all events) - if neither is defined
+func buildTriggerFilter(logger *zap.SugaredLogger, trigger *eventingv1.Trigger) eventfilter.Filter {
+	switch {
+	case len(trigger.Spec.Filters) > 0:
+		// Use new subscriptions API filters
+		logger.Debugw("using subscriptions API filters",
+			zap.Any("filters", trigger.Spec.Filters),
+		)
+		return subscriptionsapi.CreateSubscriptionsAPIFilters(logger.Desugar(), trigger.Spec.Filters)
+	case trigger.Spec.Filter != nil && trigger.Spec.Filter.Attributes != nil:
+		// Use legacy attributes filter
+		logger.Debugw("using legacy attributes filter",
+			zap.Any("filter", trigger.Spec.Filter),
+		)
+		return attributes.NewAttributesFilter(trigger.Spec.Filter.Attributes)
+	default:
+		// No filter defined, pass all events
+		logger.Debugw("no filter defined, passing all events")
+		return nil
 	}
-	return filter
 }

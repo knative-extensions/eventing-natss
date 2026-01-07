@@ -140,7 +140,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	if existing, ok := m.subscriptions[triggerUID]; ok {
 		existing.handler.noRetryConfig = noRetryConfig
 		existing.handler.retryConfig = retryConfig
-		existing.handler.filter = buildTriggerFilter(trigger)
+		existing.handler.filter = buildTriggerFilter(logger, trigger)
 		existing.handler.deadLetterSink = deadLetterSink
 
 		// Check if configuration has changed
