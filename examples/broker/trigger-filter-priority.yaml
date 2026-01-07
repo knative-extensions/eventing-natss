@@ -1,0 +1,34 @@
+# Example demonstrating filter priority
+#
+# When BOTH filters (new) and filter (legacy) are specified,
+# the NEW filters field takes priority and the legacy filter is IGNORED.
+#
+# This allows you to migrate from legacy to new filters gradually:
+# 1. Add the new "filters" field alongside existing "filter"
+# 2. The new filters will be used immediately
+# 3. Remove the legacy "filter" field when ready
+#
+# In this example:
+# - Events with type "com.example.new.type" WILL be delivered (new filter matches)
+# - Events with type "com.example.legacy.type" will NOT be delivered (legacy filter is ignored)
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: filter-priority-example
+  namespace: default
+spec:
+  broker: example-broker
+  # NEW filters field - THIS IS USED
+  filters:
+    - exact:
+        type: com.example.new.type
+  # Legacy filter field - THIS IS IGNORED when "filters" is present
+  filter:
+    attributes:
+      type: com.example.legacy.type
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: my-service

@@ -1,0 +1,34 @@
+# Broker with Custom Stream Configuration (via annotation)
+#
+# This example shows how to configure the underlying JetStream stream
+# using the broker annotation. This allows fine-tuning of:
+# - Message retention
+# - Storage type (file/memory)
+# - Message limits
+# - Replication
+#
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: broker-custom-stream
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    # Custom stream configuration as JSON
+    natsjetstream.eventing.knative.dev/config: |
+      {
+        "stream": {
+          "retention": "Limits",
+          "storage": "File",
+          "replicas": 3,
+          "maxMsgs": 1000000,
+          "maxBytes": 1073741824,
+          "maxAge": "24h",
+          "discard": "Old"
+        }
+      }
+spec:
+  delivery:
+    retry: 3
+    backoffPolicy: exponential
+    backoffDelay: PT1S

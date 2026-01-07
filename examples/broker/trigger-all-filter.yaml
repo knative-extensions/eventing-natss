@@ -1,0 +1,27 @@
+# Example Trigger with ALL filter (AND logic - new Subscriptions API)
+#
+# This trigger uses the "all" filter to require ALL conditions to be met.
+# Only events that match every nested filter will be delivered.
+#
+# This example matches events where:
+# - type equals "com.example.order.created" AND
+# - source equals "/orders/premium"
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: all-filter-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  filters:
+    - all:
+        - exact:
+            type: com.example.order.created
+        - exact:
+            source: /orders/premium
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: premium-order-processor

@@ -182,7 +182,7 @@ func MakeIngressService(broker *eventingv1.Broker) *corev1.Service {
 }
 
 func makeIngressEnv(args *IngressArgs) []corev1.EnvVar {
-	return []corev1.EnvVar{
+	env := []corev1.EnvVar{
 		{
 			Name:  system.NamespaceEnvKey,
 			Value: system.Namespace(),
@@ -224,4 +224,11 @@ func makeIngressEnv(args *IngressArgs) []corev1.EnvVar {
 			Value: IngressContainerName,
 		},
 	}
+
+	// Append additional env vars from template
+	if args.Template != nil && len(args.Template.Env) > 0 {
+		env = append(env, args.Template.Env...)
+	}
+
+	return env
 }

@@ -1,0 +1,35 @@
+# Example Trigger with Dead Letter Sink
+#
+# This trigger demonstrates configuring a dead letter sink to receive
+# events that fail delivery after all retry attempts are exhausted.
+#
+# The delivery configuration specifies:
+# - retry: Number of retry attempts (3)
+# - backoffPolicy: How to increase delay between retries (exponential)
+# - backoffDelay: Initial delay between retries (1 second)
+# - deadLetterSink: Where to send failed events
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: trigger-with-dls
+  namespace: default
+spec:
+  broker: example-broker
+  filters:
+    - exact:
+        type: com.example.order.created
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: order-processor
+  delivery:
+    retry: 3
+    backoffPolicy: exponential
+    backoffDelay: PT1S
+    deadLetterSink:
+      ref:
+        apiVersion: v1
+        kind: Service
+        name: failed-orders-handler

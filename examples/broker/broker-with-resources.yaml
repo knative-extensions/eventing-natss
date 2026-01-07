@@ -1,0 +1,62 @@
+# Broker with Custom Resource Limits and Replicas
+#
+# This example shows how to configure:
+# - Number of ingress/filter replicas for high availability
+# - CPU and memory resources for the broker components
+# - Node selectors for placement
+#
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: broker-production
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    natsjetstream.eventing.knative.dev/config: |
+      {
+        "stream": {
+          "retention": "Limits",
+          "storage": "File",
+          "replicas": 3,
+          "maxMsgs": 10000000,
+          "maxBytes": 10737418240,
+          "maxAge": "168h"
+        },
+        "ingress": {
+          "replicas": 3,
+          "resources": {
+            "requests": {
+              "cpu": "100m",
+              "memory": "128Mi"
+            },
+            "limits": {
+              "cpu": "500m",
+              "memory": "512Mi"
+            }
+          },
+          "nodeSelector": {
+            "node-type": "eventing"
+          }
+        },
+        "filter": {
+          "replicas": 3,
+          "resources": {
+            "requests": {
+              "cpu": "200m",
+              "memory": "256Mi"
+            },
+            "limits": {
+              "cpu": "1000m",
+              "memory": "1Gi"
+            }
+          },
+          "nodeSelector": {
+            "node-type": "eventing"
+          }
+        }
+      }
+spec:
+  delivery:
+    retry: 5
+    backoffPolicy: exponential
+    backoffDelay: PT1S

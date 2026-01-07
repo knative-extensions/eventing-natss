@@ -411,6 +411,10 @@ type DeploymentTemplate struct {
 	// Affinity for pod scheduling.
 	// +optional
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
+	// Env defines additional environment variables for the container.
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
 // NatsJetStreamBrokerDefaults contains the default configuration for NatsJetStreamBroker

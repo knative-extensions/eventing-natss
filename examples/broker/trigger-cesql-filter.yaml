@@ -1,0 +1,31 @@
+# Example Trigger with CESQL filter (CloudEvents SQL - new Subscriptions API)
+#
+# This trigger uses CloudEvents SQL expressions for flexible filtering.
+# CESQL provides powerful query capabilities including:
+# - LIKE patterns for prefix/suffix/contains matching
+# - Comparison operators (<, >, <=, >=, =, <>)
+# - Boolean logic (AND, OR, NOT)
+# - String functions (CONCAT, SUBSTRING, etc.)
+#
+# This example matches events where:
+# - type starts with "com.example.order." AND
+# - source equals "/orders" AND
+# - (the "priority" extension equals "high" OR extension "amount" > 1000)
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: cesql-filter-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  filters:
+    - cesql: |
+        type LIKE 'com.example.order.%' AND
+        source = '/orders' AND
+        (priority = 'high' OR amount > 1000)
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: priority-order-processor

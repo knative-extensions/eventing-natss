@@ -1,0 +1,30 @@
+# Broker with Memory Storage (High Throughput)
+#
+# This configuration uses memory storage for maximum throughput.
+# WARNING: Messages will be lost if the NATS server restarts!
+# Use this only for non-critical, high-volume event streams.
+#
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: broker-high-throughput
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    natsjetstream.eventing.knative.dev/config: |
+      {
+        "stream": {
+          "retention": "Interest",
+          "storage": "Memory",
+          "replicas": 1,
+          "maxMsgs": 100000,
+          "maxBytes": 536870912,
+          "maxAge": "1h",
+          "discard": "Old"
+        }
+      }
+spec:
+  delivery:
+    retry: 1
+    backoffPolicy: linear
+    backoffDelay: PT100MS

@@ -34,6 +34,7 @@ func runBasicJetStreamServer(t *testing.T) *natsserver.Server {
 	opts := natstest.DefaultTestOptions
 	opts.Port = -1
 	opts.JetStream = true
+	opts.StoreDir = t.TempDir() // Use temp dir to isolate test state
 	return natstest.RunServer(&opts)
 }
 

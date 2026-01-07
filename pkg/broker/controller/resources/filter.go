@@ -187,7 +187,7 @@ func MakeFilterService(broker *eventingv1.Broker) *corev1.Service {
 }
 
 func makeFilterEnv(args *FilterArgs) []corev1.EnvVar {
-	return []corev1.EnvVar{
+	env := []corev1.EnvVar{
 		{
 			Name:  system.NamespaceEnvKey,
 			Value: system.Namespace(),
@@ -233,4 +233,11 @@ func makeFilterEnv(args *FilterArgs) []corev1.EnvVar {
 			Value: FilterContainerName,
 		},
 	}
+
+	// Append additional env vars from template (e.g., CONSUMER_FETCH_BATCH_SIZE, CONSUMER_FETCH_TIMEOUT)
+	if args.Template != nil && len(args.Template.Env) > 0 {
+		env = append(env, args.Template.Env...)
+	}
+
+	return env
 }

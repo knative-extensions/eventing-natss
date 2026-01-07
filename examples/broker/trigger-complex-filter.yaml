@@ -1,0 +1,35 @@
+# Example Trigger with complex nested filters (new Subscriptions API)
+#
+# This example demonstrates combining multiple filter types in a complex expression.
+# The filters can be arbitrarily nested to create sophisticated matching rules.
+#
+# This example matches events where:
+# - (type starts with "com.example.order." OR type starts with "com.example.invoice.")
+# - AND source does NOT equal "/test"
+# - AND (priority extension equals "high" OR amount extension is present)
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: complex-filter-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  filters:
+    # All conditions must be met (AND)
+    - all:
+        # Match order or invoice events
+        - any:
+            - prefix:
+                type: com.example.order.
+            - prefix:
+                type: com.example.invoice.
+        # Exclude test events
+        - not:
+            exact:
+              source: /test
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: business-event-processor
