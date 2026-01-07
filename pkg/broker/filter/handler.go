@@ -113,18 +113,12 @@ func NewTriggerHandler(
 		zap.String("namespace", trigger.Namespace),
 	)
 
-	// Build the filter from trigger spec
-	var filter eventfilter.Filter
-	if trigger.Spec.Filter != nil && trigger.Spec.Filter.Attributes != nil {
-		filter = attributes.NewAttributesFilter(trigger.Spec.Filter.Attributes)
-	}
-
 	return &TriggerHandler{
 		logger:           logger,
 		ctx:              ctx,
 		trigger:          trigger,
 		subscriber:       subscriber,
-		filter:           filter,
+		filter:           buildTriggerFilter(trigger),
 		brokerIngressURL: brokerIngressURL,
 		dispatcher:       dispatcher,
 		retryConfig:      retryConfig,
@@ -224,7 +218,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	}
 	lastTry := retryNumber > maxRetries
 
-	// Dispatch the message to tirgger's destination
+	// Dispatch the message to trigger's destination
 	dispatchInfo, err := h.dispatcher.SendEvent(ctx, *event, h.subscriber,
 		kncloudevents.WithHeader(additionalHeaders),
 		kncloudevents.WithTransformers(&te),
@@ -327,4 +321,13 @@ func determineNatsResult(responseCode int, err error) protocol.Result {
 		}
 	}
 	return result
+}
+
+func buildTriggerFilter(trigger *eventingv1.Trigger) eventfilter.Filter {
+	// Build the filter from trigger spec
+	var filter eventfilter.Filter
+	if trigger.Spec.Filter != nil && trigger.Spec.Filter.Attributes != nil {
+		filter = attributes.NewAttributesFilter(trigger.Spec.Filter.Attributes)
+	}
+	return filter
 }

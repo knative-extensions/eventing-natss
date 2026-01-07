@@ -138,6 +138,11 @@ func (m *ConsumerManager) SubscribeTrigger(
 
 	// Check if we already have a subscription for this trigger
 	if existing, ok := m.subscriptions[triggerUID]; ok {
+		existing.handler.noRetryConfig = noRetryConfig
+		existing.handler.retryConfig = retryConfig
+		existing.handler.filter = buildTriggerFilter(trigger)
+		existing.handler.deadLetterSink = deadLetterSink
+
 		// Check if configuration has changed
 		if existing.handler.subscriber.URL.String() == subscriber.URL.String() {
 			logger.Debugw("trigger subscription already exists and is up to date")
@@ -217,7 +222,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	}
 
 	// Start the message fetch loop
-	go m.fetchLoop(ctx, triggerUID, sub, handler, logger)
+	go m.fetchLoop(ctx, sub, handler, logger)
 
 	logger.Infow("successfully started pull subscription for trigger consumer")
 	return nil
@@ -226,7 +231,6 @@ func (m *ConsumerManager) SubscribeTrigger(
 // fetchLoop continuously fetches messages from the pull consumer
 func (m *ConsumerManager) fetchLoop(
 	ctx context.Context,
-	triggerUID string,
 	sub *nats.Subscription,
 	handler *TriggerHandler,
 	logger *zap.SugaredLogger,
