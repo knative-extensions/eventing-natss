@@ -41,7 +41,7 @@ const (
 	// DefaultFetchBatchSize is the default number of messages to fetch in each batch
 	DefaultFetchBatchSize = 10
 	// DefaultFetchTimeout is the default timeout for fetching messages
-	DefaultFetchTimeout = 500 * time.Millisecond
+	DefaultFetchTimeout = 200 * time.Millisecond
 )
 
 // ConsumerManagerConfig holds configuration for the ConsumerManager
