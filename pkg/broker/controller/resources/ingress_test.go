@@ -25,7 +25,7 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/pkg/ptr"
 
-	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 )
 
 func TestMakeIngressDeployment(t *testing.T) {
@@ -72,7 +72,7 @@ func TestMakeIngressDeployment(t *testing.T) {
 				ServiceAccountName: "test-sa",
 				StreamName:         "TEST_STREAM",
 				NatsURL:            "nats://nats:4222",
-				Template: &messagingv1alpha1.DeploymentTemplate{
+				Template: &brokerconfig.DeploymentTemplate{
 					Replicas: ptr.Int32(3),
 					Labels: map[string]string{
 						"custom": "label",
@@ -166,7 +166,7 @@ func TestMakeIngressDeploymentWithResources(t *testing.T) {
 		ServiceAccountName: "test-sa",
 		StreamName:         "TEST_STREAM",
 		NatsURL:            "nats://nats:4222",
-		Template: &messagingv1alpha1.DeploymentTemplate{
+		Template: &brokerconfig.DeploymentTemplate{
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("100m"),

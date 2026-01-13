@@ -76,7 +76,7 @@ func TestLoadDefaultsFromConfigMap(t *testing.T) {
 	tests := []struct {
 		name    string
 		cm      *corev1.ConfigMap
-		want    *v1alpha1.NatsJetStreamBrokerDefaults
+		want    *NatsJetStreamBrokerDefaults
 		wantErr bool
 	}{
 		{
@@ -125,8 +125,8 @@ clusterDefault:
 `,
 				},
 			},
-			want: &v1alpha1.NatsJetStreamBrokerDefaults{
-				ClusterDefault: &v1alpha1.NatsJetStreamBrokerConfig{
+			want: &NatsJetStreamBrokerDefaults{
+				ClusterDefault: &NatsJetStreamBrokerConfig{
 					Stream: &v1alpha1.StreamConfig{
 						Replicas: 3,
 					},
@@ -149,8 +149,8 @@ namespaceDefaults:
 `,
 				},
 			},
-			want: &v1alpha1.NatsJetStreamBrokerDefaults{
-				NamespaceDefaults: map[string]*v1alpha1.NatsJetStreamBrokerConfig{
+			want: &NatsJetStreamBrokerDefaults{
+				NamespaceDefaults: map[string]*NatsJetStreamBrokerConfig{
 					"production": {
 						Stream: &v1alpha1.StreamConfig{
 							Replicas: 5,
@@ -192,7 +192,7 @@ func TestGetConfigFromAnnotation(t *testing.T) {
 	tests := []struct {
 		name        string
 		annotations map[string]string
-		want        *v1alpha1.NatsJetStreamBrokerConfig
+		want        *NatsJetStreamBrokerConfig
 		wantErr     bool
 	}{
 		{
@@ -224,7 +224,7 @@ func TestGetConfigFromAnnotation(t *testing.T) {
 			annotations: map[string]string{
 				BrokerConfigAnnotation: `{"stream":{"replicas":3}}`,
 			},
-			want: &v1alpha1.NatsJetStreamBrokerConfig{
+			want: &NatsJetStreamBrokerConfig{
 				Stream: &v1alpha1.StreamConfig{
 					Replicas: 3,
 				},
@@ -258,7 +258,7 @@ func TestGetConfigFromConfigMap(t *testing.T) {
 		name      string
 		cm        *corev1.ConfigMap
 		namespace string
-		want      *v1alpha1.NatsJetStreamBrokerConfig
+		want      *NatsJetStreamBrokerConfig
 		wantErr   bool
 	}{
 		{
@@ -283,7 +283,7 @@ namespaceDefaults:
 				},
 			},
 			namespace: "production",
-			want: &v1alpha1.NatsJetStreamBrokerConfig{
+			want: &NatsJetStreamBrokerConfig{
 				Stream: &v1alpha1.StreamConfig{
 					Replicas: 5,
 				},
@@ -305,7 +305,7 @@ namespaceDefaults:
 				},
 			},
 			namespace: "staging",
-			want: &v1alpha1.NatsJetStreamBrokerConfig{
+			want: &NatsJetStreamBrokerConfig{
 				Stream: &v1alpha1.StreamConfig{
 					Replicas: 3,
 				},
@@ -342,7 +342,7 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 		name           string
 		streamName     string
 		publishSubject string
-		config         *v1alpha1.NatsJetStreamBrokerConfig
+		config         *NatsJetStreamBrokerConfig
 		wantName       string
 		wantSubjects   []string
 		wantRetention  nats.RetentionPolicy
@@ -364,7 +364,7 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 			name:           "nil stream config uses defaults",
 			streamName:     "TEST_STREAM",
 			publishSubject: "test.subject",
-			config:         &v1alpha1.NatsJetStreamBrokerConfig{},
+			config:         &NatsJetStreamBrokerConfig{},
 			wantName:       "TEST_STREAM",
 			wantSubjects:   []string{"test.subject.>"},
 			wantRetention:  nats.InterestPolicy,
@@ -375,7 +375,7 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 			name:           "custom stream config",
 			streamName:     "CUSTOM_STREAM",
 			publishSubject: "custom.subject",
-			config: &v1alpha1.NatsJetStreamBrokerConfig{
+			config: &NatsJetStreamBrokerConfig{
 				Stream: &v1alpha1.StreamConfig{
 					Replicas:  3,
 					Storage:   v1alpha1.MemoryStorage,
@@ -392,7 +392,7 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 			name:           "additional subjects",
 			streamName:     "TEST_STREAM",
 			publishSubject: "test.subject",
-			config: &v1alpha1.NatsJetStreamBrokerConfig{
+			config: &NatsJetStreamBrokerConfig{
 				Stream: &v1alpha1.StreamConfig{
 					AdditionalSubjects: []string{"extra.subject.>"},
 				},
@@ -434,7 +434,7 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 
 func TestBrokerConfigAnnotationRoundTrip(t *testing.T) {
 	// Test that we can serialize and deserialize broker config through annotation
-	original := &v1alpha1.NatsJetStreamBrokerConfig{
+	original := &NatsJetStreamBrokerConfig{
 		Stream: &v1alpha1.StreamConfig{
 			Replicas: 3,
 			Storage:  v1alpha1.MemoryStorage,
