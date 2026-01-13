@@ -25,7 +25,7 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/pkg/ptr"
 
-	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 )
 
 func TestMakeFilterDeployment(t *testing.T) {
@@ -72,7 +72,7 @@ func TestMakeFilterDeployment(t *testing.T) {
 				ServiceAccountName: "test-sa",
 				StreamName:         "TEST_STREAM",
 				NatsURL:            "nats://nats:4222",
-				Template: &messagingv1alpha1.DeploymentTemplate{
+				Template: &brokerconfig.DeploymentTemplate{
 					Replicas: ptr.Int32(5),
 					Labels: map[string]string{
 						"custom": "label",
@@ -100,7 +100,7 @@ func TestMakeFilterDeployment(t *testing.T) {
 				ServiceAccountName: "test-sa",
 				StreamName:         "TEST_STREAM",
 				NatsURL:            "nats://nats:4222",
-				Template: &messagingv1alpha1.DeploymentTemplate{
+				Template: &brokerconfig.DeploymentTemplate{
 					PodLabels: map[string]string{
 						"pod-label": "value",
 					},
@@ -192,7 +192,7 @@ func TestMakeFilterDeploymentWithResources(t *testing.T) {
 		ServiceAccountName: "test-sa",
 		StreamName:         "TEST_STREAM",
 		NatsURL:            "nats://nats:4222",
-		Template: &messagingv1alpha1.DeploymentTemplate{
+		Template: &brokerconfig.DeploymentTemplate{
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("200m"),
@@ -237,7 +237,7 @@ func TestMakeFilterDeploymentWithNodeSelector(t *testing.T) {
 		ServiceAccountName: "test-sa",
 		StreamName:         "TEST_STREAM",
 		NatsURL:            "nats://nats:4222",
-		Template: &messagingv1alpha1.DeploymentTemplate{
+		Template: &brokerconfig.DeploymentTemplate{
 			NodeSelector: map[string]string{
 				"disktype": "ssd",
 			},

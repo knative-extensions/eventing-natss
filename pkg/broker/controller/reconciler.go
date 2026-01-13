@@ -42,7 +42,6 @@ import (
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 
-	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 	"knative.dev/eventing-natss/pkg/broker/controller/resources"
 	brokerutils "knative.dev/eventing-natss/pkg/broker/utils"
@@ -174,7 +173,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 }
 
 // reconcileStream ensures the JetStream stream exists for the broker
-func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *messagingv1alpha1.NatsJetStreamBrokerConfig) pkgreconciler.Event {
+func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
 	publishSubject := brokerutils.BrokerPublishSubjectName(b.Namespace, b.Name)
@@ -211,7 +210,7 @@ func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, 
 // 2. Namespace-specific config from ConfigMap (if present, use it entirely)
 // 3. Cluster default config from ConfigMap (if present, use it entirely)
 // 4. Hardcoded defaults
-func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*messagingv1alpha1.NatsJetStreamBrokerConfig, error) {
+func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*brokerconfig.NatsJetStreamBrokerConfig, error) {
 	logger := logging.FromContext(ctx)
 
 	// Check for broker-specific annotation first (highest priority)
@@ -240,11 +239,11 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 }
 
 // reconcileIngressDeployment ensures the ingress deployment exists
-func (r *Reconciler) reconcileIngressDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *messagingv1alpha1.NatsJetStreamBrokerConfig) pkgreconciler.Event {
+func (r *Reconciler) reconcileIngressDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
 	// Get ingress deployment template if configured
-	var ingressTemplate *messagingv1alpha1.DeploymentTemplate
+	var ingressTemplate *brokerconfig.DeploymentTemplate
 	if brokerCfg != nil {
 		ingressTemplate = brokerCfg.Ingress
 	}
@@ -387,11 +386,11 @@ func (r *Reconciler) propagateFilterAvailability(ctx context.Context, b *eventin
 }
 
 // reconcileFilterDeployment ensures the filter deployment exists
-func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *messagingv1alpha1.NatsJetStreamBrokerConfig) pkgreconciler.Event {
+func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
 	// Get filter deployment template if configured
-	var filterTemplate *messagingv1alpha1.DeploymentTemplate
+	var filterTemplate *brokerconfig.DeploymentTemplate
 	if brokerCfg != nil {
 		filterTemplate = brokerCfg.Filter
 	}

@@ -26,7 +26,7 @@ import (
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 
-	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 )
 
 const (
@@ -41,7 +41,7 @@ type FilterArgs struct {
 	ServiceAccountName string
 	StreamName         string
 	NatsURL            string
-	Template           *messagingv1alpha1.DeploymentTemplate
+	Template           *brokerconfig.DeploymentTemplate
 }
 
 // MakeFilterDeployment creates a Deployment for the broker filter
