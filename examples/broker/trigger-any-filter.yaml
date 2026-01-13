@@ -1,0 +1,30 @@
+# Example Trigger with ANY filter (OR logic - new Subscriptions API)
+#
+# This trigger uses the "any" filter to match if ANY condition is met.
+# Events that match at least one nested filter will be delivered.
+#
+# This example matches events where:
+# - type equals "com.example.order.created" OR
+# - type equals "com.example.order.updated" OR
+# - type equals "com.example.order.shipped"
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: any-filter-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  filters:
+    - any:
+        - exact:
+            type: com.example.order.created
+        - exact:
+            type: com.example.order.updated
+        - exact:
+            type: com.example.order.shipped
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: order-tracker

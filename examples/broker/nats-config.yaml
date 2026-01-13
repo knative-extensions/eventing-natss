@@ -1,0 +1,48 @@
+# NATS Connection Configuration
+#
+# This ConfigMap configures the NATS connection for the broker controller.
+# It should be applied to the knative-eventing namespace.
+#
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-nats
+  namespace: knative-eventing
+data:
+  eventing-nats: |
+    # NATS server URL
+    # For a single server:
+    url: nats://nats.nats-io.svc.cluster.local:4222
+
+    # For a NATS cluster (comma-separated):
+    # url: nats://nats-0.nats.nats-io.svc.cluster.local:4222,nats://nats-1.nats.nats-io.svc.cluster.local:4222,nats://nats-2.nats.nats-io.svc.cluster.local:4222
+
+    # Connection options
+    connOpts:
+      retryOnFailedConnect: true
+      maxReconnects: 60
+      reconnectWait: 2000
+      reconnectJitterMilliseconds: 100
+      reconnectJitterTLSMilliseconds: 1000
+
+    # Authentication (optional)
+    # auth:
+    #   # Using credentials file
+    #   credentialFile:
+    #     secret:
+    #       name: nats-credentials
+    #       key: nats.creds
+    #
+    #   # Using TLS client certificates
+    #   tls:
+    #     secret:
+    #       name: nats-tls-secret
+
+    # TLS configuration for server verification (optional)
+    # tls:
+    #   # Using CA bundle from secret
+    #   secret:
+    #     name: nats-ca-secret
+    #   # Or using inline CA bundle (base64 PEM encoded)
+    #   # caBundle: "LS0tLS1CRUdJTi..."

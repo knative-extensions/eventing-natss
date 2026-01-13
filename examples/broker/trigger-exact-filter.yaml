@@ -1,0 +1,21 @@
+# Example Trigger with exact match filter (new Subscriptions API)
+#
+# This trigger uses the new filters field with exact matching.
+# The event attribute must exactly match the specified value.
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: exact-filter-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  # New filters - exact match on event type
+  filters:
+    - exact:
+        type: com.example.order.created
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: order-processor

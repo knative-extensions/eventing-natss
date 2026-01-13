@@ -1,0 +1,24 @@
+# Example Trigger with legacy attributes filter
+#
+# This trigger uses the legacy filter.attributes field to filter events.
+# Events must match ALL specified attributes (AND logic).
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: legacy-filter-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  # Legacy filter using attributes - matches events where:
+  # - type equals "com.example.order.created" AND
+  # - source equals "/orders"
+  filter:
+    attributes:
+      type: com.example.order.created
+      source: /orders
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: order-processor

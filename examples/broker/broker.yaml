@@ -1,0 +1,19 @@
+# Example NatsJetStream Broker
+#
+# This creates a broker backed by NATS JetStream for durable event storage.
+# Events published to this broker are persisted and delivered to matching triggers.
+#
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: example-broker
+  namespace: default
+  annotations:
+    # This annotation specifies the broker class to use
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+spec:
+  # Optional: Configure delivery settings for the broker
+  delivery:
+    retry: 3
+    backoffPolicy: exponential
+    backoffDelay: PT1S

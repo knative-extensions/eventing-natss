@@ -1,0 +1,30 @@
+# Broker with Delivery Configuration
+#
+# This example shows how to configure delivery settings for a broker,
+# including retry behavior and dead letter sink.
+#
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: broker-with-delivery
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+spec:
+  delivery:
+    # Number of retry attempts for failed event delivery
+    retry: 5
+
+    # Backoff policy: "linear" or "exponential"
+    backoffPolicy: exponential
+
+    # Initial delay between retries (ISO 8601 duration format)
+    # PT1S = 1 second, PT500MS = 500 milliseconds
+    backoffDelay: PT1S
+
+    # Dead letter sink for events that fail after all retries
+    deadLetterSink:
+      ref:
+        apiVersion: v1
+        kind: Service
+        name: dead-letter-handler

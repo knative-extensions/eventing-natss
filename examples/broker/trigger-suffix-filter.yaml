@@ -1,0 +1,26 @@
+# Example Trigger with suffix match filter (new Subscriptions API)
+#
+# This trigger uses the new filters field with suffix matching.
+# The event attribute must end with the specified value.
+#
+# Examples of matching event types:
+# - com.example.order.created
+# - com.example.user.created
+# - io.mycompany.invoice.created
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: suffix-filter-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  # New filters - suffix match on event type
+  filters:
+    - suffix:
+        type: .created
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: creation-handler

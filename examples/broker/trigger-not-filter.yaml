@@ -1,0 +1,24 @@
+# Example Trigger with NOT filter (negation - new Subscriptions API)
+#
+# This trigger uses the "not" filter to exclude certain events.
+# Events that do NOT match the nested filter will be delivered.
+#
+# This example matches all events EXCEPT those where:
+# - type equals "com.example.order.deleted"
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: not-filter-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  filters:
+    - not:
+        exact:
+          type: com.example.order.deleted
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: order-processor

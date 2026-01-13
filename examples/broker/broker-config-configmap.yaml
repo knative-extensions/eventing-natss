@@ -1,0 +1,93 @@
+# Broker Configuration via ConfigMap
+#
+# This ConfigMap provides default configuration for all brokers
+# in a cluster, with optional namespace-specific overrides.
+#
+# Configuration precedence (highest to lowest):
+# 1. Broker annotation (natsjetstream.eventing.knative.dev/config)
+# 2. Namespace-specific config in this ConfigMap
+# 3. Cluster default config in this ConfigMap
+# 4. Hardcoded defaults
+#
+# The ConfigMap must be named "natsjetstream-broker-config" and placed
+# in the same namespace as the broker.
+#
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: natsjetstream-broker-config
+  namespace: default
+data:
+  config: |
+    # Cluster-wide defaults
+    clusterDefault:
+      stream:
+        retention: Limits
+        storage: File
+        replicas: 1
+        maxMsgs: 1000000
+        maxBytes: 1073741824
+        maxAge: 72h
+        discard: Old
+      consumer:
+        deliverPolicy: New
+        maxDeliver: 3
+        ackWait: 30s
+      ingress:
+        replicas: 1
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+      filter:
+        replicas: 1
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+    # Namespace-specific overrides
+    namespaceDefaults:
+      # Production namespace gets more resources and replicas
+      production:
+        stream:
+          retention: Limits
+          storage: File
+          replicas: 3
+          maxMsgs: 10000000
+          maxBytes: 10737418240
+          maxAge: 168h
+        ingress:
+          replicas: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+        filter:
+          replicas: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+
+      # Development namespace uses memory storage for speed
+      development:
+        stream:
+          retention: Interest
+          storage: Memory
+          replicas: 1
+          maxMsgs: 10000
+          maxAge: 1h

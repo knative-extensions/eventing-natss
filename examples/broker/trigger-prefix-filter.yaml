@@ -1,0 +1,26 @@
+# Example Trigger with prefix match filter (new Subscriptions API)
+#
+# This trigger uses the new filters field with prefix matching.
+# The event attribute must start with the specified value.
+#
+# Examples of matching event types:
+# - com.example.order.created
+# - com.example.order.updated
+# - com.example.order.deleted
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: prefix-filter-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  # New filters - prefix match on event type
+  filters:
+    - prefix:
+        type: com.example.order.
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: order-processor

@@ -1,0 +1,128 @@
+# Broker with Consumer Fetch Tuning
+#
+# This example shows how to configure the filter's consumer fetch behavior
+# using environment variables in the filter deployment template.
+#
+# CONSUMER_FETCH_BATCH_SIZE: Number of messages to fetch per batch (default: 10)
+# CONSUMER_FETCH_TIMEOUT: Timeout for fetch operations (default: 500ms)
+#
+# Tuning guidelines:
+# - High throughput: Increase batch size (e.g., 50-100), increase timeout (e.g., 1-2s)
+# - Low latency: Decrease batch size (e.g., 1-5), decrease timeout (e.g., 100ms)
+# - Balanced: Use defaults or moderate values (e.g., 20 batch, 500ms timeout)
+#
+---
+# Example 1: High Throughput Configuration
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: broker-high-throughput
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    natsjetstream.eventing.knative.dev/config: |
+      {
+        "stream": {
+          "retention": "Interest",
+          "storage": "File",
+          "replicas": 1
+        },
+        "filter": {
+          "replicas": 3,
+          "env": [
+            {
+              "name": "CONSUMER_FETCH_BATCH_SIZE",
+              "value": "50"
+            },
+            {
+              "name": "CONSUMER_FETCH_TIMEOUT",
+              "value": "2s"
+            }
+          ]
+        }
+      }
+spec:
+  delivery:
+    retry: 3
+    backoffPolicy: exponential
+    backoffDelay: PT1S
+---
+# Example 2: Low Latency Configuration
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: broker-low-latency
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    natsjetstream.eventing.knative.dev/config: |
+      {
+        "stream": {
+          "retention": "Interest",
+          "storage": "Memory",
+          "replicas": 1
+        },
+        "filter": {
+          "replicas": 2,
+          "env": [
+            {
+              "name": "CONSUMER_FETCH_BATCH_SIZE",
+              "value": "1"
+            },
+            {
+              "name": "CONSUMER_FETCH_TIMEOUT",
+              "value": "100ms"
+            }
+          ]
+        }
+      }
+spec:
+  delivery:
+    retry: 2
+    backoffPolicy: linear
+    backoffDelay: PT100MS
+---
+# Example 3: Balanced Configuration (explicit defaults)
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: broker-balanced
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    natsjetstream.eventing.knative.dev/config: |
+      {
+        "stream": {
+          "retention": "Limits",
+          "storage": "File",
+          "replicas": 1
+        },
+        "filter": {
+          "replicas": 2,
+          "env": [
+            {
+              "name": "CONSUMER_FETCH_BATCH_SIZE",
+              "value": "20"
+            },
+            {
+              "name": "CONSUMER_FETCH_TIMEOUT",
+              "value": "500ms"
+            }
+          ],
+          "resources": {
+            "requests": {
+              "cpu": "100m",
+              "memory": "128Mi"
+            },
+            "limits": {
+              "cpu": "500m",
+              "memory": "512Mi"
+            }
+          }
+        }
+      }
+spec:
+  delivery:
+    retry: 3
+    backoffPolicy: exponential
+    backoffDelay: PT1S

@@ -1,0 +1,17 @@
+# Example Trigger without filter
+#
+# This trigger receives ALL events from the broker without any filtering.
+# Use this when you want to process every event regardless of type or source.
+#
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: all-events-trigger
+  namespace: default
+spec:
+  broker: example-broker
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: event-display

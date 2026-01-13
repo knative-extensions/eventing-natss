@@ -1,0 +1,36 @@
+# Broker with Work Queue Retention
+#
+# This configuration uses "Work" retention policy, which means
+# messages are removed from the stream after being consumed by
+# any single consumer. This is ideal for:
+# - Job queues
+# - Task distribution
+# - Load balancing work across multiple consumers
+#
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: broker-work-queue
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    natsjetstream.eventing.knative.dev/config: |
+      {
+        "stream": {
+          "retention": "Work",
+          "storage": "File",
+          "replicas": 1,
+          "maxMsgs": 500000,
+          "discard": "New"
+        },
+        "consumer": {
+          "deliverPolicy": "All",
+          "maxDeliver": 5,
+          "ackWait": "30s"
+        }
+      }
+spec:
+  delivery:
+    retry: 5
+    backoffPolicy: exponential
+    backoffDelay: PT2S

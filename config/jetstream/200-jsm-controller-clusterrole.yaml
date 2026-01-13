@@ -49,8 +49,16 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - endpoints
       - pods
+    verbs:
+      - get
+      - list
+      - watch
+  # EndpointSlices for checking dispatcher readiness
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
     verbs:
       - get
       - list
