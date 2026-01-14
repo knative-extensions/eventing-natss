@@ -19,9 +19,9 @@ package trigger
 import (
 	"testing"
 
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
@@ -107,7 +107,7 @@ type fakeBrokerNamespaceLister struct {
 }
 
 func (f *fakeBrokerNamespaceLister) List(selector labels.Selector) ([]*eventingv1.Broker, error) {
-	var result []*eventingv1.Broker
+	result := make([]*eventingv1.Broker, 0, len(f.brokers))
 	for _, broker := range f.brokers {
 		result = append(result, broker)
 	}
@@ -162,7 +162,7 @@ type fakeTriggerNamespaceLister struct {
 }
 
 func (f *fakeTriggerNamespaceLister) List(selector labels.Selector) ([]*eventingv1.Trigger, error) {
-	var result []*eventingv1.Trigger
+	result := make([]*eventingv1.Trigger, 0, len(f.triggers))
 	for _, trigger := range f.triggers {
 		result = append(result, trigger)
 	}
@@ -174,15 +174,6 @@ func (f *fakeTriggerNamespaceLister) Get(name string) (*eventingv1.Trigger, erro
 		return trigger, nil
 	}
 	return nil, apierrs.NewNotFound(schema.GroupResource{Group: "eventing.knative.dev", Resource: "triggers"}, name)
-}
-
-// fakeEnqueuer records enqueued objects for testing
-type fakeEnqueuer struct {
-	enqueued []interface{}
-}
-
-func (f *fakeEnqueuer) Enqueue(obj interface{}) {
-	f.enqueued = append(f.enqueued, obj)
 }
 
 func TestFilterTriggersByBrokerClass(t *testing.T) {

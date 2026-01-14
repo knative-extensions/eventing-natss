@@ -62,10 +62,6 @@ func (m *mockJetStreamContext) setAddConsumerError(err error) {
 	m.addConsumerErr = err
 }
 
-func (m *mockJetStreamContext) setUpdateConsumerError(err error) {
-	m.updateConsumer = err
-}
-
 func (m *mockJetStreamContext) setDeleteConsumerError(err error) {
 	m.deleteConsumer = err
 }
@@ -239,8 +235,10 @@ func (m *mockJetStreamContext) KeyValue(bucket string) (nats.KeyValue, error) {
 func (m *mockJetStreamContext) CreateKeyValue(cfg *nats.KeyValueConfig) (nats.KeyValue, error) {
 	return nil, errors.New("not implemented")
 }
-func (m *mockJetStreamContext) DeleteKeyValue(bucket string) error { return errors.New("not implemented") }
-func (m *mockJetStreamContext) KeyValueStoreNames() <-chan string  { return nil }
+func (m *mockJetStreamContext) DeleteKeyValue(bucket string) error {
+	return errors.New("not implemented")
+}
+func (m *mockJetStreamContext) KeyValueStoreNames() <-chan string { return nil }
 func (m *mockJetStreamContext) KeyValueStores() <-chan nats.KeyValueStatus {
 	return nil
 }
