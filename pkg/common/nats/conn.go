@@ -28,6 +28,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientsetcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/system"
 
@@ -49,6 +50,31 @@ var (
 	ErrBadTLSOption            = errors.New("bad tls option")
 )
 
+// NewNatsConnFromURL creates a NATS connection using just the URL.
+// This is useful when the NATS URL is passed via environment variable.
+func NewNatsConnFromURL(ctx context.Context, url string) (*nats.Conn, error) {
+	logger := logging.FromContext(ctx)
+
+	if url == "" {
+		url = constants.DefaultNatsURL
+	}
+
+	opts := []nats.Option{
+		nats.Name("kn jsm broker component"),
+		nats.DisconnectErrHandler(func(conn *nats.Conn, err error) {
+			logger.Warnf("Disconnected from NATS: err=%v", err)
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			logger.Infof("Reconnected to NATS [%s]", nc.ConnectedUrl())
+		}),
+		nats.ClosedHandler(func(nc *nats.Conn) {
+			logger.Warnf("NATS connection closed")
+		}),
+	}
+
+	return nats.Connect(url, opts...)
+}
+
 func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*nats.Conn, error) {
 	logger := logging.FromContext(ctx)
 
@@ -57,7 +83,17 @@ func NewNatsConn(ctx context.Context, config commonconfig.EventingNatsConfig) (*
 		url = constants.DefaultNatsURL
 	}
 
-	coreV1Client, err := clientsetcorev1.NewForConfig(injection.GetConfig(ctx))
+	// Try to get config from injection, fall back to in-cluster config
+	cfg := injection.GetConfig(ctx)
+	if cfg == nil {
+		var err error
+		cfg, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get kubernetes config: %w", err)
+		}
+	}
+
+	coreV1Client, err := clientsetcorev1.NewForConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
