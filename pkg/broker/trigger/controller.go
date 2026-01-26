@@ -100,7 +100,6 @@ func NewController(
 	// Get informers
 	triggerInformer := triggerinformer.Get(ctx)
 	brokerInformer := brokerinformer.Get(ctx)
-	// todo: deployment and configmap informer
 
 	// Create reconciler
 	r := &Reconciler{
