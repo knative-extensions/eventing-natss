@@ -131,7 +131,7 @@ func NewController(
 	// Watch Broker resources to re-reconcile triggers when broker changes
 	brokerInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: filterBrokersByClass,
-		Handler:    controller.HandleAll(enqueueTriggerOfBroker(triggerInformer.Lister(), impl, r)),
+		Handler:    controller.HandleAll(enqueueTriggerOfBroker(triggerInformer.Lister(), impl)),
 	})
 
 	logger.Info("NATS JetStream Trigger controller initialized")
@@ -170,7 +170,7 @@ func filterBrokersByClass(obj interface{}) bool {
 }
 
 // enqueueTriggerOfBroker returns a handler that enqueues all triggers associated with a broker
-func enqueueTriggerOfBroker(lister eventinglisters.TriggerLister, impl *controller.Impl, r *Reconciler) func(obj interface{}) {
+func enqueueTriggerOfBroker(lister eventinglisters.TriggerLister, impl *controller.Impl) func(obj interface{}) {
 	return func(obj interface{}) {
 		broker, ok := obj.(*eventingv1.Broker)
 		if !ok {
