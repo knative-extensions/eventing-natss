@@ -151,17 +151,13 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, trigger *eventingv1.Trigg
 	logger.Infow("Finalizing trigger", zap.String("trigger", trigger.Name))
 
 	// Get the broker to find the stream name
-	broker, err := r.brokerLister.Brokers(trigger.Namespace).Get(trigger.Spec.Broker)
-	if err != nil {
-		if apierrs.IsNotFound(err) {
-			// Broker is gone, nothing to clean up
-			logger.Debugw("Broker not found during finalization, skipping consumer deletion")
-			return nil
-		}
-		return fmt.Errorf("failed to get broker: %w", err)
+	_, err := r.brokerLister.Brokers(trigger.Namespace).Get(trigger.Spec.Broker)
+	if err != nil && apierrs.IsNotFound(err) {
+		// Broker is gone, nothing to clean up
+		logger.Warnw("Broker not found during finalization")
 	}
 
-	streamName := brokerutils.BrokerStreamName(broker)
+	streamName := brokerutils.BrokerStreamNameByNsAndName(trigger.Namespace, trigger.Spec.Broker)
 	consumerName := brokerutils.TriggerConsumerName(string(trigger.UID))
 
 	// Delete the consumer
