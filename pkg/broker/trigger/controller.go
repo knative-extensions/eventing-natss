@@ -103,10 +103,8 @@ func NewController(
 
 	// Create reconciler
 	r := &Reconciler{
-		brokerLister: brokerInformer.Lister(),
-
-		js: js,
-
+		brokerLister:      brokerInformer.Lister(),
+		js:                js,
 		filterServiceName: env.FilterServiceName,
 	}
 
