@@ -36,7 +36,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	kubeclient "knative.dev/pkg/client/injection/kube/client"
 	deploymentinformer "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment"
-	endpointsinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/endpoints"
 	podinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/pod"
 	serviceinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/service"
 	serviceaccountinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/serviceaccount"
@@ -73,7 +72,6 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	jsmInformer := natsjetstreamchannel.Get(ctx)
 	deploymentInformer := deploymentinformer.Get(ctx)
 	serviceInformer := serviceinformer.Get(ctx)
-	endpointsInformer := endpointsinformer.Get(ctx)
 	serviceAccountInformer := serviceaccountinformer.Get(ctx)
 	roleBindingInformer := rolebindinginformer.Get(ctx)
 	podInformer := podinformer.Get(ctx)
@@ -88,7 +86,6 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		dispatcherServiceAccount: env.DispatcherServiceAccount,
 		deploymentLister:         deploymentInformer.Lister(),
 		serviceLister:            serviceInformer.Lister(),
-		endpointsLister:          endpointsInformer.Lister(),
 		serviceAccountLister:     serviceAccountInformer.Lister(),
 		roleBindingLister:        roleBindingInformer.Lister(),
 		jsmChannelLister:         jsmChannelInformer.Lister(),
@@ -114,10 +111,6 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		Handler:    controller.HandleAll(grCh),
 	})
 	serviceInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: filterFunc,
-		Handler:    controller.HandleAll(grCh),
-	})
-	endpointsInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: filterFunc,
 		Handler:    controller.HandleAll(grCh),
 	})

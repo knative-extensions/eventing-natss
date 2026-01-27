@@ -40,6 +40,7 @@ import (
 	"knative.dev/pkg/reconciler"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -98,7 +99,6 @@ type Reconciler struct {
 
 	deploymentLister     appsv1listers.DeploymentLister
 	serviceLister        corev1listers.ServiceLister
-	endpointsLister      corev1listers.EndpointsLister
 	serviceAccountLister corev1listers.ServiceAccountLister
 	roleBindingLister    rbacv1listers.RoleBindingLister
 	jsmChannelLister     jetstreamv1alpha1listers.NatsJetStreamChannelLister
@@ -138,22 +138,38 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, nc *v1alpha1.NatsJetStre
 		return err
 	}
 
-	// Get the Dispatcher Service Endpoints and propagate the status to the Channel
-	// endpoints has the same name as the service, so not a bug.
-	e, err := r.endpointsLister.Endpoints(dispatcherNamespace).Get(jetstream.DispatcherName)
+	// Get the Dispatcher Service EndpointSlices and propagate the status to the Channel
+	endpointSliceList, err := r.kubeClientSet.DiscoveryV1().EndpointSlices(dispatcherNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: discoveryv1.LabelServiceName + "=" + jetstream.DispatcherName,
+	})
 	if err != nil {
-		if apierrs.IsNotFound(err) {
-			nc.Status.MarkEndpointsFailed("DispatcherEndpointsDoesNotExist", "Dispatcher Endpoints does not exist")
-			return nil
-		}
-
-		logger.Errorw("Unable to get the dispatcher endpoints", zap.Error(err))
+		logger.Errorw("Unable to list the dispatcher endpoint slices", zap.Error(err))
 		nc.Status.MarkEndpointsFailed("DispatcherEndpointsGetFailed", "Failed to get dispatcher endpoints")
 		return err
 	}
+	endpointSlices := endpointSliceList.Items
 
-	if len(e.Subsets) == 0 {
-		logger.Infow("No endpoints found for Dispatcher service")
+	if len(endpointSlices) == 0 {
+		nc.Status.MarkEndpointsFailed("DispatcherEndpointsDoesNotExist", "Dispatcher Endpoints does not exist")
+		return nil
+	}
+
+	// Check if any endpoint slice has ready endpoints
+	hasReadyEndpoints := false
+	for _, es := range endpointSlices {
+		for _, endpoint := range es.Endpoints {
+			if endpoint.Conditions.Ready != nil && *endpoint.Conditions.Ready {
+				hasReadyEndpoints = true
+				break
+			}
+		}
+		if hasReadyEndpoints {
+			break
+		}
+	}
+
+	if !hasReadyEndpoints {
+		logger.Infow("No ready endpoints found for Dispatcher service")
 		nc.Status.MarkEndpointsFailed("DispatcherEndpointsNotReady", "There are no endpoints ready for Dispatcher service")
 		return nil
 	}
