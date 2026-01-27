@@ -35,7 +35,11 @@ var (
 // - "default/my-broker" => "KN_BROKER_DEFAULT__MY_BROKER"
 // - "knative-eventing/test-broker" => "KN_BROKER_KNATIVE_EVENTING__TEST_BROKER"
 func BrokerStreamName(b *eventingv1.Broker) string {
-	return strings.ToUpper(streamNameReplacer.Replace(fmt.Sprintf("KN_BROKER_%s__%s", b.Namespace, b.Name)))
+	return BrokerStreamNameByNsAndName(b.Namespace, b.Name)
+}
+
+func BrokerStreamNameByNsAndName(ns string, name string) string {
+	return strings.ToUpper(streamNameReplacer.Replace(fmt.Sprintf("KN_BROKER_%s__%s", ns, name)))
 }
 
 // BrokerPublishSubjectName generates the subject name for publishing events to a broker's stream.
