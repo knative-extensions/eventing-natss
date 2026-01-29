@@ -17,8 +17,12 @@ limitations under the License.
 package filter
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
+
+	"knative.dev/pkg/logging"
 )
 
 func TestConsumerManagerConfigDefaults(t *testing.T) {
@@ -113,5 +117,51 @@ func TestConsumerManagerConfig(t *testing.T) {
 				t.Errorf("fetchTimeout = %v, want %v", fetchTimeout, tt.wantFetchTimeout)
 			}
 		})
+	}
+}
+
+func TestGetSubscriptionCount(t *testing.T) {
+	ctx := logging.WithLogger(context.Background(), logging.FromContext(context.TODO()))
+
+	tests := []struct {
+		name  string
+		count int
+	}{
+		{"empty map", 0},
+		{"one entry", 1},
+		{"three entries", 3},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cm := &ConsumerManager{
+				logger:        logging.FromContext(ctx),
+				subscriptions: make(map[string]*TriggerSubscription),
+			}
+			for i := 0; i < tc.count; i++ {
+				uid := fmt.Sprintf("uid-%d", i)
+				cm.subscriptions[uid] = &TriggerSubscription{}
+			}
+			if got := cm.GetSubscriptionCount(); got != tc.count {
+				t.Errorf("GetSubscriptionCount() = %d, want %d", got, tc.count)
+			}
+		})
+	}
+}
+
+func TestHasSubscription(t *testing.T) {
+	ctx := logging.WithLogger(context.Background(), logging.FromContext(context.TODO()))
+
+	cm := &ConsumerManager{
+		logger:        logging.FromContext(ctx),
+		subscriptions: make(map[string]*TriggerSubscription),
+	}
+	cm.subscriptions["existing-uid"] = &TriggerSubscription{}
+
+	if !cm.HasSubscription("existing-uid") {
+		t.Error("HasSubscription() = false for existing UID, want true")
+	}
+	if cm.HasSubscription("missing-uid") {
+		t.Error("HasSubscription() = true for missing UID, want false")
 	}
 }
