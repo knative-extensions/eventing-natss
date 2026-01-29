@@ -257,7 +257,7 @@ func (m *ConsumerManager) fetchLoop(
 				}
 				logger.Errorw("error fetching messages", zap.Error(err))
 				// Back off on errors
-				time.Sleep(time.Second)
+				time.Sleep(200 * time.Millisecond)
 				continue
 			}
 
