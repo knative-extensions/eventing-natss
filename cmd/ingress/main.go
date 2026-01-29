@@ -17,29 +17,23 @@ limitations under the License.
 package main
 
 import (
-	// Import GCP auth plugin for authentication with GKE clusters
-	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
+	"os"
 
-	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/signals"
-	"knative.dev/pkg/system"
 
-	"knative.dev/eventing-natss/pkg/broker/controller"
-	"knative.dev/eventing-natss/pkg/broker/trigger"
-	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
+	"knative.dev/eventing-natss/pkg/broker/ingress"
 )
 
 func main() {
+	component := "natsjs-broker-ingress"
+
 	ctx := signals.NewContext()
+	ns := os.Getenv("NAMESPACE")
+	if ns != "" {
+		ctx = injection.WithNamespaceScope(ctx, ns)
+	}
 
-	// nats-config is volume mounted so initialize the fsloader
-	ctx = fsloader.WithLoader(ctx, configmap.Load)
-	ctx = injection.WithNamespaceScope(ctx, system.Namespace())
-
-	sharedmain.MainWithContext(ctx, controller.ComponentName,
-		controller.NewController,
-		trigger.NewController,
-	)
+	sharedmain.MainWithContext(ctx, component, ingress.NewController)
 }
