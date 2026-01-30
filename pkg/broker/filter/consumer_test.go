@@ -165,3 +165,31 @@ func TestHasSubscription(t *testing.T) {
 		t.Error("HasSubscription() = true for missing UID, want false")
 	}
 }
+
+func TestConsumerManagerClose(t *testing.T) {
+	ctx := logging.WithLogger(context.Background(), logging.FromContext(context.TODO()))
+
+	cm := &ConsumerManager{
+		logger:        logging.FromContext(ctx),
+		subscriptions: make(map[string]*TriggerSubscription),
+	}
+
+	err := cm.Close()
+	if err != nil {
+		t.Errorf("Close() unexpected error on empty subscriptions: %v", err)
+	}
+}
+
+func TestUnsubscribeTrigger_NotFound(t *testing.T) {
+	ctx := logging.WithLogger(context.Background(), logging.FromContext(context.TODO()))
+
+	cm := &ConsumerManager{
+		logger:        logging.FromContext(ctx),
+		subscriptions: make(map[string]*TriggerSubscription),
+	}
+
+	err := cm.UnsubscribeTrigger("non-existent-uid")
+	if err != nil {
+		t.Errorf("UnsubscribeTrigger() unexpected error for non-existent UID: %v", err)
+	}
+}
