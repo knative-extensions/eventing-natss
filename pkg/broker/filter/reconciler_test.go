@@ -470,17 +470,29 @@ func TestReconcileTrigger_ExistingSubscription(t *testing.T) {
 	ctx := logging.WithLogger(context.Background(), logging.FromContext(context.TODO()))
 
 	broker := newReadyTestBroker(testNamespace, testBrokerName, constants.BrokerClassName)
-	subscriberURL := "http://subscriber.example.com"
-	trigger := newTestTriggerWithSubscriber(testNamespace, testTriggerName, testBrokerName, subscriberURL)
+	broker.Status.SetAddress(&duckv1.Addressable{
+		URL: apis.HTTP("broker-ingress.example.com"),
+	})
+
+	// Use a different subscriber URL than what's already in the handler to
+	// prove the in-place update works (no re-subscribe).
+	oldSubscriberURL := "http://old-subscriber.example.com"
+	newSubscriberURL := "http://new-subscriber.example.com"
+	trigger := newTestTriggerWithSubscriber(testNamespace, testTriggerName, testBrokerName, newSubscriberURL)
+	trigger.Spec.Filter = &eventingv1.TriggerFilter{
+		Attributes: map[string]string{"type": "test.type"},
+	}
+	newDLSURL, _ := apis.ParseURL("http://new-dls.example.com")
+	trigger.Status.DeadLetterSinkURI = newDLSURL
 	triggerUID := string(trigger.UID)
 
 	brokerLister := newFakeBrokerLister()
 	brokerLister.addBroker(broker)
 
-	// Pre-populate subscription with matching subscriber URL.
-	parsedURL, _ := apis.ParseURL(subscriberURL)
+	// Pre-populate subscription with old values.
+	oldParsedURL, _ := apis.ParseURL(oldSubscriberURL)
 	existingHandler := &TriggerHandler{
-		subscriber: duckv1.Addressable{URL: parsedURL},
+		subscriber: duckv1.Addressable{URL: oldParsedURL},
 	}
 
 	cm := &ConsumerManager{
@@ -501,9 +513,27 @@ func TestReconcileTrigger_ExistingSubscription(t *testing.T) {
 		consumerManager: cm,
 	}
 
-	// Should return nil because existing subscription has same URL.
+	// Should return nil — all fields updated in place, no re-subscribe.
 	err := r.ReconcileTrigger(ctx, trigger)
 	if err != nil {
-		t.Errorf("ReconcileTrigger() unexpected error for existing subscription with same URL: %v", err)
+		t.Fatalf("ReconcileTrigger() unexpected error: %v", err)
+	}
+
+	// Verify all handler fields were updated in place.
+	h := cm.subscriptions[triggerUID].handler
+	if got := h.subscriber.URL.String(); got != newSubscriberURL {
+		t.Errorf("handler.subscriber.URL = %q, want %q", got, newSubscriberURL)
+	}
+	if h.brokerIngressURL == nil {
+		t.Error("handler.brokerIngressURL should not be nil")
+	}
+	if h.filter == nil {
+		t.Error("handler.filter should not be nil after update with filter spec")
+	}
+	if h.deadLetterSink == nil || h.deadLetterSink.URL.String() != newDLSURL.String() {
+		t.Errorf("handler.deadLetterSink.URL = %v, want %v", h.deadLetterSink, newDLSURL)
+	}
+	if h.trigger != trigger {
+		t.Error("handler.trigger should be updated to the new trigger object")
 	}
 }

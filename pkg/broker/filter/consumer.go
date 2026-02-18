@@ -136,23 +136,20 @@ func (m *ConsumerManager) SubscribeTrigger(
 		zap.String("trigger_uid", triggerUID),
 	)
 
-	// Check if we already have a subscription for this trigger
+	// Check if we already have a subscription for this trigger.
+	// All handler fields are safe to update in place — the NATS pull
+	// subscription is bound to (stream, consumer) which are derived from
+	// the immutable (broker, trigger UID) and never change.
 	if existing, ok := m.subscriptions[triggerUID]; ok {
+		existing.handler.subscriber = subscriber
+		existing.handler.brokerIngressURL = brokerIngressURL
 		existing.handler.noRetryConfig = noRetryConfig
 		existing.handler.retryConfig = retryConfig
 		existing.handler.filter = buildTriggerFilter(logger, trigger)
 		existing.handler.deadLetterSink = deadLetterSink
-
-		// Check if configuration has changed
-		if existing.handler.subscriber.URL.String() == subscriber.URL.String() {
-			logger.Debugw("trigger subscription already exists and is up to date")
-			return nil
-		}
-		// Configuration changed, unsubscribe and re-subscribe
-		logger.Infow("trigger configuration changed, re-subscribing")
-		if err := m.unsubscribeLocked(triggerUID); err != nil {
-			logger.Warnw("failed to unsubscribe old trigger subscription", zap.Error(err))
-		}
+		existing.handler.trigger = trigger
+		logger.Debugw("trigger subscription updated in place")
+		return nil
 	}
 
 	// Create the trigger handler
