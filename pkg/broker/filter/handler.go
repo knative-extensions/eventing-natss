@@ -216,7 +216,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	}
 
 	// Determine if this is the last try
-	maxRetries := 1
+	maxRetries := 0
 	if h.retryConfig != nil {
 		maxRetries = h.retryConfig.RetryMax
 	}
