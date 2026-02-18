@@ -32,7 +32,7 @@ func TestConsumerManagerConfigDefaults(t *testing.T) {
 	}
 
 	if DefaultFetchTimeout != 200*time.Millisecond {
-		t.Errorf("DefaultFetchTimeout = %v, want 500ms", DefaultFetchTimeout)
+		t.Errorf("DefaultFetchTimeout = %v, want 200ms", DefaultFetchTimeout)
 	}
 }
 

@@ -199,5 +199,8 @@ func startHealthServer(ctx context.Context, logger *zap.SugaredLogger, natsConn 
 
 	<-ctx.Done()
 	logger.Info("Shutting down health server")
-	server.Shutdown(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	server.Shutdown(ctx)
 }
