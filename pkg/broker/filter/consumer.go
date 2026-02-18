@@ -175,7 +175,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	consumerName := brokerutils.TriggerConsumerName(triggerUID)
 
 	// Get consumer info (also verifies consumer exists)
-	consumerInfo, err := m.js.ConsumerInfo(streamName, consumerName)
+	_, err = m.js.ConsumerInfo(streamName, consumerName)
 	if err != nil {
 		handler.Cleanup()
 		if errors.Is(err, nats.ErrConsumerNotFound) {
@@ -206,7 +206,6 @@ func (m *ConsumerManager) SubscribeTrigger(
 
 	// Set subscription and consumer info on handler
 	handler.subscription = sub
-	handler.consumer = consumerInfo
 
 	// Create cancellable context for the fetch loop
 	ctx, cancel := context.WithCancel(m.ctx)

@@ -99,7 +99,6 @@ type TriggerHandler struct {
 	deadLetterSink *duckv1.Addressable
 
 	subscription *nats.Subscription
-	consumer     *nats.ConsumerInfo
 }
 
 // NewTriggerHandler creates a new handler for a trigger
