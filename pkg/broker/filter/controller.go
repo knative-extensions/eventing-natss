@@ -29,7 +29,6 @@ import (
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
-	"knative.dev/pkg/reconciler"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	brokerinformer "knative.dev/eventing/pkg/client/injection/informers/eventing/v1/broker"
@@ -88,42 +87,20 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		consumerManager,
 	)
 
-	// Create a simple controller impl - we don't use the standard reconciler pattern
-	// because we handle events directly via informer handlers
-	impl := controller.NewContext(ctx, &noopReconciler{}, controller.ControllerOptions{
+	// Create controller using the filter reconciler which implements
+	// reconciler.Interface via its Reconcile(ctx, key) method.
+	impl := controller.NewContext(ctx, reconciler, controller.ControllerOptions{
 		WorkQueueName: "NatsJetStreamBrokerFilter",
 		Logger:        logger,
 	})
 
-	// Set up event handlers for Trigger resources
+	// Set up event handlers for Trigger resources.
+	// Events are enqueued into the work queue and reconciled via
+	// FilterReconciler.Reconcile, giving us rate limiting, dedup,
+	// per-key serialization, and backoff on errors.
 	triggerInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: filterTriggersByBrokerClass(brokerInformer.Lister()),
-		Handler: cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				trigger := obj.(*eventingv1.Trigger)
-				if err := reconciler.ReconcileTrigger(ctx, trigger); err != nil {
-					logger.Errorw("Failed to reconcile trigger on add", zap.Error(err),
-						zap.String("trigger", trigger.Name),
-						zap.String("namespace", trigger.Namespace))
-				}
-			},
-			UpdateFunc: func(_, newObj interface{}) {
-				trigger := newObj.(*eventingv1.Trigger)
-				if err := reconciler.ReconcileTrigger(ctx, trigger); err != nil {
-					logger.Errorw("Failed to reconcile trigger on update", zap.Error(err),
-						zap.String("trigger", trigger.Name),
-						zap.String("namespace", trigger.Namespace))
-				}
-			},
-			DeleteFunc: func(obj interface{}) {
-				trigger := obj.(*eventingv1.Trigger)
-				if err := reconciler.DeleteTrigger(string(trigger.UID)); err != nil {
-					logger.Errorw("Failed to delete trigger subscription", zap.Error(err),
-						zap.String("trigger", trigger.Name),
-						zap.String("namespace", trigger.Namespace))
-				}
-			},
-		},
+		Handler:    controller.HandleAll(impl.Enqueue),
 	})
 
 	// Start health server in background
@@ -131,15 +108,6 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 
 	logger.Info("Filter controller initialized")
 	return impl
-}
-
-// noopReconciler is a no-op reconciler since we handle events directly
-type noopReconciler struct {
-	reconciler.LeaderAwareFuncs
-}
-
-func (r *noopReconciler) Reconcile(ctx context.Context, key string) error {
-	return nil
 }
 
 // filterTriggersByBrokerClass returns a filter function that only passes triggers

@@ -20,13 +20,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/tools/cache"
 
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/logging"
+	"knative.dev/pkg/reconciler"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
@@ -37,12 +40,20 @@ import (
 
 // FilterReconciler reconciles triggers and manages consumer subscriptions
 type FilterReconciler struct {
+	reconciler.LeaderAwareFuncs
+
 	logger *zap.SugaredLogger
 
 	triggerLister eventinglisters.TriggerLister
 	brokerLister  eventinglisters.BrokerLister
 
 	consumerManager *ConsumerManager
+
+	// triggerUIDs maps "namespace/name" keys to trigger UIDs so that
+	// delete events (where the object is gone from the lister) can
+	// still look up the UID to clean up the consumer subscription.
+	triggerUIDs map[string]string
+	mu          sync.RWMutex
 }
 
 // NewFilterReconciler creates a new filter reconciler
@@ -57,7 +68,44 @@ func NewFilterReconciler(
 		triggerLister:   triggerLister,
 		brokerLister:    brokerLister,
 		consumerManager: consumerManager,
+		triggerUIDs:     make(map[string]string),
 	}
+}
+
+// Reconcile implements reconciler.Interface. It is called by the controller
+// work queue and handles both create/update and delete events.
+func (r *FilterReconciler) Reconcile(ctx context.Context, key string) error {
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return fmt.Errorf("invalid resource key: %w", err)
+	}
+
+	trigger, err := r.triggerLister.Triggers(namespace).Get(name)
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			// Trigger has been deleted — clean up subscription
+			r.mu.RLock()
+			uid, ok := r.triggerUIDs[key]
+			r.mu.RUnlock()
+			if ok {
+				if delErr := r.DeleteTrigger(uid); delErr != nil {
+					return delErr
+				}
+				r.mu.Lock()
+				delete(r.triggerUIDs, key)
+				r.mu.Unlock()
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get trigger: %w", err)
+	}
+
+	// Track key→UID mapping for delete handling
+	r.mu.Lock()
+	r.triggerUIDs[key] = string(trigger.UID)
+	r.mu.Unlock()
+
+	return r.ReconcileTrigger(ctx, trigger)
 }
 
 // ReconcileTrigger reconciles a trigger to ensure the filter has a subscription

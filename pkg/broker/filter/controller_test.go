@@ -17,7 +17,6 @@ limitations under the License.
 package filter
 
 import (
-	"context"
 	"testing"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
@@ -85,13 +84,5 @@ func TestFilterTriggersByBrokerClass(t *testing.T) {
 				t.Errorf("filterTriggersByBrokerClass() = %v, want %v", got, tc.wantFiltered)
 			}
 		})
-	}
-}
-
-func TestNoopReconciler(t *testing.T) {
-	r := &noopReconciler{}
-	err := r.Reconcile(context.Background(), "test-namespace/test-name")
-	if err != nil {
-		t.Errorf("noopReconciler.Reconcile() unexpected error: %v", err)
 	}
 }

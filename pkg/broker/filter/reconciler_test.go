@@ -537,3 +537,159 @@ func TestReconcileTrigger_ExistingSubscription(t *testing.T) {
 		t.Error("handler.trigger should be updated to the new trigger object")
 	}
 }
+
+// --- Fake trigger lister ---
+
+type fakeTriggerLister struct {
+	triggers map[string]map[string]*eventingv1.Trigger
+}
+
+func newFakeTriggerLister() *fakeTriggerLister {
+	return &fakeTriggerLister{
+		triggers: make(map[string]map[string]*eventingv1.Trigger),
+	}
+}
+
+func (f *fakeTriggerLister) addTrigger(trigger *eventingv1.Trigger) {
+	if f.triggers[trigger.Namespace] == nil {
+		f.triggers[trigger.Namespace] = make(map[string]*eventingv1.Trigger)
+	}
+	f.triggers[trigger.Namespace][trigger.Name] = trigger
+}
+
+func (f *fakeTriggerLister) List(selector labels.Selector) ([]*eventingv1.Trigger, error) {
+	var result []*eventingv1.Trigger
+	for _, ns := range f.triggers {
+		for _, t := range ns {
+			result = append(result, t)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeTriggerLister) Triggers(namespace string) eventinglisters.TriggerNamespaceLister {
+	return &fakeTriggerNamespaceLister{
+		namespace: namespace,
+		triggers:  f.triggers[namespace],
+	}
+}
+
+type fakeTriggerNamespaceLister struct {
+	namespace string
+	triggers  map[string]*eventingv1.Trigger
+}
+
+func (f *fakeTriggerNamespaceLister) List(selector labels.Selector) ([]*eventingv1.Trigger, error) {
+	result := make([]*eventingv1.Trigger, 0, len(f.triggers))
+	for _, t := range f.triggers {
+		result = append(result, t)
+	}
+	return result, nil
+}
+
+func (f *fakeTriggerNamespaceLister) Get(name string) (*eventingv1.Trigger, error) {
+	if t, ok := f.triggers[name]; ok {
+		return t, nil
+	}
+	return nil, apierrs.NewNotFound(schema.GroupResource{Group: "eventing.knative.dev", Resource: "triggers"}, name)
+}
+
+func TestReconcile(t *testing.T) {
+	tests := []struct {
+		name            string
+		key             string
+		trigger         *eventingv1.Trigger
+		broker          *eventingv1.Broker
+		presetUIDs      map[string]string
+		wantErr         bool
+		wantErrContains string
+		wantUIDs        map[string]string
+	}{
+		{
+			name:    "trigger exists - stores UID mapping and reconciles (skipped by broker not found)",
+			key:     testNamespace + "/" + testTriggerName,
+			trigger: newTestTrigger(testNamespace, testTriggerName, testBrokerName),
+			wantErr: false,
+			wantUIDs: map[string]string{
+				testNamespace + "/" + testTriggerName: testTriggerUID,
+			},
+		},
+		{
+			name:    "trigger deleted with known UID - calls DeleteTrigger and cleans up",
+			key:     testNamespace + "/" + testTriggerName,
+			trigger: nil,
+			presetUIDs: map[string]string{
+				testNamespace + "/" + testTriggerName: testTriggerUID,
+			},
+			wantErr:  false,
+			wantUIDs: map[string]string{},
+		},
+		{
+			name:     "trigger deleted with unknown key - returns nil",
+			key:      testNamespace + "/" + testTriggerName,
+			trigger:  nil,
+			wantErr:  false,
+			wantUIDs: map[string]string{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := logging.WithLogger(context.Background(), logging.FromContext(context.TODO()))
+
+			triggerLister := newFakeTriggerLister()
+			if tc.trigger != nil {
+				triggerLister.addTrigger(tc.trigger)
+			}
+
+			brokerLister := newFakeBrokerLister()
+			if tc.broker != nil {
+				brokerLister.addBroker(tc.broker)
+			}
+
+			cm := &ConsumerManager{
+				logger:        logging.FromContext(ctx),
+				subscriptions: make(map[string]*TriggerSubscription),
+			}
+
+			r := &FilterReconciler{
+				logger:          logging.FromContext(ctx),
+				triggerLister:   triggerLister,
+				brokerLister:    brokerLister,
+				consumerManager: cm,
+				triggerUIDs:     make(map[string]string),
+			}
+
+			// Preset UIDs if specified
+			if tc.presetUIDs != nil {
+				for k, v := range tc.presetUIDs {
+					r.triggerUIDs[k] = v
+				}
+			}
+
+			err := r.Reconcile(ctx, tc.key)
+			if tc.wantErr {
+				if err == nil {
+					t.Error("Reconcile() expected error, got nil")
+				} else if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Errorf("error %q should contain %q", err.Error(), tc.wantErrContains)
+				}
+			} else if err != nil {
+				t.Errorf("Reconcile() unexpected error: %v", err)
+			}
+
+			if tc.wantUIDs != nil {
+				if len(r.triggerUIDs) != len(tc.wantUIDs) {
+					t.Errorf("triggerUIDs length = %d, want %d", len(r.triggerUIDs), len(tc.wantUIDs))
+				}
+				for k, v := range tc.wantUIDs {
+					if got, ok := r.triggerUIDs[k]; !ok {
+						t.Errorf("triggerUIDs missing key %q", k)
+					} else if got != v {
+						t.Errorf("triggerUIDs[%q] = %q, want %q", k, got, v)
+					}
+				}
+			}
+		})
+	}
+}
