@@ -17,7 +17,9 @@ limitations under the License.
 package filter
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
@@ -25,6 +27,7 @@ import (
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/binding/spec"
 	"github.com/cloudevents/sdk-go/v2/protocol"
+	cehttp "github.com/cloudevents/sdk-go/v2/protocol/http"
 	"github.com/cloudevents/sdk-go/v2/types"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
@@ -40,6 +43,7 @@ import (
 	"knative.dev/eventing/pkg/eventfilter/attributes"
 	"knative.dev/eventing/pkg/eventfilter/subscriptionsapi"
 	"knative.dev/eventing/pkg/kncloudevents"
+	eventingutils "knative.dev/eventing/pkg/utils"
 )
 
 var retryMax int32 = 3
@@ -228,22 +232,30 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 
 	result := determineNatsResult(dispatchInfo.ResponseCode, err)
 
+	// Extract pass-through headers (tracing, knative-*, x-b3-*, etc.) from
+	// the subscriber's response so they are available in every code path.
+	responseHeaders := eventingutils.PassThroughHeaders(dispatchInfo.ResponseHeader)
+
 	// Handle ack/nack/term based on result
 	switch {
 	case protocol.IsACK(result):
-		// process reply url case first
+		// If the subscriber returned a CloudEvent response, forward it to broker ingress for re-routing.
 		if h.brokerIngressURL != nil {
-			// TODO: should we retry in-memory reply url or go with re-delivery of the message?
-			replyDispatchInfo, replyErr := h.dispatcher.SendEvent(ctx, *event, *h.brokerIngressURL,
-				kncloudevents.WithRetryConfig(&defaultRetry),
-				kncloudevents.WithHeader(additionalHeaders),
-				kncloudevents.WithTransformers(&te),
-			)
-			if replyErr != nil {
-				logger.Errorw("failed to send reply to broker ingress",
-					zap.Error(replyErr),
-					zap.Int("response_code", replyDispatchInfo.ResponseCode),
+			responseEvent, parseErr := responseToEvent(ctx, dispatchInfo)
+			if parseErr != nil {
+				logger.Warnw("failed to parse response event from subscriber", zap.Error(parseErr))
+			} else if responseEvent != nil {
+				replyDispatchInfo, replyErr := h.dispatcher.SendEvent(ctx, *responseEvent, *h.brokerIngressURL,
+					kncloudevents.WithRetryConfig(&defaultRetry),
+					kncloudevents.WithHeader(responseHeaders),
+					kncloudevents.WithTransformers(&te),
 				)
+				if replyErr != nil {
+					logger.Errorw("failed to send reply to broker ingress",
+						zap.Error(replyErr),
+						zap.Int("response_code", replyDispatchInfo.ResponseCode),
+					)
+				}
 			}
 		}
 		if err := msg.Ack(nats.Context(ctx)); err != nil {
@@ -300,6 +312,25 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	}
 
 	return dispatchInfo, err
+}
+
+// responseToEvent parses the subscriber's HTTP response into a CloudEvent.
+// Returns (nil, nil) if the response body is empty (e.g. 202 Accepted or empty 200).
+func responseToEvent(ctx context.Context, di *kncloudevents.DispatchInfo) (*cloudevents.Event, error) {
+	if len(di.ResponseBody) == 0 {
+		return nil, nil
+	}
+	resp := &http.Response{
+		StatusCode: di.ResponseCode,
+		Header:     di.ResponseHeader,
+		Body:       io.NopCloser(bytes.NewReader(di.ResponseBody)),
+	}
+	msg := cehttp.NewMessageFromHttpResponse(resp)
+	defer msg.Finish(nil)
+	if msg.ReadEncoding() == binding.EncodingUnknown {
+		return nil, nil
+	}
+	return binding.ToEvent(ctx, msg)
 }
 
 // Cleanup releases resources

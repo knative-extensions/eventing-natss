@@ -646,6 +646,102 @@ func TestTriggerHandlerCleanup(t *testing.T) {
 	})
 }
 
+func TestResponseToEvent(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty response body returns nil", func(t *testing.T) {
+		di := &kncloudevents.DispatchInfo{
+			ResponseCode: http.StatusAccepted,
+			ResponseBody: nil,
+		}
+		event, err := responseToEvent(ctx, di)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if event != nil {
+			t.Error("expected nil event for empty response body")
+		}
+	})
+
+	t.Run("empty byte slice returns nil", func(t *testing.T) {
+		di := &kncloudevents.DispatchInfo{
+			ResponseCode: http.StatusOK,
+			ResponseBody: []byte{},
+		}
+		event, err := responseToEvent(ctx, di)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if event != nil {
+			t.Error("expected nil event for empty byte slice response body")
+		}
+	})
+
+	t.Run("non-cloudevent response body returns nil", func(t *testing.T) {
+		di := &kncloudevents.DispatchInfo{
+			ResponseCode:   http.StatusOK,
+			ResponseHeader: http.Header{"Content-Type": []string{"text/plain"}},
+			ResponseBody:   []byte("just a plain text response"),
+		}
+		event, err := responseToEvent(ctx, di)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if event != nil {
+			t.Error("expected nil event for non-CloudEvent response")
+		}
+	})
+
+	t.Run("structured CloudEvent response is parsed", func(t *testing.T) {
+		ceJSON := `{"specversion":"1.0","type":"reply.type","source":"subscriber","id":"reply-1","data":"hello"}`
+		di := &kncloudevents.DispatchInfo{
+			ResponseCode:   http.StatusOK,
+			ResponseHeader: http.Header{"Content-Type": []string{"application/cloudevents+json"}},
+			ResponseBody:   []byte(ceJSON),
+		}
+		event, err := responseToEvent(ctx, di)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if event == nil {
+			t.Fatal("expected non-nil event for structured CloudEvent response")
+		}
+		if event.Type() != "reply.type" {
+			t.Errorf("event.Type() = %q, want %q", event.Type(), "reply.type")
+		}
+		if event.Source() != "subscriber" {
+			t.Errorf("event.Source() = %q, want %q", event.Source(), "subscriber")
+		}
+		if event.ID() != "reply-1" {
+			t.Errorf("event.ID() = %q, want %q", event.ID(), "reply-1")
+		}
+	})
+
+	t.Run("binary CloudEvent response is parsed", func(t *testing.T) {
+		di := &kncloudevents.DispatchInfo{
+			ResponseCode: http.StatusOK,
+			ResponseHeader: http.Header{
+				"Content-Type":   []string{"application/json"},
+				"Ce-Specversion": []string{"1.0"},
+				"Ce-Type":        []string{"binary.reply"},
+				"Ce-Source":      []string{"subscriber"},
+				"Ce-Id":          []string{"reply-2"},
+			},
+			ResponseBody: []byte(`{"key":"value"}`),
+		}
+		event, err := responseToEvent(ctx, di)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if event == nil {
+			t.Fatal("expected non-nil event for binary CloudEvent response")
+		}
+		if event.Type() != "binary.reply" {
+			t.Errorf("event.Type() = %q, want %q", event.Type(), "binary.reply")
+		}
+	})
+}
+
 func TestDefaultRetryConfigInitialized(t *testing.T) {
 	if defaultRetry.RetryMax != int(retryMax) {
 		t.Errorf("defaultRetry.RetryMax = %v, want %v", defaultRetry.RetryMax, retryMax)
