@@ -1,0 +1,151 @@
+# Copyright 2024 The Knative Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: natsjetstream-broker-controller
+  labels:
+    nats.eventing.knative.dev/release: devel
+rules:
+  # Watch and update Brokers
+  - apiGroups:
+      - eventing.knative.dev
+    resources:
+      - brokers
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+  # Update Broker status and finalizers
+  - apiGroups:
+      - eventing.knative.dev
+    resources:
+      - brokers/status
+      - brokers/finalizers
+    verbs:
+      - update
+  # Watch and update Triggers
+  - apiGroups:
+      - eventing.knative.dev
+    resources:
+      - triggers
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+  # Update Trigger status and finalizers
+  - apiGroups:
+      - eventing.knative.dev
+    resources:
+      - triggers/status
+      - triggers/finalizers
+    verbs:
+      - update
+  # Create and manage events
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+      - update
+  # Read configmaps for configuration
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  # Read secrets for NATS credentials
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  # Manage deployments for ingress and filter
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - delete
+  # Manage services for ingress and filter
+  - apiGroups:
+      - "serving.knative.dev"
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - delete
+  # Leader election
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  # Manage service accounts for dataplane components
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+  # Manage cluster role bindings for dataplane components
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterrolebindings
+    verbs:
+      - get
+      - list
+      - watch
+      - create
