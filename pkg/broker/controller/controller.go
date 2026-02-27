@@ -34,9 +34,11 @@ import (
 
 	brokerinformer "knative.dev/eventing/pkg/client/injection/informers/eventing/v1/broker"
 	deploymentinformer "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment"
+	configmapinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/configmap"
 	serviceinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/service"
 
 	"knative.dev/eventing-natss/pkg/broker/constants"
+	"knative.dev/eventing-natss/pkg/broker/contract"
 	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 	commonnats "knative.dev/eventing-natss/pkg/common/nats"
 )
@@ -48,10 +50,13 @@ const (
 
 // envConfig holds configuration from environment variables
 type envConfig struct {
-	IngressImage          string `envconfig:"BROKER_INGRESS_IMAGE" required:"true"`
-	FilterImage           string `envconfig:"BROKER_FILTER_IMAGE" required:"true"`
-	IngressServiceAccount string `envconfig:"BROKER_INGRESS_SERVICE_ACCOUNT" default:"natsjs-broker-ingress"`
-	FilterServiceAccount  string `envconfig:"BROKER_FILTER_SERVICE_ACCOUNT" default:"natsjs-broker-filter"`
+	// Filter image for per-broker filter deployments
+	FilterImage          string `envconfig:"BROKER_FILTER_IMAGE" required:"true"`
+	FilterServiceAccount string `envconfig:"BROKER_FILTER_SERVICE_ACCOUNT" default:"natsjetstream-broker-dataplane"`
+
+	// Shared ingress service configuration
+	IngressServiceName string `envconfig:"INGRESS_SERVICE_NAME" default:"nats-broker-ingress"`
+	IngressNamespace   string `envconfig:"INGRESS_NAMESPACE" default:"knative-eventing"`
 }
 
 // NewController creates a new controller for the NATS JetStream Broker
@@ -68,10 +73,10 @@ func NewController(
 	}
 
 	logger.Infow("Broker controller configuration",
-		zap.String("ingress_image", env.IngressImage),
 		zap.String("filter_image", env.FilterImage),
-		zap.String("ingress_service_account", env.IngressServiceAccount),
 		zap.String("filter_service_account", env.FilterServiceAccount),
+		zap.String("ingress_service_name", env.IngressServiceName),
+		zap.String("ingress_namespace", env.IngressNamespace),
 	)
 
 	// Get the config loader from context
@@ -108,6 +113,13 @@ func NewController(
 	brokerInformer := brokerinformer.Get(ctx)
 	deploymentInformer := deploymentinformer.Get(ctx)
 	serviceInformer := serviceinformer.Get(ctx)
+	configMapInformer := configmapinformer.Get(ctx)
+
+	// Create contract manager for shared ingress
+	contractManager := contract.NewManager(
+		kubeclient.Get(ctx),
+		configMapInformer.Lister(),
+	)
 
 	// Create reconciler
 	r := &Reconciler{
@@ -116,14 +128,17 @@ func NewController(
 		deploymentLister: deploymentInformer.Lister(),
 		serviceLister:    serviceInformer.Lister(),
 
+		contractManager: contractManager,
+
 		js: js,
 
 		natsURL: natsConfig.URL,
 
-		ingressImage:          env.IngressImage,
-		filterImage:           env.FilterImage,
-		ingressServiceAccount: env.IngressServiceAccount,
-		filterServiceAccount:  env.FilterServiceAccount,
+		filterImage:          env.FilterImage,
+		filterServiceAccount: env.FilterServiceAccount,
+
+		ingressServiceName: env.IngressServiceName,
+		ingressNamespace:   env.IngressNamespace,
 	}
 
 	// Create controller implementation
@@ -135,13 +150,13 @@ func NewController(
 		Handler:    controller.HandleAll(impl.Enqueue),
 	})
 
-	// Watch deployments owned by brokers
+	// Watch deployments owned by brokers (for filter deployments)
 	deploymentInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: controller.FilterControllerGK(eventingv1.Kind("Broker")),
 		Handler:    controller.HandleAll(impl.EnqueueControllerOf),
 	})
 
-	// Watch services owned by brokers
+	// Watch services owned by brokers (for filter services)
 	serviceInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: controller.FilterControllerGK(eventingv1.Kind("Broker")),
 		Handler:    controller.HandleAll(impl.EnqueueControllerOf),

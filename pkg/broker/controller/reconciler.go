@@ -43,24 +43,22 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
+	"knative.dev/eventing-natss/pkg/broker/contract"
 	"knative.dev/eventing-natss/pkg/broker/controller/resources"
 	brokerutils "knative.dev/eventing-natss/pkg/broker/utils"
 )
 
 const (
 	// Event reasons
-	ReasonIngressDeploymentCreated = "IngressDeploymentCreated"
-	ReasonIngressDeploymentUpdated = "IngressDeploymentUpdated"
-	ReasonIngressDeploymentFailed  = "IngressDeploymentFailed"
-	ReasonIngressServiceCreated    = "IngressServiceCreated"
-	ReasonIngressServiceFailed     = "IngressServiceFailed"
-	ReasonFilterDeploymentCreated  = "FilterDeploymentCreated"
-	ReasonFilterDeploymentUpdated  = "FilterDeploymentUpdated"
-	ReasonFilterDeploymentFailed   = "FilterDeploymentFailed"
-	ReasonFilterServiceCreated     = "FilterServiceCreated"
-	ReasonFilterServiceFailed      = "FilterServiceFailed"
-	ReasonStreamCreated            = "JetStreamStreamCreated"
-	ReasonStreamFailed             = "JetStreamStreamFailed"
+	ReasonContractUpdated         = "ContractUpdated"
+	ReasonContractFailed          = "ContractFailed"
+	ReasonFilterDeploymentCreated = "FilterDeploymentCreated"
+	ReasonFilterDeploymentUpdated = "FilterDeploymentUpdated"
+	ReasonFilterDeploymentFailed  = "FilterDeploymentFailed"
+	ReasonFilterServiceCreated    = "FilterServiceCreated"
+	ReasonFilterServiceFailed     = "FilterServiceFailed"
+	ReasonStreamCreated           = "JetStreamStreamCreated"
+	ReasonStreamFailed            = "JetStreamStreamFailed"
 
 	// DataplaneClusterRoleName is the name of the ClusterRole for dataplane components
 	DataplaneClusterRoleName = "natsjetstream-broker-dataplane"
@@ -74,6 +72,9 @@ type Reconciler struct {
 	deploymentLister appsv1listers.DeploymentLister
 	serviceLister    corev1listers.ServiceLister
 
+	// Contract manager for updating shared ingress configuration
+	contractManager *contract.Manager
+
 	// NATS JetStream connection
 	js nats.JetStreamContext
 
@@ -81,10 +82,12 @@ type Reconciler struct {
 	natsURL string
 
 	// Image configuration
-	ingressImage          string
-	filterImage           string
-	ingressServiceAccount string
-	filterServiceAccount  string
+	filterImage          string
+	filterServiceAccount string
+
+	// Shared ingress service configuration
+	ingressServiceName string
+	ingressNamespace   string
 }
 
 // ReconcileKind implements Interface.ReconcileKind
@@ -94,6 +97,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 
 	// Get stream name for this broker
 	streamName := brokerutils.BrokerStreamName(b)
+	publishSubject := brokerutils.BrokerPublishSubjectName(b.Namespace, b.Name)
 
 	// Load broker configuration (once for the entire reconciliation)
 	brokerCfg, err := r.getBrokerConfig(ctx, b)
@@ -103,61 +107,70 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 		return fmt.Errorf("failed to get broker config: %w", err)
 	}
 
-	// Step 1: Reconcile dataplane RBAC (service account and role binding)
+	// Step 1: Reconcile dataplane RBAC (service account and role binding for filter)
 	if err := r.reconcileDataplaneRBAC(ctx, b); err != nil {
 		return err
 	}
 
 	// Step 2: Reconcile JetStream stream
-	if err := r.reconcileStream(ctx, b, streamName, brokerCfg); err != nil {
+	if err := r.reconcileStream(ctx, b, streamName, publishSubject, brokerCfg); err != nil {
 		return err
 	}
 
-	// Step 3: Reconcile ingress deployment
-	if err := r.reconcileIngressDeployment(ctx, b, streamName, brokerCfg); err != nil {
-		return err
+	// Step 3: Update contract ConfigMap for shared ingress
+	brokerContract := contract.BrokerContract{
+		UID:            string(b.UID),
+		Namespace:      b.Namespace,
+		Name:           b.Name,
+		StreamName:     streamName,
+		PublishSubject: publishSubject,
+		Path:           fmt.Sprintf("/%s/%s", b.Namespace, b.Name),
+		Generation:     b.Generation,
 	}
 
 	// Step 4: Reconcile ingress service
-	ingressService, err := r.reconcileIngressService(ctx, b)
-	if err != nil {
-		return err
+	if err := r.contractManager.UpdateBroker(ctx, brokerContract); err != nil {
+		logger.Errorw("Failed to update contract", zap.Error(err))
+		controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeWarning, ReasonContractFailed, err.Error())
+		b.Status.MarkIngressFailed("ContractUpdateFailed", "Failed to update contract ConfigMap: %v", err)
+		return fmt.Errorf("failed to update contract: %w", err)
 	}
 
-	// Step 5: Check ingress deployment readiness
-	if err := r.propagateIngressAvailability(ctx, b, ingressService); err != nil {
-		return err
-	}
+	controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonContractUpdated, "Contract updated")
 
-	// Step 6: Reconcile filter deployment
+	// Step 4: Mark ingress as ready (shared ingress is managed externally)
+	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionIngress)
+
+	// Step 5: Reconcile filter deployment
 	if err := r.reconcileFilterDeployment(ctx, b, streamName, brokerCfg); err != nil {
 		return err
 	}
 
-	// Step 7: Reconcile filter service
+	// Step 6: Reconcile filter service
 	filterService, err := r.reconcileFilterService(ctx, b)
 	if err != nil {
 		return err
 	}
 
-	// Step 8: Check filter deployment readiness
+	// Step 7: Check filter deployment readiness
 	if err := r.propagateFilterAvailability(ctx, b, filterService); err != nil {
 		return err
 	}
 
-	// Step 9: Set broker address
+	// Step 8: Set broker address to shared ingress with path
 	b.Status.SetAddress(&duckv1.Addressable{
 		Name: ptr.To("http"),
 		URL: &apis.URL{
 			Scheme: "http",
-			Host:   network.GetServiceHostname(ingressService.Name, ingressService.Namespace),
+			Host:   network.GetServiceHostname(r.ingressServiceName, r.ingressNamespace),
+			Path:   fmt.Sprintf("/%s/%s", b.Namespace, b.Name),
 		},
 	})
 
-	// Step 10: Mark TriggerChannel as ready (we use JetStream instead of a channel)
+	// Step 9: Mark TriggerChannel as ready (we use JetStream instead of a channel)
 	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionTriggerChannel)
 
-	// Step 11: Mark DeadLetterSink condition
+	// Step 10: Mark DeadLetterSink condition
 	if b.Spec.Delivery == nil || b.Spec.Delivery.DeadLetterSink == nil {
 		b.Status.MarkDeadLetterSinkNotConfigured()
 	} else {
@@ -165,7 +178,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 		b.Status.MarkDeadLetterSinkNotConfigured()
 	}
 
-	// Step 12: Mark EventPolicies as ready (not using OIDC authentication)
+	// Step 11: Mark EventPolicies as ready (not using OIDC authentication)
 	b.Status.MarkEventPoliciesTrueWithReason("EventPoliciesSkipped", "Feature %q is disabled", "OIDC")
 
 	logger.Infow("Broker reconciliation completed successfully", zap.String("broker", b.Name))
@@ -173,10 +186,8 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 }
 
 // reconcileStream ensures the JetStream stream exists for the broker
-func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
+func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName, publishSubject string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
-
-	publishSubject := brokerutils.BrokerPublishSubjectName(b.Namespace, b.Name)
 
 	// Check if stream exists
 	_, err := r.js.StreamInfo(streamName)
@@ -236,127 +247,6 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 
 	// Load and return config from ConfigMap
 	return brokerconfig.GetConfigFromConfigMap(cm, b.Namespace)
-}
-
-// reconcileIngressDeployment ensures the ingress deployment exists
-func (r *Reconciler) reconcileIngressDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
-	logger := logging.FromContext(ctx)
-
-	// Get ingress deployment template if configured
-	var ingressTemplate *brokerconfig.DeploymentTemplate
-	if brokerCfg != nil {
-		ingressTemplate = brokerCfg.Ingress
-	}
-
-	expected := resources.MakeIngressDeployment(&resources.IngressArgs{
-		Broker:             b,
-		Image:              r.ingressImage,
-		ServiceAccountName: r.ingressServiceAccount,
-		StreamName:         streamName,
-		NatsURL:            r.natsURL,
-		Template:           ingressTemplate,
-	})
-
-	name := resources.IngressName(b.Name)
-	existing, err := r.deploymentLister.Deployments(b.Namespace).Get(name)
-	if err != nil {
-		if apierrs.IsNotFound(err) {
-			_, err = r.kubeClientSet.AppsV1().Deployments(b.Namespace).Create(ctx, expected, metav1.CreateOptions{})
-			if err != nil {
-				logger.Errorw("Failed to create ingress deployment", zap.Error(err))
-				b.Status.MarkIngressFailed("IngressDeploymentFailed", "Failed to create ingress deployment: %v", err)
-				return fmt.Errorf("failed to create ingress deployment: %w", err)
-			}
-			controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonIngressDeploymentCreated, "Ingress deployment created")
-			return nil
-		}
-		logger.Errorw("Failed to get ingress deployment", zap.Error(err))
-		b.Status.MarkIngressFailed("IngressDeploymentFailed", "Failed to get ingress deployment: %v", err)
-		return fmt.Errorf("failed to get ingress deployment: %w", err)
-	}
-
-	// Update if needed
-	if !equality.Semantic.DeepEqual(expected.Spec, existing.Spec) {
-		toUpdate := existing.DeepCopy()
-		toUpdate.Spec = expected.Spec
-		_, err = r.kubeClientSet.AppsV1().Deployments(b.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})
-		if err != nil {
-			logger.Errorw("Failed to update ingress deployment", zap.Error(err))
-			b.Status.MarkIngressFailed("IngressDeploymentFailed", "Failed to update ingress deployment: %v", err)
-			return fmt.Errorf("failed to update ingress deployment: %w", err)
-		}
-		controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonIngressDeploymentUpdated, "Ingress deployment updated")
-	}
-
-	return nil
-}
-
-// reconcileIngressService ensures the ingress service exists
-func (r *Reconciler) reconcileIngressService(ctx context.Context, b *eventingv1.Broker) (*corev1.Service, pkgreconciler.Event) {
-	logger := logging.FromContext(ctx)
-
-	expected := resources.MakeIngressService(b)
-	name := resources.IngressName(b.Name)
-
-	existing, err := r.serviceLister.Services(b.Namespace).Get(name)
-	if err != nil {
-		if apierrs.IsNotFound(err) {
-			svc, err := r.kubeClientSet.CoreV1().Services(b.Namespace).Create(ctx, expected, metav1.CreateOptions{})
-			if err != nil {
-				logger.Errorw("Failed to create ingress service", zap.Error(err))
-				b.Status.MarkIngressFailed("IngressServiceFailed", "Failed to create ingress service: %v", err)
-				return nil, fmt.Errorf("failed to create ingress service: %w", err)
-			}
-			controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonIngressServiceCreated, "Ingress service created")
-			return svc, nil
-		}
-		logger.Errorw("Failed to get ingress service", zap.Error(err))
-		b.Status.MarkIngressFailed("IngressServiceFailed", "Failed to get ingress service: %v", err)
-		return nil, fmt.Errorf("failed to get ingress service: %w", err)
-	}
-
-	// Update ClusterIP from existing service (immutable field)
-	expected.Spec.ClusterIP = existing.Spec.ClusterIP
-
-	if !equality.Semantic.DeepEqual(expected.Spec, existing.Spec) {
-		toUpdate := existing.DeepCopy()
-		toUpdate.Spec = expected.Spec
-		svc, err := r.kubeClientSet.CoreV1().Services(b.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})
-		if err != nil {
-			logger.Errorw("Failed to update ingress service", zap.Error(err))
-			b.Status.MarkIngressFailed("IngressServiceFailed", "Failed to update ingress service: %v", err)
-			return nil, fmt.Errorf("failed to update ingress service: %w", err)
-		}
-		return svc, nil
-	}
-
-	return existing, nil
-}
-
-// propagateIngressAvailability checks if the ingress deployment is available
-func (r *Reconciler) propagateIngressAvailability(ctx context.Context, b *eventingv1.Broker, svc *corev1.Service) pkgreconciler.Event {
-	logger := logging.FromContext(ctx)
-
-	deploymentName := resources.IngressName(b.Name)
-	deployment, err := r.deploymentLister.Deployments(b.Namespace).Get(deploymentName)
-	if err != nil {
-		if apierrs.IsNotFound(err) {
-			b.Status.MarkIngressFailed("DeploymentNotFound", "Ingress deployment does not exist")
-			return nil // Don't return error, let controller requeue
-		}
-		logger.Errorw("Failed to get ingress deployment", zap.Error(err))
-		b.Status.MarkIngressFailed("DeploymentGetFailed", "Failed to get ingress deployment: %v", err)
-		return fmt.Errorf("failed to get ingress deployment: %w", err)
-	}
-
-	if deployment.Status.ReadyReplicas == 0 {
-		b.Status.MarkIngressFailed("DeploymentNotReady", "Ingress deployment has no ready replicas")
-		return nil // Don't return error, let controller requeue
-	}
-
-	// Mark ingress as ready using condition set manager
-	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionIngress)
-	return nil
 }
 
 // propagateFilterAvailability checks if the filter deployment is available
@@ -485,6 +375,12 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, b *eventingv1.Broker) pkg
 	logger := logging.FromContext(ctx)
 	logger.Infow("Finalizing broker", zap.String("broker", b.Name))
 
+	// Delete from contract ConfigMap
+	if err := r.contractManager.DeleteBroker(ctx, b.Namespace, b.Name); err != nil {
+		logger.Errorw("Failed to delete broker from contract", zap.Error(err))
+		return fmt.Errorf("failed to delete broker from contract: %w", err)
+	}
+
 	streamName := brokerutils.BrokerStreamName(b)
 
 	// Delete the JetStream stream
@@ -499,12 +395,12 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, b *eventingv1.Broker) pkg
 }
 
 // reconcileDataplaneRBAC ensures the service account and cluster role binding exist
-// for the dataplane components (filter and ingress) in the broker's namespace.
+// for the dataplane components (filter) in the broker's namespace.
 func (r *Reconciler) reconcileDataplaneRBAC(ctx context.Context, b *eventingv1.Broker) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
 	// Create the service account if it doesn't exist
-	saName := r.filterServiceAccount // Same SA is used for both filter and ingress
+	saName := r.filterServiceAccount
 	_, err := r.kubeClientSet.CoreV1().ServiceAccounts(b.Namespace).Get(ctx, saName, metav1.GetOptions{})
 	if err != nil {
 		if apierrs.IsNotFound(err) {

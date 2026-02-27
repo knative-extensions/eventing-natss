@@ -15,26 +15,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: natsjetstream-broker-controller
+  name: nats-broker-ingress
   namespace: knative-eventing
   labels:
     nats.eventing.knative.dev/release: devel
-    eventing.knative.dev/brokerRole: controller
+    eventing.knative.dev/brokerRole: ingress
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: natsjetstream-broker-controller
+      app: nats-broker-ingress
   template:
     metadata:
       labels:
-        app: natsjetstream-broker-controller
-        eventing.knative.dev/brokerRole: controller
+        app: nats-broker-ingress
+        eventing.knative.dev/brokerRole: ingress
     spec:
-      serviceAccountName: natsjetstream-broker-controller
+      serviceAccountName: natsjetstream-broker-dataplane
       containers:
-        - name: controller
-          image: ko://knative.dev/eventing-natss/cmd/broker
+        - name: ingress
+          image: ko://knative.dev/eventing-natss/cmd/ingress
           env:
             - name: SYSTEM_NAMESPACE
               valueFrom:
@@ -44,45 +44,29 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: CONFIG_LOGGING_NAME
-              value: config-logging
-            - name: CONFIG_OBSERVABILITY_NAME
-              value: config-observability
-            - name: METRICS_DOMAIN
-              value: knative.dev/eventing
-            - name: BROKER_FILTER_IMAGE
-              value: ko://knative.dev/eventing-natss/cmd/filter
-            - name: BROKER_FILTER_SERVICE_ACCOUNT
-              value: natsjetstream-broker-dataplane
-            - name: INGRESS_SERVICE_NAME
-              value: nats-broker-ingress
-            - name: INGRESS_NAMESPACE
-              value: knative-eventing
+            - name: NATS_URL
+              value: "nats://nats.nats-io.svc.cluster.local:4222"
+            - name: PORT
+              value: "8080"
           ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
             - containerPort: 9090
               name: metrics
               protocol: TCP
-            - containerPort: 8080
-              name: probes
-              protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-              scheme: HTTP
-            initialDelaySeconds: 20
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /readiness
+              path: /readyz
               port: 8080
-              scheme: HTTP
-            initialDelaySeconds: 20
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
           resources:
             requests:
               cpu: 100m
@@ -99,11 +83,22 @@ spec:
                 - ALL
             seccompProfile:
               type: RuntimeDefault
-          volumeMounts:
-            - name: config-nats-broker
-              mountPath: /etc/config-nats-broker
-              readOnly: true
-      volumes:
-        - name: config-nats-broker
-          configMap:
-            name: config-nats-broker
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-broker-ingress
+  namespace: knative-eventing
+  labels:
+    nats.eventing.knative.dev/release: devel
+    eventing.knative.dev/brokerRole: ingress
+spec:
+  selector:
+    app: nats-broker-ingress
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+    - name: metrics
+      port: 9090
+      targetPort: 9090
