@@ -32,7 +32,7 @@ spec:
             - name: EVENT_TYPE
               value: "type-a"
             - name: K_SINK
-              value: http://filter-test-broker-broker-ingress.{{ .namespace }}.svc.cluster.local
+              value: http://nats-broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/filter-test-broker
 ---
 # Producer for type-b events
 apiVersion: batch/v1
@@ -54,4 +54,4 @@ spec:
             - name: EVENT_TYPE
               value: "type-b"
             - name: K_SINK
-              value: http://filter-test-broker-broker-ingress.{{ .namespace }}.svc.cluster.local
+              value: http://nats-broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/filter-test-broker

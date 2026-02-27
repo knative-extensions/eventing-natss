@@ -31,4 +31,4 @@ spec:
             - name: EVENT_TYPE
               value: "dls.test.event"
             - name: K_SINK
-              value: http://dls-test-broker-broker-ingress.{{ .namespace }}.svc.cluster.local
+              value: http://nats-broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/dls-test-broker
