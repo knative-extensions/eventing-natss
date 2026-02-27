@@ -21,10 +21,8 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 
 	"knative.dev/pkg/configmap"
-	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/signals"
-	"knative.dev/pkg/system"
 
 	"knative.dev/eventing-natss/pkg/broker/controller"
 	"knative.dev/eventing-natss/pkg/broker/trigger"
@@ -36,7 +34,6 @@ func main() {
 
 	// nats-config is volume mounted so initialize the fsloader
 	ctx = fsloader.WithLoader(ctx, configmap.Load)
-	ctx = injection.WithNamespaceScope(ctx, system.Namespace())
 
 	sharedmain.MainWithContext(ctx, controller.ComponentName,
 		controller.NewController,
