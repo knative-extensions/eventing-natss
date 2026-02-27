@@ -75,15 +75,6 @@ rules:
       - get
       - list
       - watch
-  # Read secrets for NATS credentials
-  - apiGroups:
-      - ""
-    resources:
-      - secrets
-    verbs:
-      - get
-      - list
-      - watch
   # Manage deployments for ingress and filter
   - apiGroups:
       - apps
