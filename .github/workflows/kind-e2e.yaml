@@ -95,11 +95,11 @@ jobs:
         set -x
 
         kubectl create namespace nats
-        kubectl apply -n nats-io -f ./config/broker/natsjsm.yaml
+        kubectl apply -n nats-io -f ./config/mtbroker/natsjsm.yaml
         # Create a ConfigMap that we use to instruct Broker to create nats channels.
         kubectl create namespace knative-eventing
-        kubectl apply -n knative-eventing -f ./config/broker/config-br-default-channel-jsm.yaml
-        kubectl apply -n knative-eventing -f ./config/broker/config-nats.yaml
+        kubectl apply -n knative-eventing -f ./config/mtbroker/config-br-default-channel-jsm.yaml
+        kubectl apply -n knative-eventing -f ./config/mtbroker/config-nats.yaml
 
     - name: Install Knative Eventing
       run: |
