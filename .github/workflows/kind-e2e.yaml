@@ -118,6 +118,7 @@ jobs:
         # Install the nats channel
         ko apply -f ./config/webhook
         ko apply -f ./config/jetstream
+        ko apply -f ./config/broker
 
     - name: Wait for Ready
       run: |
