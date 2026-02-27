@@ -140,3 +140,14 @@ rules:
       - list
       - watch
       - create
+  # Bind the dataplane ClusterRole when creating per-namespace ClusterRoleBindings.
+  # The `bind` verb allows creating bindings to this specific role without the
+  # controller needing to hold every permission the role contains (prevents escalation).
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - natsjetstream-broker-dataplane
+    verbs:
+      - bind
