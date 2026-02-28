@@ -53,7 +53,7 @@ func main() {
 	}
 
 	log.Printf("sleeping before sending %d events of type %s", env.Count, env.EventType)
-	time.Sleep(15 * time.Second)
+	time.Sleep(30 * time.Second)
 	log.Print("done sleeping, sending events now, target: ", env.Sink)
 	send(ctx, c, env.Count, env.EventType)
 
