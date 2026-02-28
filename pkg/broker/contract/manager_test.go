@@ -85,9 +85,7 @@ func (f *fakeConfigMapNamespaceLister) Get(name string) (*corev1.ConfigMap, erro
 
 // newTestManager creates a Manager with the given lister and fake k8s client,
 // bypassing system.Namespace() by setting namespace directly.
-func newTestManager(lister corev1listers.ConfigMapLister, objects ...interface{}) (*Manager, *fake.Clientset) {
-	runtimeObjects := make([]interface{}, 0, len(objects))
-	runtimeObjects = append(runtimeObjects, objects...)
+func newTestManager(lister corev1listers.ConfigMapLister) (*Manager, *fake.Clientset) {
 	client := fake.NewClientset()
 	return &Manager{
 		client:    client,
