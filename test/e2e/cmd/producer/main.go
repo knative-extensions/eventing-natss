@@ -52,7 +52,7 @@ func main() {
 	}
 
 	log.Print("sleeping")
-	time.Sleep(10 * time.Second)
+	time.Sleep(15 * time.Second)
 	log.Print("done sleeping, sending events now, target: ", env.Sink)
 	send(cloudevents.ContextWithRetriesExponentialBackoff(ctx, 10*time.Millisecond, 10), c, env.Count)
 

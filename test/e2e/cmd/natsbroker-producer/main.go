@@ -53,8 +53,8 @@ func main() {
 	}
 
 	log.Printf("sleeping before sending %d events of type %s", env.Count, env.EventType)
-	time.Sleep(10 * time.Second)
-	log.Print("done sleeping, sending events now")
+	time.Sleep(15 * time.Second)
+	log.Print("done sleeping, sending events now, target: ", env.Sink)
 	send(cloudevents.ContextWithRetriesExponentialBackoff(ctx, 10*time.Millisecond, 10), c, env.Count, env.EventType)
 
 	log.Print("all events sent, exiting")
@@ -73,7 +73,7 @@ func send(ctx context.Context, c cloudevents.Client, count int, eventType string
 		})
 
 		// Try to send with retry.
-		ctx := cloudevents.ContextWithRetriesExponentialBackoff(ctx, 10*time.Millisecond, 100)
+		ctx := cloudevents.ContextWithRetriesExponentialBackoff(ctx, 10*time.Millisecond, 10)
 
 		if result := c.Send(ctx, e); cloudevents.IsUndelivered(result) {
 			log.Print("Failed to send: ", result.Error())
@@ -81,6 +81,8 @@ func send(ctx context.Context, c cloudevents.Client, count int, eventType string
 			log.Printf("Sent event %d of type %s", i, eventType)
 		} else if cloudevents.IsNACK(result) {
 			log.Print("Sent but not accepted: ", result.Error())
+		} else {
+			log.Print("Unknown result: ", result)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
