@@ -28,10 +28,10 @@ import (
 	// For our e2e testing, we want this linked first so that our
 	// system namespace environment variable is defaulted prior to
 	// logstream initialization.
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	_ "knative.dev/eventing-natss/test/defaultsystem"
 	"knative.dev/pkg/system"
 	_ "knative.dev/pkg/system/testing"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/reconciler-test/pkg/eventshub"
 	"knative.dev/reconciler-test/pkg/feature"
 	"knative.dev/reconciler-test/pkg/k8s"

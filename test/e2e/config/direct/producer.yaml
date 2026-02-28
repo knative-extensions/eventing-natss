@@ -1,4 +1,4 @@
-# Copyright 2020 The Knative Authors
+# Copyright 2024 The Knative Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,26 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
   name: producer
-  namespace: {{ .namespace }}
+  namespace: "{{ .namespace }}"
 spec:
-  replicas: 1
-  selector:
-    matchLabels: &labels
-      app: producer
+  backoffLimit: 3
   template:
-    metadata:
-      labels: *labels
     spec:
+      restartPolicy: Never
       containers:
         - name: producer
           image: ko://knative.dev/eventing-natss/test/e2e/cmd/producer
           env:
             - name: COUNT
-              value: '{{ .producerCount }}'
+              value: "{{ .producerCount }}"
             - name: K_SINK
               value: http://broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/testbroker
-

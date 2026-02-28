@@ -24,7 +24,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: producer
-          image: ko://knative.dev/eventing-natss/test/e2e/cmd/natsbroker-producer
+          image: ko://knative.dev/eventing-natss/test/e2e/cmd/producer
           env:
             - name: COUNT
               value: "{{ .producerCount }}"
