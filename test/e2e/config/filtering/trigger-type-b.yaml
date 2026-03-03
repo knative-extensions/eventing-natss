@@ -13,15 +13,17 @@
 # limitations under the License.
 
 apiVersion: eventing.knative.dev/v1
-kind: Broker
+kind: Trigger
 metadata:
-  name: testbroker
+  name: trigger-type-b
   namespace: {{ .namespace }}
-  annotations:
-    eventing.knative.dev/broker.class: MTChannelBasedBroker
 spec:
-  config:
-    apiVersion: v1
-    kind: ConfigMap
-    name: config-natjsm-channel
-    namespace: knative-eventing
+  broker: filter-test-broker
+  filter:
+    attributes:
+      type: type-b
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: recorder-type-b

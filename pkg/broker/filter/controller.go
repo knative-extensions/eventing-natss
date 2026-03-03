@@ -18,11 +18,9 @@ package filter
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
-	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	"k8s.io/client-go/tools/cache"
 
@@ -103,9 +101,6 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		Handler:    controller.HandleAll(impl.Enqueue),
 	})
 
-	// Start health server in background
-	go startHealthServer(ctx, logger, natsConn)
-
 	logger.Info("Filter controller initialized")
 	return impl
 }
@@ -130,45 +125,4 @@ func filterTriggersByBrokerClass(brokerLister eventinglisters.BrokerLister) func
 		// Check if the broker is of class NatsJetStreamBroker
 		return broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] == constants.BrokerClassName
 	}
-}
-
-func startHealthServer(ctx context.Context, logger *zap.SugaredLogger, natsConn *nats.Conn) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		if natsConn.IsConnected() {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("ok"))
-		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("nats disconnected"))
-		}
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		if natsConn.IsConnected() {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("ok"))
-		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("nats disconnected"))
-		}
-	})
-
-	server := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
-	}
-
-	logger.Info("Starting health server on :8080")
-	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Errorw("Health server error", zap.Error(err))
-		}
-	}()
-
-	<-ctx.Done()
-	logger.Info("Shutting down health server")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	server.Shutdown(ctx)
 }

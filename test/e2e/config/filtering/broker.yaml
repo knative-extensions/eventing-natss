@@ -15,13 +15,7 @@
 apiVersion: eventing.knative.dev/v1
 kind: Broker
 metadata:
-  name: testbroker
+  name: filter-test-broker
   namespace: {{ .namespace }}
   annotations:
-    eventing.knative.dev/broker.class: MTChannelBasedBroker
-spec:
-  config:
-    apiVersion: v1
-    kind: ConfigMap
-    name: config-natjsm-channel
-    namespace: knative-eventing
+    eventing.knative.dev/broker.class: NatsJetStreamBroker

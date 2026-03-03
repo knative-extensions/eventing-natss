@@ -66,7 +66,7 @@ rules:
       - create
       - patch
       - update
-  # Read configmaps for configuration
+  # Read and manage configmaps for configuration and contract
   - apiGroups:
       - ""
     resources:
@@ -75,6 +75,9 @@ rules:
       - get
       - list
       - watch
+      - create
+      - update
+      - delete
   # Manage deployments for ingress and filter
   - apiGroups:
       - apps

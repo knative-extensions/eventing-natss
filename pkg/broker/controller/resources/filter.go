@@ -135,7 +135,7 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 							LivenessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/healthz",
+										Path: "/health",
 										Port: intstr.FromInt(FilterPortNumber),
 									},
 								},
@@ -145,7 +145,7 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 							ReadinessProbe: &corev1.Probe{
 								ProbeHandler: corev1.ProbeHandler{
 									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/readyz",
+										Path: "/readiness",
 										Port: intstr.FromInt(FilterPortNumber),
 									},
 								},
