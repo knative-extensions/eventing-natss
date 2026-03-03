@@ -156,7 +156,7 @@ func send(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message bin
 		logger.Errorw("failed to get nats message metadata, assuming it is 1", zap.Error(err))
 	}
 
-	if retryNumber <= config.retryConfig.RetryMax {
+	if config.retryConfig != nil && retryNumber <= config.retryConfig.RetryMax {
 		lastTry = false
 	} else {
 		lastTry = true
