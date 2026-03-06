@@ -57,7 +57,7 @@ func NewNatsJetStreamChannelInformer(client versioned.Interface, namespace strin
 // one. This reduces memory footprint and number of connections to the server.
 func NewFilteredNatsJetStreamChannelInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
 	return cache.NewSharedIndexInformer(
-		&cache.ListWatch{
+		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
@@ -82,7 +82,7 @@ func NewFilteredNatsJetStreamChannelInformer(client versioned.Interface, namespa
 				}
 				return client.MessagingV1alpha1().NatsJetStreamChannels(namespace).Watch(ctx, options)
 			},
-		},
+		}, client),
 		&apismessagingv1alpha1.NatsJetStreamChannel{},
 		resyncPeriod,
 		indexers,
