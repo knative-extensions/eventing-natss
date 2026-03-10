@@ -76,6 +76,7 @@ rules:
     verbs:
       - get
       - list
+      - watch
   # Manage deployments for ingress and filter
   - apiGroups:
       - apps
