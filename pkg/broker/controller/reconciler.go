@@ -138,8 +138,10 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 
 	controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonContractUpdated, "Contract updated")
 
-	// Step 4: Mark ingress as ready (shared ingress is managed externally)
-	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionIngress)
+	// Step 4: Check shared ingress deployment readiness
+	if err := r.propagateIngressAvailability(ctx, b); err != nil {
+		return err
+	}
 
 	// Step 5: Reconcile filter deployment
 	if err := r.reconcileFilterDeployment(ctx, b, streamName, brokerCfg); err != nil {
@@ -247,6 +249,30 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 
 	// Load and return config from ConfigMap
 	return brokerconfig.GetConfigFromConfigMap(cm, b.Namespace)
+}
+
+// propagateIngressAvailability checks if the shared ingress deployment is available
+func (r *Reconciler) propagateIngressAvailability(ctx context.Context, b *eventingv1.Broker) pkgreconciler.Event {
+	logger := logging.FromContext(ctx)
+
+	deployment, err := r.deploymentLister.Deployments(r.ingressNamespace).Get(r.ingressServiceName)
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			b.Status.MarkIngressFailed("DeploymentNotFound", "Shared ingress deployment %q not found in namespace %q", r.ingressServiceName, r.ingressNamespace)
+			return nil
+		}
+		logger.Errorw("Failed to get shared ingress deployment", zap.Error(err))
+		b.Status.MarkIngressFailed("DeploymentGetFailed", "Failed to get shared ingress deployment: %v", err)
+		return fmt.Errorf("failed to get ingress deployment: %w", err)
+	}
+
+	if deployment.Status.ReadyReplicas == 0 {
+		b.Status.MarkIngressFailed("DeploymentNotReady", "Shared ingress deployment has no ready replicas")
+		return nil
+	}
+
+	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionIngress)
+	return nil
 }
 
 // propagateFilterAvailability checks if the filter deployment is available
