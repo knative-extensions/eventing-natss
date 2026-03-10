@@ -196,8 +196,6 @@ func (h *Handler) publishToJetStream(ctx context.Context, event *ce.Event, broke
 // ReadinessChecker returns an http.HandlerFunc for readiness checks
 func (h *Handler) ReadinessChecker() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check that we have at least one broker registered
-		// or if no brokers are expected yet, just return OK
 		w.WriteHeader(http.StatusOK)
 	}
 }
