@@ -66,7 +66,9 @@ rules:
       - create
       - patch
       - update
-  # Read and manage configmaps for configuration and contract
+  # Read broker config ConfigMaps from user namespaces (broker's own namespace).
+  # Writes to the contract ConfigMap happen only in knative-eventing and are
+  # covered by the namespaced Role in that namespace.
   - apiGroups:
       - ""
     resources:
@@ -74,10 +76,6 @@ rules:
     verbs:
       - get
       - list
-      - watch
-      - create
-      - update
-      - delete
   # Manage deployments for ingress and filter
   - apiGroups:
       - apps
