@@ -59,6 +59,7 @@ jobs:
         kubectl apply -n knative-eventing -f ./config/mtbroker/config-br-default-channel-jsm.yaml
         kubectl apply -n knative-eventing -f ./config/mtbroker/config-nats.yaml
         
+        source ./vendor/knative.dev/hack/infra-library.sh
         wait_until_pods_running nats-io
         
         kubectl get pods -n nats-io
