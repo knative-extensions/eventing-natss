@@ -99,6 +99,9 @@ jobs:
         
         set -x
         kubectl get pods -n nats-io
+        kubectl get svc nats -n nats-io
+        kubectl get pods -n kube-system -l k8s-app=kube-dns
+        kubectl logs -n kube-system -l k8s-app=kube-dns
 
     - name: Install Knative Eventing
       run: |
