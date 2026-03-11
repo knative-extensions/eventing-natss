@@ -58,6 +58,10 @@ jobs:
         kubectl create namespace knative-eventing
         kubectl apply -n knative-eventing -f ./config/mtbroker/config-br-default-channel-jsm.yaml
         kubectl apply -n knative-eventing -f ./config/mtbroker/config-nats.yaml
+        
+        wait_until_pods_running nats-io
+        
+        kubectl get pods -n nats-io
 
     - name: Install Knative Eventing
       run: |
