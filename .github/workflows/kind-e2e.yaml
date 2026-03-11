@@ -19,6 +19,7 @@ jobs:
 
         eventing-version:
         - knative-v1.21.0
+
         # Map between K8s and KinD versions.
         # This is attempting to make it a bit clearer what's being tested.
         # See: https://github.com/kubernetes-sigs/kind/releases/tag/v0.29.0
@@ -52,7 +53,7 @@ jobs:
         KIND_VERSION: ${{ matrix.kind-version }}
       run: |
         set -x
-  
+
         curl -Lo ./kind https://github.com/kubernetes-sigs/kind/releases/download/${{ matrix.kind-version }}/kind-$(uname)-amd64
         chmod +x ./kind
         sudo mv kind /usr/local/bin
@@ -60,12 +61,12 @@ jobs:
     - name: Create KinD Cluster
       run: |
         set -x
-  
+
         # KinD configuration.
         cat > kind.yaml <<EOF
         apiVersion: kind.x-k8s.io/v1alpha4
         kind: Cluster
-  
+
         # This is needed in order to support projected volumes with service account tokens.
         # See: https://kubernetes.slack.com/archives/CEKK1KTN2/p1600268272383600
         kubeadmConfigPatches:
@@ -83,9 +84,9 @@ jobs:
           image: kindest/node:${{ matrix.k8s-version }}@${{ matrix.kind-image-sha }}
         - role: worker
           image: kindest/node:${{ matrix.k8s-version }}@${{ matrix.kind-image-sha }}
-  
+
         EOF
-  
+
         # Create a cluster!
         kind create cluster --config kind.yaml
 
