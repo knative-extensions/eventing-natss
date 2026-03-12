@@ -19,7 +19,6 @@ metadata:
   namespace: knative-eventing
   labels:
     nats.eventing.knative.dev/release: devel
-    eventing.knative.dev/brokerRole: ingress
 spec:
   replicas: 1
   selector:
@@ -29,7 +28,6 @@ spec:
     metadata:
       labels:
         app: nats-broker-ingress
-        eventing.knative.dev/brokerRole: ingress
     spec:
       serviceAccountName: natsjetstream-broker-dataplane
       containers:
