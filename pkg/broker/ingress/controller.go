@@ -24,12 +24,19 @@ import (
 
 	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/tools/cache"
 
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/reconciler"
+	"knative.dev/pkg/system"
 
+	configmapinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/configmap"
+
+	"knative.dev/eventing-natss/pkg/broker/contract"
 	commonnats "knative.dev/eventing-natss/pkg/common/nats"
 )
 
@@ -42,14 +49,11 @@ const (
 )
 
 type envConfig struct {
-	BrokerName string `envconfig:"BROKER_NAME" required:"true"`
-	Namespace  string `envconfig:"BROKER_NAMESPACE" required:"true"`
-	StreamName string `envconfig:"STREAM_NAME" required:"true"`
-	NatsURL    string `envconfig:"NATS_URL" required:"true"`
-	Port       int    `envconfig:"PORT" default:"8080"`
+	NatsURL string `envconfig:"NATS_URL" required:"true"`
+	Port    int    `envconfig:"PORT" default:"8080"`
 }
 
-// NewController creates a new ingress controller
+// NewController creates a new shared ingress controller
 func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	logger := logging.FromContext(ctx)
 
@@ -59,10 +63,7 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		logger.Fatalw("Failed to process environment variables", zap.Error(err))
 	}
 
-	logger.Infow("Starting broker ingress",
-		zap.String("broker", env.BrokerName),
-		zap.String("namespace", env.Namespace),
-		zap.String("stream", env.StreamName),
+	logger.Infow("Starting shared broker ingress",
 		zap.String("nats_url", env.NatsURL),
 		zap.Int("port", env.Port),
 	)
@@ -79,22 +80,19 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		logger.Fatalw("Failed to create JetStream context", zap.Error(err))
 	}
 
-	// Verify stream exists
-	_, err = js.StreamInfo(env.StreamName)
-	if err != nil {
-		logger.Fatalw("Stream does not exist", zap.Error(err), zap.String("stream", env.StreamName))
-	}
+	logger.Info("Connected to JetStream")
 
-	logger.Infow("Connected to JetStream", zap.String("stream", env.StreamName))
-
-	// Create the ingress handler
+	// Create the shared ingress handler
 	handler := NewHandler(HandlerConfig{
-		Logger:     logger,
-		JetStream:  js,
-		BrokerName: env.BrokerName,
-		Namespace:  env.Namespace,
-		StreamName: env.StreamName,
+		Logger:    logger,
+		JetStream: js,
 	})
+
+	// Get ConfigMap informer for watching contract changes
+	configMapInformer := configmapinformer.Get(ctx)
+
+	// Load initial contract from ConfigMap
+	loadContractFromInformer(configMapInformer.Lister().ConfigMaps(system.Namespace()), handler, logger)
 
 	// Set up HTTP server with routes
 	mux := http.NewServeMux()
@@ -134,8 +132,74 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		Logger:        logger,
 	})
 
-	logger.Info("Ingress controller initialized")
+	// Watch contract ConfigMap for changes
+	configMapInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
+		FilterFunc: filterContractConfigMap,
+		Handler: cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				loadContractFromInformer(configMapInformer.Lister().ConfigMaps(system.Namespace()), handler, logger)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				loadContractFromInformer(configMapInformer.Lister().ConfigMaps(system.Namespace()), handler, logger)
+			},
+			DeleteFunc: func(obj interface{}) {
+				// Clear all brokers when contract is deleted
+				handler.UpdateContract(&contract.Contract{})
+				logger.Info("Contract ConfigMap deleted, cleared all broker mappings")
+			},
+		},
+	})
+
+	logger.Info("Shared ingress controller initialized")
 	return impl
+}
+
+// filterContractConfigMap returns true if the object is the contract ConfigMap
+func filterContractConfigMap(obj interface{}) bool {
+	if obj == nil {
+		return false
+	}
+
+	// Handle tombstone objects
+	if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+		obj = tombstone.Obj
+	}
+
+	// Check if it's a ConfigMap
+	cm, ok := obj.(*corev1.ConfigMap)
+	if !ok {
+		return false
+	}
+
+	return cm.Name == contract.ConfigMapName && cm.Namespace == system.Namespace()
+}
+
+// configMapGetter is an interface for getting ConfigMaps by name
+type configMapGetter interface {
+	Get(name string) (*corev1.ConfigMap, error)
+}
+
+// loadContractFromInformer loads the contract from the ConfigMap and updates the handler
+func loadContractFromInformer(cmGetter configMapGetter, handler *Handler, logger *zap.SugaredLogger) {
+	cm, err := cmGetter.Get(contract.ConfigMapName)
+	if err != nil {
+		if apierrs.IsNotFound(err) {
+			logger.Debug("Contract ConfigMap not found, no brokers registered yet")
+			return
+		}
+		logger.Warnw("Failed to get contract ConfigMap", zap.Error(err))
+		return
+	}
+
+	// Parse the contract
+	c, err := contract.ParseContract(cm)
+	if err != nil {
+		logger.Errorw("Failed to parse contract", zap.Error(err))
+		return
+	}
+
+	handler.UpdateContract(c)
+	logger.Infow("Contract loaded", zap.Int("broker_count", len(c.Brokers)))
 }
 
 // noopReconciler is a no-op reconciler since ingress doesn't reconcile any resources

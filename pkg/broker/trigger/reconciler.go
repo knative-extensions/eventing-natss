@@ -160,11 +160,16 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, trigger *eventingv1.Trigg
 	streamName := brokerutils.BrokerStreamNameByNsAndName(trigger.Namespace, trigger.Spec.Broker)
 	consumerName := brokerutils.TriggerConsumerName(string(trigger.UID))
 
-	// Delete the consumer
+	// Delete the consumer. Treat stream-not-found and consumer-not-found as
+	// warnings — if the stream is gone the consumer is implicitly gone too.
 	err = r.js.DeleteConsumer(streamName, consumerName)
-	if err != nil && !errors.Is(err, nats.ErrConsumerNotFound) {
-		logger.Errorw("Failed to delete JetStream consumer", zap.Error(err), zap.String("consumer", consumerName))
-		return fmt.Errorf("failed to delete consumer: %w", err)
+	if err != nil {
+		if errors.Is(err, nats.ErrConsumerNotFound) || errors.Is(err, nats.ErrStreamNotFound) {
+			logger.Warnw("Consumer already gone during trigger finalization", zap.Error(err), zap.String("consumer", consumerName))
+		} else {
+			logger.Errorw("Failed to delete JetStream consumer", zap.Error(err), zap.String("consumer", consumerName))
+			return fmt.Errorf("failed to delete consumer: %w", err)
+		}
 	}
 
 	logger.Infow("Trigger finalization completed", zap.String("trigger", trigger.Name))

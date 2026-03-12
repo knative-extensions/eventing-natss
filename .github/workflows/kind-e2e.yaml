@@ -15,10 +15,18 @@ jobs:
       fail-fast: false # Keep running if one leg fails.
       matrix:
         k8s-version:
-        - v1.34.x
+        - v1.34.3
 
         eventing-version:
         - knative-v1.21.0
+
+        # Map between K8s and KinD versions.
+        # This is attempting to make it a bit clearer what's being tested.
+        # See: https://github.com/kubernetes-sigs/kind/releases/tag/v0.29.0
+        include:
+        - k8s-version: v1.34.3
+          kind-version: v0.31.0
+          kind-image-sha: sha256:08497ee19eace7b4b5348db5c6a1591d7752b164530a36f855cb0f2bdcbadd48
     env:
       KO_DOCKER_REPO: kind.local
       SYSTEM_NAMESPACE: knative-eventing
@@ -41,12 +49,46 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install KinD
-      # TODO: replace with chainguard-dev/actions/setup-kind
-      uses: chainguard-dev/actions/setup-kind@5e84f02889db0de213947c80a5d75b51bb899048 # main
-      with:
-        k8s-version: ${{ matrix.k8s-version }}
-        kind-worker-count: 2
-        cluster-suffix: c${{ github.run_id }}.local
+      env:
+        KIND_VERSION: ${{ matrix.kind-version }}
+      run: |
+        set -x
+
+        curl -Lo ./kind https://github.com/kubernetes-sigs/kind/releases/download/${{ matrix.kind-version }}/kind-$(uname)-amd64
+        chmod +x ./kind
+        sudo mv kind /usr/local/bin
+
+    - name: Create KinD Cluster
+      run: |
+        set -x
+
+        # KinD configuration.
+        cat > kind.yaml <<EOF
+        apiVersion: kind.x-k8s.io/v1alpha4
+        kind: Cluster
+
+        # This is needed in order to support projected volumes with service account tokens.
+        # See: https://kubernetes.slack.com/archives/CEKK1KTN2/p1600268272383600
+        kubeadmConfigPatches:
+          - |
+            apiVersion: kubeadm.k8s.io/v1beta2
+            kind: ClusterConfiguration
+            metadata:
+              name: config
+            apiServer:
+              extraArgs:
+                "service-account-issuer": "kubernetes.default.svc"
+                "service-account-signing-key-file": "/etc/kubernetes/pki/sa.key"
+        nodes:
+        - role: control-plane
+          image: kindest/node:${{ matrix.k8s-version }}@${{ matrix.kind-image-sha }}
+        - role: worker
+          image: kindest/node:${{ matrix.k8s-version }}@${{ matrix.kind-image-sha }}
+
+        EOF
+
+        # Create a cluster!
+        kind create cluster --config kind.yaml
 
     - name: Install nats
       run: |
@@ -58,6 +100,16 @@ jobs:
         kubectl create namespace knative-eventing
         kubectl apply -n knative-eventing -f ./config/mtbroker/config-br-default-channel-jsm.yaml
         kubectl apply -n knative-eventing -f ./config/mtbroker/config-nats.yaml
+        
+        set +x
+        source ./vendor/knative.dev/hack/infra-library.sh
+        wait_until_pods_running nats-io
+        
+        set -x
+        kubectl get pods -n nats-io
+        kubectl get svc nats -n nats-io
+        kubectl get pods -n kube-system -l k8s-app=kube-dns
+        kubectl logs -n kube-system -l k8s-app=kube-dns
 
     - name: Install Knative Eventing
       run: |
@@ -76,6 +128,7 @@ jobs:
         # Install the nats channel
         ko apply -f ./config/webhook
         ko apply -f ./config/jetstream
+        ko apply -f ./config/broker
 
     - name: Wait for Ready
       run: |

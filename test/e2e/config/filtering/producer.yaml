@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Producer for type-a events
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: producer
+  name: producer-type-a
   namespace: "{{ .namespace }}"
 spec:
   backoffLimit: 3
@@ -27,6 +28,30 @@ spec:
           image: ko://knative.dev/eventing-natss/test/e2e/cmd/producer
           env:
             - name: COUNT
-              value: "{{ .producerCount }}"
+              value: "{{ .producerCountTypeA }}"
+            - name: EVENT_TYPE
+              value: "type-a"
             - name: K_SINK
-              value: http://broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/testbroker
+              value: http://nats-broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/filter-test-broker
+---
+# Producer for type-b events
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: producer-type-b
+  namespace: "{{ .namespace }}"
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: producer
+          image: ko://knative.dev/eventing-natss/test/e2e/cmd/producer
+          env:
+            - name: COUNT
+              value: "{{ .producerCountTypeB }}"
+            - name: EVENT_TYPE
+              value: "type-b"
+            - name: K_SINK
+              value: http://nats-broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/filter-test-broker

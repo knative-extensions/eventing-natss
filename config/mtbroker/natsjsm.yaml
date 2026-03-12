@@ -83,7 +83,7 @@ spec:
     spec:
       containers:
         - name: nats-jetstream
-          image: nats:2.3.4
+          image: nats:2.10.26
           imagePullPolicy: IfNotPresent
           args:
           - -D

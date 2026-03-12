@@ -20,6 +20,20 @@ metadata:
   labels:
     nats.eventing.knative.dev/release: devel
 rules:
+  # Full access to ConfigMaps in knative-eventing for the contract ConfigMap
+  # (nats-broker-ingress-contract) and sharedmain config maps (config-logging, etc.).
+  # Write operations on ConfigMaps never leave this namespace.
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - delete
   # Read secrets for NATS credentials/TLS — only ever accessed in the
   # controller's own namespace, so a namespaced Role is sufficient.
   - apiGroups:

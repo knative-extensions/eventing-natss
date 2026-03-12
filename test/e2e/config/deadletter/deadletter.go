@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package direct
+package deadletter
 
 import (
 	"context"
@@ -28,11 +28,30 @@ import (
 //go:embed *.yaml
 var yamls embed.FS
 
-func Install() feature.StepFn {
+//go:embed broker.yaml trigger.yaml failing-subscriber.yaml
+var brokerYamls embed.FS
+
+//go:embed producer.yaml
+var producerYamls embed.FS
+
+// InstallBrokerAndSubscriber installs the broker, trigger, and failing-subscriber.
+// Call this before waiting for readiness, then call InstallProducer after ready.
+func InstallBrokerAndSubscriber() feature.StepFn {
 	return func(ctx context.Context, t feature.T) {
 		registerImages(ctx, t)
-		args := map[string]interface{}{"producerCount": 5}
-		if _, err := manifest.InstallYamlFS(ctx, yamls, args); err != nil {
+		if _, err := manifest.InstallYamlFS(ctx, brokerYamls, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// InstallProducer installs the producer job. Call this after the broker and
+// trigger are ready so that the NATS consumer exists before events are sent.
+func InstallProducer(count int) feature.StepFn {
+	return func(ctx context.Context, t feature.T) {
+		registerImages(ctx, t)
+		args := map[string]interface{}{"producerCount": count}
+		if _, err := manifest.InstallYamlFS(ctx, producerYamls, args); err != nil {
 			t.Fatal(err)
 		}
 	}

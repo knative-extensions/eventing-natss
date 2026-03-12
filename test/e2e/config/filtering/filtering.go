@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package direct
+package filtering
 
 import (
 	"context"
@@ -28,11 +28,33 @@ import (
 //go:embed *.yaml
 var yamls embed.FS
 
-func Install() feature.StepFn {
+//go:embed broker.yaml trigger-type-a.yaml trigger-type-b.yaml
+var brokerYamls embed.FS
+
+//go:embed producer.yaml
+var producerYamls embed.FS
+
+// InstallBrokerAndTriggers installs the broker and both type-filtered triggers.
+// Call this before waiting for readiness, then call InstallProducers after ready.
+func InstallBrokerAndTriggers() feature.StepFn {
 	return func(ctx context.Context, t feature.T) {
 		registerImages(ctx, t)
-		args := map[string]interface{}{"producerCount": 5}
-		if _, err := manifest.InstallYamlFS(ctx, yamls, args); err != nil {
+		if _, err := manifest.InstallYamlFS(ctx, brokerYamls, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// InstallProducers installs both producer jobs. Call this after the broker and
+// triggers are ready so that NATS consumers exist before events are sent.
+func InstallProducers(countTypeA, countTypeB int) feature.StepFn {
+	return func(ctx context.Context, t feature.T) {
+		registerImages(ctx, t)
+		args := map[string]interface{}{
+			"producerCountTypeA": countTypeA,
+			"producerCountTypeB": countTypeB,
+		}
+		if _, err := manifest.InstallYamlFS(ctx, producerYamls, args); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -30,6 +30,8 @@ func main() {
 	component := "natsjs-broker-ingress"
 
 	ctx := signals.NewContext()
+	ctx = sharedmain.WithHealthProbesDisabled(ctx)
+
 	ns := os.Getenv("NAMESPACE")
 	if ns != "" {
 		ctx = injection.WithNamespaceScope(ctx, ns)
