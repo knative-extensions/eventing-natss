@@ -1072,8 +1072,8 @@ k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 h1:Y3gxNAuB0OBLImH611+UDZ
 k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912/go.mod h1:kdmbQkyfwUagLfXIad1y2TdrjPFWp2Q89B3qkRwf/pQ=
 k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 h1:SjGebBtkBqHFOli+05xYbK8YF1Dzkbzn+gDM4X9T4Ck=
 k8s.io/utils v0.0.0-20251002143259-bc988d571ff4/go.mod h1:OLgZIPagt7ERELqWJFomSt595RzquPNLL48iOWgYOg0=
-knative.dev/eventing v0.48.1-0.20260310120613-104b6237f845 h1:i6Dhhq07M5qqgRaYQ1aTcnpAnPGHPMoyd41bc9Dy7UI=
-knative.dev/eventing v0.48.1-0.20260310120613-104b6237f845/go.mod h1:nn4erf/DV7kg4qlIjz00JJjqqP6X58PaETGjDgbY8Jo=
+knative.dev/eventing v0.48.1-0.20260312112120-216791f66f4a h1:B75jTs+XK/uL68eyfcdzHiBpZQzONdX+GEr6YhSY054=
+knative.dev/eventing v0.48.1-0.20260312112120-216791f66f4a/go.mod h1:veiqrbGdkwuK5A1EGPbJiOojRJHdE4/LIkndxxKQOwY=
 knative.dev/hack v0.0.0-20260310014051-c448fdb867e2 h1:b35SGLEp03D8oGf8mE9HBt3yfNgYpAK0fw46hFXs9w4=
 knative.dev/hack v0.0.0-20260310014051-c448fdb867e2/go.mod h1:L5RzHgbvam0u8QFHfzCX6MKxu/a/gIGEdaRBqNiVbl0=
 knative.dev/pkg v0.0.0-20260310013839-5504026dd1b6 h1:oVpQ0Y+FUmRQer8kdqJjQL20KveZa5sCfnBWeJi4nyQ=
