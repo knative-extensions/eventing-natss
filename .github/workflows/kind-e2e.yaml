@@ -15,18 +15,18 @@ jobs:
       fail-fast: false # Keep running if one leg fails.
       matrix:
         k8s-version:
-        - v1.33.1
+        - v1.34.3
 
         eventing-version:
-        - knative-v1.19.0
+        - knative-v1.21.0
 
         # Map between K8s and KinD versions.
         # This is attempting to make it a bit clearer what's being tested.
         # See: https://github.com/kubernetes-sigs/kind/releases/tag/v0.29.0
         include:
-        - k8s-version: v1.33.1
-          kind-version: v0.29.0
-          kind-image-sha: sha256:050072256b9a903bd914c0b2866828150cb229cea0efe5892e2b644d5dd3b34f
+        - k8s-version: v1.34.3
+          kind-version: v0.31.0
+          kind-image-sha: sha256:08497ee19eace7b4b5348db5c6a1591d7752b164530a36f855cb0f2bdcbadd48
     env:
       KO_DOCKER_REPO: kind.local
       SYSTEM_NAMESPACE: knative-eventing
@@ -95,11 +95,21 @@ jobs:
         set -x
 
         kubectl create namespace nats
-        kubectl apply -n nats-io -f ./config/broker/natsjsm.yaml
+        kubectl apply -n nats-io -f ./config/mtbroker/natsjsm.yaml
         # Create a ConfigMap that we use to instruct Broker to create nats channels.
         kubectl create namespace knative-eventing
-        kubectl apply -n knative-eventing -f ./config/broker/config-br-default-channel-jsm.yaml
-        kubectl apply -n knative-eventing -f ./config/broker/config-nats.yaml
+        kubectl apply -n knative-eventing -f ./config/mtbroker/config-br-default-channel-jsm.yaml
+        kubectl apply -n knative-eventing -f ./config/mtbroker/config-nats.yaml
+        
+        set +x
+        source ./vendor/knative.dev/hack/infra-library.sh
+        wait_until_pods_running nats-io
+        
+        set -x
+        kubectl get pods -n nats-io
+        kubectl get svc nats -n nats-io
+        kubectl get pods -n kube-system -l k8s-app=kube-dns
+        kubectl logs -n kube-system -l k8s-app=kube-dns
 
     - name: Install Knative Eventing
       run: |
@@ -118,6 +128,7 @@ jobs:
         # Install the nats channel
         ko apply -f ./config/webhook
         ko apply -f ./config/jetstream
+        ko apply -f ./config/broker
 
     - name: Wait for Ready
       run: |

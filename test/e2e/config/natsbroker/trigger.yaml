@@ -12,21 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: batch/v1
-kind: Job
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
 metadata:
-  name: producer
-  namespace: "{{ .namespace }}"
+  name: test-trigger
+  namespace: {{ .namespace }}
 spec:
-  backoffLimit: 3
-  template:
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: producer
-          image: ko://knative.dev/eventing-natss/test/e2e/cmd/producer
-          env:
-            - name: COUNT
-              value: "{{ .producerCount }}"
-            - name: K_SINK
-              value: http://broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/testbroker
+  broker: test-nats-broker
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: recorder

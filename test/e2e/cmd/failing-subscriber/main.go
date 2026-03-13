@@ -1,12 +1,12 @@
-//go:build e2e
-// +build e2e
-
 /*
 Copyright 2026 The Knative Authors
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
+
     http://www.apache.org/licenses/LICENSE-2.0
+
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,27 +14,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package e2e
+package main
 
 import (
-	"time"
-
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"knative.dev/reconciler-test/pkg/eventshub"
-	"knative.dev/reconciler-test/pkg/feature"
-	"knative.dev/reconciler-test/pkg/k8s"
+	"log"
+	"net/http"
 )
 
-func RecorderFeature() *feature.Feature {
-	svc := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}
+func main() {
+	log.Println("Starting failing subscriber - all requests will return 500")
 
-	to := "recorder"
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Received request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Intentional failure for testing"))
+	})
 
-	f := new(feature.Feature)
-
-	f.Setup("install recorder", eventshub.Install(to, eventshub.StartReceiver))
-
-	f.Requirement("recorder is addressable", k8s.IsAddressable(svc, to, time.Second, 30*time.Second))
-
-	return f
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }

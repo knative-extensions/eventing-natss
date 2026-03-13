@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Knative Authors
+Copyright 2026 The Knative Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,8 +29,9 @@ import (
 )
 
 type envConfig struct {
-	Sink  string `envconfig:"K_SINK" required:"true"`
-	Count int    `envconfig:"COUNT" default:"1"`
+	Sink      string `envconfig:"K_SINK" required:"true"`
+	Count     int    `envconfig:"COUNT" default:"1"`
+	EventType string `envconfig:"EVENT_TYPE" default:"knative.natsbroker.e2etest"`
 }
 
 func main() {
@@ -51,34 +52,32 @@ func main() {
 		log.Fatal("failed to create client, ", err)
 	}
 
-	log.Print("sleeping")
-	time.Sleep(10 * time.Second)
+	log.Printf("sleeping before sending %d events of type %s", env.Count, env.EventType)
+	time.Sleep(30 * time.Second)
 	log.Print("done sleeping, sending events now, target: ", env.Sink)
-	send(cloudevents.ContextWithRetriesExponentialBackoff(ctx, 10*time.Millisecond, 10), c, env.Count)
+	send(ctx, c, env.Count, env.EventType)
 
-	// Wait.
-	<-ctx.Done()
+	log.Print("all events sent, exiting")
+	os.Exit(0)
 }
 
-func send(ctx context.Context, c cloudevents.Client, count int) {
+func send(ctx context.Context, c cloudevents.Client, count int, eventType string) {
 	for i := 0; i < count; i++ {
 		e := cloudevents.NewEvent()
-		e.SetType("knative.producer.e2etest")
-		e.SetSource("https://knative.dev/eventing/e2e")
+		e.SetType(eventType)
+		e.SetSource("https://knative.dev/eventing-natss/e2e")
 		e.SetExtension("index", i)
 		_ = e.SetData(cloudevents.ApplicationJSON, map[string]interface{}{
 			"id":      i,
 			"message": "Hello, World!",
 		})
 
-		log.Print("Sending event: ", i)
-		// Try to send with retry.
 		ctx := cloudevents.ContextWithRetriesExponentialBackoff(ctx, 10*time.Millisecond, 10)
 
 		if result := c.Send(ctx, e); cloudevents.IsUndelivered(result) {
 			log.Print("Failed to send: ", result.Error())
 		} else if cloudevents.IsACK(result) {
-			log.Print("Sent: ", i)
+			log.Printf("Sent event %d of type %s", i, eventType)
 		} else if cloudevents.IsNACK(result) {
 			log.Print("Sent but not accepted: ", result.Error())
 		} else {

@@ -25,17 +25,11 @@ const (
 	// RoleLabelKey is the label key for role identification
 	RoleLabelKey = "eventing.knative.dev/role"
 
-	// IngressRoleLabelValue is the label value for ingress components
-	IngressRoleLabelValue = "ingress"
-
 	// FilterRoleLabelValue is the label value for filter components
 	FilterRoleLabelValue = "filter"
 
 	// BrokerClassLabelValue is the label value for NatsJetStream broker
 	BrokerClassLabelValue = "nats-jetstream-broker"
-
-	// IngressContainerName is the name of the ingress container
-	IngressContainerName = "ingress"
 
 	// FilterContainerName is the name of the filter container
 	FilterContainerName = "filter"
@@ -43,20 +37,12 @@ const (
 	// IngressPortName is the name of the ingress HTTP port
 	IngressPortName = "http"
 
-	// IngressPortNumber is the port number for ingress HTTP traffic
-	IngressPortNumber = 8080
-
 	// MetricsPortName is the name of the metrics port
 	MetricsPortName = "metrics"
 
 	// MetricsPortNumber is the port number for metrics
 	MetricsPortNumber = 9090
 )
-
-// IngressName returns the name of the ingress deployment/service for a broker
-func IngressName(brokerName string) string {
-	return brokerName + "-broker-ingress"
-}
 
 // FilterName returns the name of the filter deployment/service for a broker
 func FilterName(brokerName string) string {
@@ -67,14 +53,6 @@ func FilterName(brokerName string) string {
 func BrokerLabels(brokerName string) map[string]string {
 	return map[string]string{
 		BrokerLabelKey: brokerName,
-	}
-}
-
-// IngressLabels returns labels for ingress resources
-func IngressLabels(brokerName string) map[string]string {
-	return map[string]string{
-		BrokerLabelKey: brokerName,
-		RoleLabelKey:   IngressRoleLabelValue,
 	}
 }
 
