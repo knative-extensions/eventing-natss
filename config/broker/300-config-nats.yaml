@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     https://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,21 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: batch/v1
-kind: Job
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: producer
-  namespace: "{{ .namespace }}"
-spec:
-  backoffLimit: 3
-  template:
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: producer
-          image: ko://knative.dev/eventing-natss/test/e2e/cmd/producer
-          env:
-            - name: COUNT
-              value: "{{ .producerCount }}"
-            - name: K_SINK
-              value: http://broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/testbroker
+  name: config-nats-broker
+  namespace: knative-eventing
+  labels:
+    nats.eventing.knative.dev/release: devel
+data:
+  eventing-nats: |
+    url: nats://nats.nats-io.svc.cluster.local:4222
+    connOpts:
+      retryOnFailedConnect: true
+      maxReconnects: 5
+      reconnectWaitMilliseconds: 2000
+      reconnectJitterMilliseconds: 100
+      reconnectJitterTLSMilliseconds: 1000

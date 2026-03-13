@@ -12,21 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: batch/v1
-kind: Job
+apiVersion: eventing.knative.dev/v1
+kind: Broker
 metadata:
-  name: producer
-  namespace: "{{ .namespace }}"
-spec:
-  backoffLimit: 3
-  template:
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: producer
-          image: ko://knative.dev/eventing-natss/test/e2e/cmd/producer
-          env:
-            - name: COUNT
-              value: "{{ .producerCount }}"
-            - name: K_SINK
-              value: http://broker-ingress.knative-eventing.svc.cluster.local/{{ .namespace }}/testbroker
+  name: test-nats-broker
+  namespace: {{ .namespace }}
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
