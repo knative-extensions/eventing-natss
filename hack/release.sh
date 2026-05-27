@@ -25,7 +25,8 @@ export GO111MODULE=on
 declare -A COMPONENTS
 COMPONENTS=(
   ["eventing-jsm.yaml"]="./config/webhook,./config/jetstream"
-  ["broker-jsm.yaml"]="./config/webhook,./config/broker"
+  ["broker-jsm.yaml"]="./config/broker"
+  ["webhook-jsm.yaml"]="./config/webhook"
 )
 readonly COMPONENTS
 
