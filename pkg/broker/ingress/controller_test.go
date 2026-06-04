@@ -17,6 +17,7 @@ limitations under the License.
 package ingress
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -29,7 +30,11 @@ import (
 
 	"go.uber.org/zap"
 
+	"k8s.io/client-go/rest"
+	"knative.dev/pkg/injection"
+
 	"knative.dev/eventing-natss/pkg/broker/contract"
+	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 )
 
 // fakeGetter is a test double for configMapGetter.
@@ -207,5 +212,101 @@ func TestLoadContractFromInformer_EmptyContract(t *testing.T) {
 
 	if got := h.GetBrokerCount(); got != 0 {
 		t.Errorf("broker count = %d, want 0 after loading empty contract", got)
+	}
+}
+
+// --- loadEnvConfig ---
+
+func TestLoadEnvConfig_Defaults(t *testing.T) {
+	env, err := loadEnvConfig()
+	if err != nil {
+		t.Fatalf("loadEnvConfig() unexpected error: %v", err)
+	}
+	if env.Port != 8080 {
+		t.Errorf("Port = %d, want 8080 (default)", env.Port)
+	}
+}
+
+func TestLoadEnvConfig_CustomPort(t *testing.T) {
+	t.Setenv("PORT", "9090")
+	env, err := loadEnvConfig()
+	if err != nil {
+		t.Fatalf("loadEnvConfig() unexpected error: %v", err)
+	}
+	if env.Port != 9090 {
+		t.Errorf("Port = %d, want 9090", env.Port)
+	}
+}
+
+func TestLoadEnvConfig_InvalidPort(t *testing.T) {
+	t.Setenv("PORT", "not-a-number")
+	_, err := loadEnvConfig()
+	if err == nil {
+		t.Error("loadEnvConfig() expected error for non-integer PORT, got nil")
+	}
+}
+
+// --- buildNatsConn ---
+
+func TestBuildNatsConn_NoLoaderInContext(t *testing.T) {
+	_, err := buildNatsConn(context.Background())
+	if err == nil {
+		t.Error("buildNatsConn() expected error when no loader in context, got nil")
+	}
+}
+
+func TestBuildNatsConn_LoaderReturnsError(t *testing.T) {
+	ctx := fsloader.WithLoader(context.Background(), func(_ string) (map[string]string, error) {
+		return nil, fmt.Errorf("disk read error")
+	})
+	_, err := buildNatsConn(ctx)
+	if err == nil {
+		t.Error("buildNatsConn() expected error when loader fails, got nil")
+	}
+}
+
+func TestBuildNatsConn_MissingNatsConfigKey(t *testing.T) {
+	// Loader returns a map without the required "eventing-nats" key.
+	ctx := fsloader.WithLoader(context.Background(), func(_ string) (map[string]string, error) {
+		return map[string]string{}, nil
+	})
+	_, err := buildNatsConn(ctx)
+	if err == nil {
+		t.Error("buildNatsConn() expected error for missing eventing-nats key, got nil")
+	}
+}
+
+func TestBuildNatsConn_InvalidNatsConfigYAML(t *testing.T) {
+	ctx := fsloader.WithLoader(context.Background(), func(_ string) (map[string]string, error) {
+		return map[string]string{"eventing-nats": "{"}, nil // invalid YAML
+	})
+	_, err := buildNatsConn(ctx)
+	if err == nil {
+		t.Error("buildNatsConn() expected error for invalid YAML, got nil")
+	}
+}
+
+func TestBuildNatsConn_ValidConfig(t *testing.T) {
+	t.Setenv("SYSTEM_NAMESPACE", "knative-eventing")
+	s := runBasicJetStreamServer(t)
+	defer s.Shutdown()
+
+	// NewNatsConn always creates a k8s secrets client (for credential/TLS resolution).
+	// Inject a stub rest.Config so it doesn't fall back to InClusterConfig.
+	ctx := injection.WithConfig(context.Background(), &rest.Config{Host: "http://localhost:6443"})
+	ctx = fsloader.WithLoader(ctx, func(_ string) (map[string]string, error) {
+		return map[string]string{
+			"eventing-nats": fmt.Sprintf("url: %s", s.ClientURL()),
+		}, nil
+	})
+
+	conn, err := buildNatsConn(ctx)
+	if err != nil {
+		t.Fatalf("buildNatsConn() unexpected error: %v", err)
+	}
+	defer conn.Close()
+
+	if !conn.IsConnected() {
+		t.Error("expected an active NATS connection")
 	}
 }
