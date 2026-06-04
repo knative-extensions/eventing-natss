@@ -24,8 +24,9 @@ export GO111MODULE=on
 # Yaml files to generate, and the source config dir for them.
 declare -A COMPONENTS
 COMPONENTS=(
-  ["eventing-jsm.yaml"]="./config/webhook,./config/jetstream"
-  ["broker-jsm.yaml"]="./config/webhook,./config/broker"
+  ["eventing-jsm.yaml"]="./config/jetstream"
+  ["broker-jsm.yaml"]="./config/broker"
+  ["webhook-jsm.yaml"]="./config/webhook"
 )
 readonly COMPONENTS
 
