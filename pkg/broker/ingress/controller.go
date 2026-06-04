@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
+	nats "github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -58,31 +59,16 @@ type envConfig struct {
 func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	logger := logging.FromContext(ctx)
 
-	// Load environment configuration
-	env := &envConfig{}
-	if err := envconfig.Process("", env); err != nil {
+	env, err := loadEnvConfig()
+	if err != nil {
 		logger.Fatalw("Failed to process environment variables", zap.Error(err))
 	}
 
 	logger.Infow("Starting shared broker ingress", zap.Int("port", env.Port))
 
-	// Load NATS configuration from mounted ConfigMap
-	fsLoader, err := fsloader.Get(ctx)
+	natsConn, err := buildNatsConn(ctx)
 	if err != nil {
-		logger.Fatalw("Failed to get ConfigMap loader from context", zap.Error(err))
-	}
-	cmData, err := fsLoader(constants.SettingsConfigMapMountPath)
-	if err != nil {
-		logger.Fatalw("Failed to load NATS ConfigMap", zap.Error(err))
-	}
-	natsConfig, err := commonnats.LoadEventingNatsConfig(cmData)
-	if err != nil {
-		logger.Fatalw("Failed to parse NATS configuration", zap.Error(err))
-	}
-
-	natsConn, err := commonnats.NewNatsConn(ctx, natsConfig)
-	if err != nil {
-		logger.Fatalw("Failed to create NATS connection", zap.Error(err))
+		logger.Fatalw("Failed to initialize NATS connection", zap.Error(err))
 	}
 
 	// Create JetStream context
@@ -163,6 +149,29 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 
 	logger.Info("Shared ingress controller initialized")
 	return impl
+}
+
+// loadEnvConfig reads environment variables into envConfig.
+func loadEnvConfig() (*envConfig, error) {
+	env := &envConfig{}
+	return env, envconfig.Process("", env)
+}
+
+// buildNatsConn loads NATS configuration from the mounted ConfigMap and creates a connection.
+func buildNatsConn(ctx context.Context) (*nats.Conn, error) {
+	fsLoader, err := fsloader.Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ConfigMap loader from context: %w", err)
+	}
+	cmData, err := fsLoader(constants.SettingsConfigMapMountPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load NATS ConfigMap: %w", err)
+	}
+	natsConfig, err := commonnats.LoadEventingNatsConfig(cmData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse NATS configuration: %w", err)
+	}
+	return commonnats.NewNatsConn(ctx, natsConfig)
 }
 
 // filterContractConfigMap returns true if the object is the contract ConfigMap
