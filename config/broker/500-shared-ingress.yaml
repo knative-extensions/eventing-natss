@@ -42,10 +42,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: NATS_URL
-              value: "nats://nats.nats-io.svc.cluster.local:4222"
             - name: PORT
               value: "8080"
+          volumeMounts:
+            - name: config-nats-broker
+              mountPath: /etc/config-nats-broker
+              readOnly: true
           ports:
             - containerPort: 8080
               name: http
@@ -81,6 +83,10 @@ spec:
                 - ALL
             seccompProfile:
               type: RuntimeDefault
+      volumes:
+        - name: config-nats-broker
+          configMap:
+            name: config-nats-broker
 ---
 apiVersion: v1
 kind: Service

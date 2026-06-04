@@ -36,7 +36,9 @@ import (
 
 	configmapinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/configmap"
 
+	"knative.dev/eventing-natss/pkg/broker/constants"
 	"knative.dev/eventing-natss/pkg/broker/contract"
+	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 	commonnats "knative.dev/eventing-natss/pkg/common/nats"
 )
 
@@ -49,8 +51,7 @@ const (
 )
 
 type envConfig struct {
-	NatsURL string `envconfig:"NATS_URL" required:"true"`
-	Port    int    `envconfig:"PORT" default:"8080"`
+	Port int `envconfig:"PORT" default:"8080"`
 }
 
 // NewController creates a new shared ingress controller
@@ -63,13 +64,23 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		logger.Fatalw("Failed to process environment variables", zap.Error(err))
 	}
 
-	logger.Infow("Starting shared broker ingress",
-		zap.String("nats_url", env.NatsURL),
-		zap.Int("port", env.Port),
-	)
+	logger.Infow("Starting shared broker ingress", zap.Int("port", env.Port))
 
-	// Create NATS connection using URL from environment variable
-	natsConn, err := commonnats.NewNatsConnFromURL(ctx, env.NatsURL)
+	// Load NATS configuration from mounted ConfigMap
+	fsLoader, err := fsloader.Get(ctx)
+	if err != nil {
+		logger.Fatalw("Failed to get ConfigMap loader from context", zap.Error(err))
+	}
+	cmData, err := fsLoader(constants.SettingsConfigMapMountPath)
+	if err != nil {
+		logger.Fatalw("Failed to load NATS ConfigMap", zap.Error(err))
+	}
+	natsConfig, err := commonnats.LoadEventingNatsConfig(cmData)
+	if err != nil {
+		logger.Fatalw("Failed to parse NATS configuration", zap.Error(err))
+	}
+
+	natsConn, err := commonnats.NewNatsConn(ctx, natsConfig)
 	if err != nil {
 		logger.Fatalw("Failed to create NATS connection", zap.Error(err))
 	}
