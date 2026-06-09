@@ -55,6 +55,20 @@ const (
 	// integer; absent or invalid values fall back to DefaultMaxConcurrency (or
 	// the value set via CONSUMER_MAX_CONCURRENCY on the filter deployment).
 	TriggerMaxConcurrencyAnnotation = "natsjetstream.eventing.knative.dev/max-concurrency"
+
+	// TriggerFetchBatchSizeAnnotation is the annotation key on a Trigger that
+	// overrides the number of messages fetched from JetStream in each pull
+	// request. Must be a positive integer; absent or invalid values fall back
+	// to DefaultFetchBatchSize (or CONSUMER_FETCH_BATCH_SIZE on the filter
+	// deployment).
+	TriggerFetchBatchSizeAnnotation = "natsjetstream.eventing.knative.dev/fetch-batch-size"
+
+	// TriggerFetchTimeoutAnnotation is the annotation key on a Trigger that
+	// overrides how long a fetch request waits for messages before returning
+	// empty. Must be a valid Go duration string (e.g. "500ms", "1s"); absent
+	// or invalid values fall back to DefaultFetchTimeout (or
+	// CONSUMER_FETCH_TIMEOUT on the filter deployment).
+	TriggerFetchTimeoutAnnotation = "natsjetstream.eventing.knative.dev/fetch-timeout"
 )
 
 // ConsumerManagerConfig holds configuration for the ConsumerManager
@@ -103,6 +117,8 @@ type TriggerSubscription struct {
 	streamName   string
 	consumerName string
 	ackWait      time.Duration
+	fetchBatchSize int
+	fetchTimeout   time.Duration
 	// sem is a per-trigger counting semaphore. A slot is acquired before
 	// spawning each dispatch goroutine and released when it exits, bounding
 	// the number of concurrent in-flight HTTP calls for this trigger and
@@ -213,9 +229,33 @@ func (m *ConsumerManager) SubscribeTrigger(
 	}
 	ackWait := consumerInfo.Config.AckWait
 
-	// Determine per-trigger concurrency limit.
-	// The trigger annotation takes precedence; falls back to the manager default
-	// which comes from CONSUMER_MAX_CONCURRENCY on the filter deployment.
+	// Resolve per-trigger fetch parameters.
+	// Trigger annotations take precedence; absent or invalid values fall back
+	// to the manager defaults set via env vars on the filter deployment.
+	fetchBatchSize := m.fetchBatchSize
+	if ann := trigger.Annotations[TriggerFetchBatchSizeAnnotation]; ann != "" {
+		if n, err := strconv.Atoi(ann); err == nil && n > 0 {
+			fetchBatchSize = n
+		} else {
+			logger.Warnw("invalid fetch-batch-size annotation, using default",
+				zap.String("annotation", ann),
+				zap.Int("default", fetchBatchSize),
+			)
+		}
+	}
+
+	fetchTimeout := m.fetchTimeout
+	if ann := trigger.Annotations[TriggerFetchTimeoutAnnotation]; ann != "" {
+		if d, err := time.ParseDuration(ann); err == nil && d > 0 {
+			fetchTimeout = d
+		} else {
+			logger.Warnw("invalid fetch-timeout annotation, using default",
+				zap.String("annotation", ann),
+				zap.Duration("default", fetchTimeout),
+			)
+		}
+	}
+
 	maxConcurrency := m.defaultMaxConcurrency
 	if ann := trigger.Annotations[TriggerMaxConcurrencyAnnotation]; ann != "" {
 		if n, err := strconv.Atoi(ann); err == nil && n > 0 {
@@ -258,22 +298,26 @@ func (m *ConsumerManager) SubscribeTrigger(
 
 	// Store the subscription
 	m.subscriptions[triggerUID] = &TriggerSubscription{
-		trigger:      trigger,
-		subscription: sub,
-		handler:      handler,
-		streamName:   streamName,
-		consumerName: consumerName,
-		ackWait:      ackWait,
-		sem:          sem,
-		cancel:       cancel,
+		trigger:        trigger,
+		subscription:   sub,
+		handler:        handler,
+		streamName:     streamName,
+		consumerName:   consumerName,
+		ackWait:        ackWait,
+		fetchBatchSize: fetchBatchSize,
+		fetchTimeout:   fetchTimeout,
+		sem:            sem,
+		cancel:         cancel,
 	}
 
 	logger.Infow("starting fetch loop",
+		zap.Int("fetch_batch_size", fetchBatchSize),
+		zap.Duration("fetch_timeout", fetchTimeout),
 		zap.Int("max_concurrency", maxConcurrency),
 	)
 
 	// Start the message fetch loop
-	go m.fetchLoop(ctx, sub, handler, ackWait, sem, logger)
+	go m.fetchLoop(ctx, sub, handler, ackWait, fetchBatchSize, fetchTimeout, sem, logger)
 
 	logger.Infow("successfully started pull subscription for trigger consumer")
 	return nil
@@ -292,6 +336,8 @@ func (m *ConsumerManager) fetchLoop(
 	sub *nats.Subscription,
 	handler *TriggerHandler,
 	ackWait time.Duration,
+	fetchBatchSize int,
+	fetchTimeout time.Duration,
 	sem chan struct{},
 	logger *zap.SugaredLogger,
 ) {
@@ -305,7 +351,7 @@ func (m *ConsumerManager) fetchLoop(
 			return
 		default:
 			// Fetch a batch of messages
-			msgs, err := sub.Fetch(m.fetchBatchSize, nats.MaxWait(m.fetchTimeout))
+			msgs, err := sub.Fetch(fetchBatchSize, nats.MaxWait(fetchTimeout))
 			if err != nil {
 				if errors.Is(err, nats.ErrTimeout) {
 					continue
