@@ -42,6 +42,11 @@ const (
 	DefaultFetchBatchSize = 10
 	// DefaultFetchTimeout is the default timeout for fetching messages
 	DefaultFetchTimeout = 200 * time.Millisecond
+	// DefaultMaxConcurrency is the default maximum number of messages dispatched concurrently
+	// across all trigger subscriptions in a ConsumerManager. Should be >= FetchBatchSize so a
+	// full batch always has available slots and is never left fetched-but-unprocessed with its
+	// AckWait ticking.
+	DefaultMaxConcurrency = 20
 )
 
 // ConsumerManagerConfig holds configuration for the ConsumerManager
@@ -53,6 +58,14 @@ type ConsumerManagerConfig struct {
 	// FetchTimeout is the timeout for fetching messages.
 	// Defaults to DefaultFetchTimeout if not set.
 	FetchTimeout time.Duration
+
+	// MaxConcurrency is the maximum number of messages that may be dispatched
+	// concurrently across all trigger subscriptions. The fetch loop acquires a
+	// semaphore slot before spawning each dispatch goroutine, so this directly
+	// bounds the number of in-flight HTTP calls and provides backpressure to
+	// the stream when all slots are busy.
+	// Defaults to DefaultMaxConcurrency if not set.
+	MaxConcurrency int
 }
 
 // ConsumerManager manages JetStream consumer subscriptions for triggers
@@ -66,6 +79,12 @@ type ConsumerManager struct {
 	// Configuration
 	fetchBatchSize int
 	fetchTimeout   time.Duration
+
+	// sem is a counting semaphore that limits concurrent in-flight dispatches.
+	// A slot is acquired before spawning each dispatch goroutine and released
+	// when the goroutine exits, providing backpressure to the fetch loop.
+	// nil when the manager is constructed directly (e.g. in tests).
+	sem chan struct{}
 
 	// Event dispatcher
 	dispatcher *kncloudevents.Dispatcher
@@ -82,6 +101,7 @@ type TriggerSubscription struct {
 	handler      *TriggerHandler
 	streamName   string
 	consumerName string
+	ackWait      time.Duration
 	cancel       context.CancelFunc
 }
 
@@ -94,6 +114,7 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 	// Apply defaults
 	fetchBatchSize := DefaultFetchBatchSize
 	fetchTimeout := DefaultFetchTimeout
+	maxConcurrency := DefaultMaxConcurrency
 
 	if config != nil {
 		if config.FetchBatchSize > 0 {
@@ -101,6 +122,9 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 		}
 		if config.FetchTimeout > 0 {
 			fetchTimeout = config.FetchTimeout
+		}
+		if config.MaxConcurrency > 0 {
+			maxConcurrency = config.MaxConcurrency
 		}
 	}
 
@@ -111,6 +135,7 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 		conn:           conn,
 		fetchBatchSize: fetchBatchSize,
 		fetchTimeout:   fetchTimeout,
+		sem:            make(chan struct{}, maxConcurrency),
 		dispatcher:     dispatcher,
 		subscriptions:  make(map[string]*TriggerSubscription),
 	}
@@ -172,7 +197,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	consumerName := brokerutils.TriggerConsumerName(triggerUID)
 
 	// Get consumer info (also verifies consumer exists)
-	_, err = m.js.ConsumerInfo(streamName, consumerName)
+	consumerInfo, err := m.js.ConsumerInfo(streamName, consumerName)
 	if err != nil {
 		handler.Cleanup()
 		if errors.Is(err, nats.ErrConsumerNotFound) {
@@ -180,6 +205,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 		}
 		return fmt.Errorf("failed to get consumer info: %w", err)
 	}
+	ackWait := consumerInfo.Config.AckWait
 
 	// Get the filter subject from the consumer's configuration
 	filterSubject := brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
@@ -214,23 +240,35 @@ func (m *ConsumerManager) SubscribeTrigger(
 		handler:      handler,
 		streamName:   streamName,
 		consumerName: consumerName,
+		ackWait:      ackWait,
 		cancel:       cancel,
 	}
 
 	// Start the message fetch loop
-	go m.fetchLoop(ctx, sub, handler, logger)
+	go m.fetchLoop(ctx, sub, handler, ackWait, logger)
 
 	logger.Infow("successfully started pull subscription for trigger consumer")
 	return nil
 }
 
-// fetchLoop continuously fetches messages from the pull consumer
+// fetchLoop continuously fetches messages from the pull consumer and dispatches
+// them concurrently. Each message gets its own goroutine, but a semaphore slot
+// must be acquired before the goroutine is spawned. This means the loop stalls
+// when all concurrency slots are occupied, providing backpressure back to the
+// JetStream stream (messages remain un-fetched and their AckWait clocks have
+// not started). Each dispatch goroutine wraps its work in a context deadline
+// equal to the consumer's AckWait so that a subscriber that takes longer than
+// AckWait is cancelled before JetStream redelivers the message.
 func (m *ConsumerManager) fetchLoop(
 	ctx context.Context,
 	sub *nats.Subscription,
 	handler *TriggerHandler,
+	ackWait time.Duration,
 	logger *zap.SugaredLogger,
 ) {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -241,7 +279,6 @@ func (m *ConsumerManager) fetchLoop(
 			msgs, err := sub.Fetch(m.fetchBatchSize, nats.MaxWait(m.fetchTimeout))
 			if err != nil {
 				if errors.Is(err, nats.ErrTimeout) {
-					// No messages available, continue polling
 					continue
 				}
 				if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrConsumerDeleted) || errors.Is(err, nats.ErrBadSubscription) {
@@ -252,14 +289,52 @@ func (m *ConsumerManager) fetchLoop(
 					return
 				}
 				logger.Errorw("error fetching messages", zap.Error(err))
-				// Back off on errors
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
 
-			// Process fetched messages
 			for _, msg := range msgs {
-				handler.HandleMessage(msg)
+				msg := msg
+
+				// Acquire a semaphore slot before spawning the goroutine.
+				// When the semaphore is full every slot is occupied by an
+				// in-flight dispatch, so blocking here prevents us from
+				// fetching the next batch until capacity is available.
+				// Messages that have not yet been fetched stay safely in the
+				// stream with their AckWait clocks not yet running.
+				if m.sem != nil {
+					select {
+					case m.sem <- struct{}{}:
+					case <-ctx.Done():
+						return
+					}
+				}
+
+				wg.Add(1)
+				go func() {
+					defer func() {
+						if m.sem != nil {
+							<-m.sem
+						}
+						wg.Done()
+					}()
+
+					// Bound dispatch duration to AckWait so we cancel the
+					// outbound HTTP call before JetStream redelivers the
+					// message. The context deadline starts here (after
+					// acquiring the slot) rather than at fetch time, keeping
+					// it aligned with when we actually begin dispatching.
+					var msgCtx context.Context
+					var cancel context.CancelFunc
+					if ackWait > 0 {
+						msgCtx, cancel = context.WithTimeout(ctx, ackWait)
+					} else {
+						msgCtx, cancel = context.WithCancel(ctx)
+					}
+					defer cancel()
+
+					handler.HandleMessage(msgCtx, msg)
+				}()
 			}
 		}
 	}
