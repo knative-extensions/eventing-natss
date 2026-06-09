@@ -19,11 +19,13 @@ package main
 import (
 	"os"
 
+	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/sharedmain"
 	"knative.dev/pkg/signals"
 
 	"knative.dev/eventing-natss/pkg/broker/ingress"
+	"knative.dev/eventing-natss/pkg/common/configloader/fsloader"
 )
 
 func main() {
@@ -31,6 +33,7 @@ func main() {
 
 	ctx := signals.NewContext()
 	ctx = sharedmain.WithHealthProbesDisabled(ctx)
+	ctx = fsloader.WithLoader(ctx, configmap.Load)
 
 	ns := os.Getenv("NAMESPACE")
 	if ns != "" {
