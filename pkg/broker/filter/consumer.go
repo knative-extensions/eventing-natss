@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -42,11 +43,18 @@ const (
 	DefaultFetchBatchSize = 10
 	// DefaultFetchTimeout is the default timeout for fetching messages
 	DefaultFetchTimeout = 200 * time.Millisecond
-	// DefaultMaxConcurrency is the default maximum number of messages dispatched concurrently
-	// across all trigger subscriptions in a ConsumerManager. Should be >= FetchBatchSize so a
-	// full batch always has available slots and is never left fetched-but-unprocessed with its
-	// AckWait ticking.
+	// DefaultMaxConcurrency is the default per-trigger maximum number of messages
+	// dispatched concurrently. Should be >= FetchBatchSize so a full batch always
+	// has available slots and is never left fetched-but-unprocessed with its
+	// AckWait ticking. Individual triggers can override this via the
+	// TriggerMaxConcurrencyAnnotation annotation.
 	DefaultMaxConcurrency = 20
+
+	// TriggerMaxConcurrencyAnnotation is the annotation key on a Trigger that
+	// overrides the per-trigger dispatch concurrency limit. Must be a positive
+	// integer; absent or invalid values fall back to DefaultMaxConcurrency (or
+	// the value set via CONSUMER_MAX_CONCURRENCY on the filter deployment).
+	TriggerMaxConcurrencyAnnotation = "natsjetstream.eventing.knative.dev/max-concurrency"
 )
 
 // ConsumerManagerConfig holds configuration for the ConsumerManager
@@ -59,11 +67,9 @@ type ConsumerManagerConfig struct {
 	// Defaults to DefaultFetchTimeout if not set.
 	FetchTimeout time.Duration
 
-	// MaxConcurrency is the maximum number of messages that may be dispatched
-	// concurrently across all trigger subscriptions. The fetch loop acquires a
-	// semaphore slot before spawning each dispatch goroutine, so this directly
-	// bounds the number of in-flight HTTP calls and provides backpressure to
-	// the stream when all slots are busy.
+	// MaxConcurrency is the default per-trigger maximum number of messages
+	// dispatched concurrently. Individual triggers can override this via the
+	// TriggerMaxConcurrencyAnnotation annotation.
 	// Defaults to DefaultMaxConcurrency if not set.
 	MaxConcurrency int
 }
@@ -77,14 +83,9 @@ type ConsumerManager struct {
 	conn *nats.Conn
 
 	// Configuration
-	fetchBatchSize int
-	fetchTimeout   time.Duration
-
-	// sem is a counting semaphore that limits concurrent in-flight dispatches.
-	// A slot is acquired before spawning each dispatch goroutine and released
-	// when the goroutine exits, providing backpressure to the fetch loop.
-	// nil when the manager is constructed directly (e.g. in tests).
-	sem chan struct{}
+	fetchBatchSize        int
+	fetchTimeout          time.Duration
+	defaultMaxConcurrency int
 
 	// Event dispatcher
 	dispatcher *kncloudevents.Dispatcher
@@ -102,7 +103,12 @@ type TriggerSubscription struct {
 	streamName   string
 	consumerName string
 	ackWait      time.Duration
-	cancel       context.CancelFunc
+	// sem is a per-trigger counting semaphore. A slot is acquired before
+	// spawning each dispatch goroutine and released when it exits, bounding
+	// the number of concurrent in-flight HTTP calls for this trigger and
+	// providing backpressure to its fetch loop.
+	sem    chan struct{}
+	cancel context.CancelFunc
 }
 
 // NewConsumerManager creates a new consumer manager
@@ -129,15 +135,15 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 	}
 
 	return &ConsumerManager{
-		logger:         logging.FromContext(ctx),
-		ctx:            ctx,
-		js:             js,
-		conn:           conn,
-		fetchBatchSize: fetchBatchSize,
-		fetchTimeout:   fetchTimeout,
-		sem:            make(chan struct{}, maxConcurrency),
-		dispatcher:     dispatcher,
-		subscriptions:  make(map[string]*TriggerSubscription),
+		logger:                logging.FromContext(ctx),
+		ctx:                   ctx,
+		js:                    js,
+		conn:                  conn,
+		fetchBatchSize:        fetchBatchSize,
+		fetchTimeout:          fetchTimeout,
+		defaultMaxConcurrency: maxConcurrency,
+		dispatcher:            dispatcher,
+		subscriptions:         make(map[string]*TriggerSubscription),
 	}
 }
 
@@ -207,6 +213,23 @@ func (m *ConsumerManager) SubscribeTrigger(
 	}
 	ackWait := consumerInfo.Config.AckWait
 
+	// Determine per-trigger concurrency limit.
+	// The trigger annotation takes precedence; falls back to the manager default
+	// which comes from CONSUMER_MAX_CONCURRENCY on the filter deployment.
+	maxConcurrency := m.defaultMaxConcurrency
+	if ann := trigger.Annotations[TriggerMaxConcurrencyAnnotation]; ann != "" {
+		if n, err := strconv.Atoi(ann); err == nil && n > 0 {
+			maxConcurrency = n
+		} else {
+			logger.Warnw("invalid max-concurrency annotation, using default",
+				zap.String("annotation", ann),
+				zap.Int("default", maxConcurrency),
+			)
+		}
+	}
+
+	sem := make(chan struct{}, maxConcurrency)
+
 	// Get the filter subject from the consumer's configuration
 	filterSubject := brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
 
@@ -241,11 +264,16 @@ func (m *ConsumerManager) SubscribeTrigger(
 		streamName:   streamName,
 		consumerName: consumerName,
 		ackWait:      ackWait,
+		sem:          sem,
 		cancel:       cancel,
 	}
 
+	logger.Infow("starting fetch loop",
+		zap.Int("max_concurrency", maxConcurrency),
+	)
+
 	// Start the message fetch loop
-	go m.fetchLoop(ctx, sub, handler, ackWait, logger)
+	go m.fetchLoop(ctx, sub, handler, ackWait, sem, logger)
 
 	logger.Infow("successfully started pull subscription for trigger consumer")
 	return nil
@@ -264,6 +292,7 @@ func (m *ConsumerManager) fetchLoop(
 	sub *nats.Subscription,
 	handler *TriggerHandler,
 	ackWait time.Duration,
+	sem chan struct{},
 	logger *zap.SugaredLogger,
 ) {
 	var wg sync.WaitGroup
@@ -296,15 +325,15 @@ func (m *ConsumerManager) fetchLoop(
 			for _, msg := range msgs {
 				msg := msg
 
-				// Acquire a semaphore slot before spawning the goroutine.
-				// When the semaphore is full every slot is occupied by an
-				// in-flight dispatch, so blocking here prevents us from
-				// fetching the next batch until capacity is available.
+				// Acquire a per-trigger semaphore slot before spawning the
+				// goroutine. When the semaphore is full every slot is occupied
+				// by an in-flight dispatch for this trigger, so blocking here
+				// prevents fetching the next batch until capacity is available.
 				// Messages that have not yet been fetched stay safely in the
 				// stream with their AckWait clocks not yet running.
-				if m.sem != nil {
+				if sem != nil {
 					select {
-					case m.sem <- struct{}{}:
+					case sem <- struct{}{}:
 					case <-ctx.Done():
 						return
 					}
@@ -313,8 +342,8 @@ func (m *ConsumerManager) fetchLoop(
 				wg.Add(1)
 				go func() {
 					defer func() {
-						if m.sem != nil {
-							<-m.sem
+						if sem != nil {
+							<-sem
 						}
 						wg.Done()
 					}()
