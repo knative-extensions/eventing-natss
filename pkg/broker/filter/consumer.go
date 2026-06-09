@@ -111,12 +111,12 @@ type ConsumerManager struct {
 
 // TriggerSubscription holds the subscription and handler for a trigger
 type TriggerSubscription struct {
-	trigger      *eventingv1.Trigger
-	subscription *nats.Subscription
-	handler      *TriggerHandler
-	streamName   string
-	consumerName string
-	ackWait      time.Duration
+	trigger        *eventingv1.Trigger
+	subscription   *nats.Subscription
+	handler        *TriggerHandler
+	streamName     string
+	consumerName   string
+	ackWait        time.Duration
 	fetchBatchSize int
 	fetchTimeout   time.Duration
 	// sem is a per-trigger counting semaphore. A slot is acquired before
