@@ -243,7 +243,7 @@ Slow triggers affect only their own semaphore — they cannot starve or delay ot
 | Slow Subscriber | 5–10 | 200ms | 2–5 | Rate-limited or expensive downstream |
 | Balanced (default) | 10 | 200ms | 20 | General purpose |
 
-`max-concurrency` should be ≥ `fetch-batch-size` so that a freshly-fetched batch always has available semaphore slots. If `max-concurrency` < `fetch-batch-size`, the later messages in a batch will sit fetched-but-unprocessed with their AckWait clocks ticking, potentially triggering early redeliveries.
+The fetch loop caps each pull request to the number of free semaphore slots, so a batch is never larger than the available dispatch capacity. This means `max-concurrency` and `fetch-batch-size` can be tuned independently — there is no requirement for one to be larger than the other.
 
 ## Architecture
 
@@ -301,7 +301,7 @@ After all retries are exhausted, if a dead letter sink is configured, the event 
 
 ### Duplicate message delivery
 
-If consumers are receiving the same event more than once, the most common cause is that `max-concurrency` is set lower than `fetch-batch-size`, causing later messages in a batch to hit their AckWait deadline before being dispatched. Ensure `max-concurrency` ≥ `fetch-batch-size`, or increase `trigger.spec.delivery.timeout`.
+If consumers are receiving the same event more than once, the most likely cause is that the subscriber is taking longer than `trigger.spec.delivery.timeout` (the consumer's AckWait) to respond. JetStream redelivers the message once AckWait expires. Increase the timeout or reduce subscriber latency.
 
 ### Events going to dead letter sink
 

@@ -324,13 +324,14 @@ func (m *ConsumerManager) SubscribeTrigger(
 }
 
 // fetchLoop continuously fetches messages from the pull consumer and dispatches
-// them concurrently. Each message gets its own goroutine, but a semaphore slot
-// must be acquired before the goroutine is spawned. This means the loop stalls
-// when all concurrency slots are occupied, providing backpressure back to the
-// JetStream stream (messages remain un-fetched and their AckWait clocks have
-// not started). Each dispatch goroutine wraps its work in a context deadline
-// equal to the consumer's AckWait so that a subscriber that takes longer than
-// AckWait is cancelled before JetStream redelivers the message.
+// them concurrently. Before each fetch it checks how many semaphore slots are
+// free and requests at most that many messages. This guarantees every fetched
+// message acquires its slot within microseconds — no message sits fetched-but-
+// unprocessed with JetStream's AckWait clock already running. When all slots
+// are occupied the loop waits one fetchTimeout before re-checking, leaving
+// messages safely in the stream. Each dispatch goroutine carries a context
+// deadline equal to the consumer's AckWait so that the outbound HTTP call is
+// cancelled before JetStream redelivers the message.
 func (m *ConsumerManager) fetchLoop(
 	ctx context.Context,
 	sub *nats.Subscription,
@@ -350,67 +351,85 @@ func (m *ConsumerManager) fetchLoop(
 			logger.Debugw("fetch loop stopped")
 			return
 		default:
-			// Fetch a batch of messages
-			msgs, err := sub.Fetch(fetchBatchSize, nats.MaxWait(fetchTimeout))
-			if err != nil {
-				if errors.Is(err, nats.ErrTimeout) {
-					continue
-				}
-				if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrConsumerDeleted) || errors.Is(err, nats.ErrBadSubscription) {
-					logger.Warnw("subscription closed, stopping fetch loop", zap.Error(err))
+		}
+
+		// Determine how many messages to request this round.
+		// When a semaphore is configured, cap the request to the number of
+		// free slots so every returned message can acquire its slot
+		// immediately — keeping our AckWait context aligned with JetStream's
+		// delivery clock. fetchLoop is the only goroutine that acquires slots,
+		// so cap(sem)-len(sem) is a stable lower bound: in-flight goroutines
+		// can only release slots between here and the acquire, never consume
+		// new ones.
+		batchSize := fetchBatchSize
+		if sem != nil {
+			available := cap(sem) - len(sem)
+			if available == 0 {
+				// All slots occupied. Wait one fetch interval so messages
+				// remain in the stream, then re-check.
+				select {
+				case <-time.After(fetchTimeout):
+				case <-ctx.Done():
 					return
 				}
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-				logger.Errorw("error fetching messages", zap.Error(err))
-				time.Sleep(200 * time.Millisecond)
 				continue
 			}
-
-			for _, msg := range msgs {
-				msg := msg
-
-				// Acquire a per-trigger semaphore slot before spawning the
-				// goroutine. When the semaphore is full every slot is occupied
-				// by an in-flight dispatch for this trigger, so blocking here
-				// prevents fetching the next batch until capacity is available.
-				// Messages that have not yet been fetched stay safely in the
-				// stream with their AckWait clocks not yet running.
-				if sem != nil {
-					select {
-					case sem <- struct{}{}:
-					case <-ctx.Done():
-						return
-					}
-				}
-
-				wg.Add(1)
-				go func() {
-					defer func() {
-						if sem != nil {
-							<-sem
-						}
-						wg.Done()
-					}()
-
-					// Bound dispatch duration to AckWait so we cancel the
-					// outbound HTTP call before JetStream redelivers the
-					// message. The context deadline starts here (after
-					// acquiring the slot) rather than at fetch time, keeping
-					// it aligned with when we actually begin dispatching.
-					var msgCtx context.Context
-					var cancel context.CancelFunc
-					if ackWait > 0 {
-						msgCtx, cancel = context.WithTimeout(ctx, ackWait)
-					} else {
-						msgCtx, cancel = context.WithCancel(ctx)
-					}
-					defer cancel()
-
-					handler.HandleMessage(msgCtx, msg)
-				}()
+			if available < batchSize {
+				batchSize = available
 			}
+		}
+
+		msgs, err := sub.Fetch(batchSize, nats.MaxWait(fetchTimeout))
+		if err != nil {
+			if errors.Is(err, nats.ErrTimeout) {
+				continue
+			}
+			if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrConsumerDeleted) || errors.Is(err, nats.ErrBadSubscription) {
+				logger.Warnw("subscription closed, stopping fetch loop", zap.Error(err))
+				return
+			}
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			logger.Errorw("error fetching messages", zap.Error(err))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		for _, msg := range msgs {
+			msg := msg
+
+			// Acquire a semaphore slot. Because batchSize was capped to the
+			// number of free slots above, this send is non-blocking in the
+			// steady state. The ctx.Done case handles clean shutdown.
+			if sem != nil {
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+			}
+
+			wg.Add(1)
+			go func() {
+				defer func() {
+					if sem != nil {
+						<-sem
+					}
+					wg.Done()
+				}()
+
+				var msgCtx context.Context
+				var cancel context.CancelFunc
+				if ackWait > 0 {
+					msgCtx, cancel = context.WithTimeout(ctx, ackWait)
+				} else {
+					msgCtx, cancel = context.WithCancel(ctx)
+				}
+				defer cancel()
+
+				handler.HandleMessage(msgCtx, msg)
+			}()
 		}
 	}
 }
