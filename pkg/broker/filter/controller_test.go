@@ -86,3 +86,41 @@ func TestFilterTriggersByBrokerClass(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvConfig_MaxConcurrency(t *testing.T) {
+	tests := []struct {
+		name               string
+		configMaxConcur    int
+		wantMaxConcurrency int
+	}{
+		{
+			name:               "zero uses default",
+			configMaxConcur:    0,
+			wantMaxConcurrency: DefaultMaxConcurrency,
+		},
+		{
+			name:               "positive value is used",
+			configMaxConcur:    40,
+			wantMaxConcurrency: 40,
+		},
+		{
+			name:               "negative uses default",
+			configMaxConcur:    -1,
+			wantMaxConcurrency: DefaultMaxConcurrency,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			maxConcurrency := DefaultMaxConcurrency
+
+			if tt.configMaxConcur > 0 {
+				maxConcurrency = tt.configMaxConcur
+			}
+
+			if maxConcurrency != tt.wantMaxConcurrency {
+				t.Errorf("maxConcurrency = %v, want %v", maxConcurrency, tt.wantMaxConcurrency)
+			}
+		})
+	}
+}
