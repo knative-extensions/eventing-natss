@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
 	"knative.dev/pkg/logging"
 )
 
@@ -191,5 +192,291 @@ func TestUnsubscribeTrigger_NotFound(t *testing.T) {
 	err := cm.UnsubscribeTrigger("non-existent-uid")
 	if err != nil {
 		t.Errorf("UnsubscribeTrigger() unexpected error for non-existent UID: %v", err)
+	}
+}
+
+func TestDefaultMaxConcurrency(t *testing.T) {
+	if DefaultMaxConcurrency != 20 {
+		t.Errorf("DefaultMaxConcurrency = %v, want 20", DefaultMaxConcurrency)
+	}
+}
+
+func TestAnnotationConstants(t *testing.T) {
+	tests := []struct {
+		name  string
+		got   string
+		want  string
+	}{
+		{
+			name: "TriggerMaxConcurrencyAnnotation",
+			got:  TriggerMaxConcurrencyAnnotation,
+			want: "natsjetstream.eventing.knative.dev/max-concurrency",
+		},
+		{
+			name: "TriggerFetchBatchSizeAnnotation",
+			got:  TriggerFetchBatchSizeAnnotation,
+			want: "natsjetstream.eventing.knative.dev/fetch-batch-size",
+		},
+		{
+			name: "TriggerFetchTimeoutAnnotation",
+			got:  TriggerFetchTimeoutAnnotation,
+			want: "natsjetstream.eventing.knative.dev/fetch-timeout",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("%s = %q, want %q", tt.name, tt.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConsumerManagerConfig_MaxConcurrency(t *testing.T) {
+	tests := []struct {
+		name               string
+		config             *ConsumerManagerConfig
+		wantMaxConcurrency int
+	}{
+		{
+			name:               "nil config uses default",
+			config:             nil,
+			wantMaxConcurrency: DefaultMaxConcurrency,
+		},
+		{
+			name:               "zero MaxConcurrency uses default",
+			config:             &ConsumerManagerConfig{MaxConcurrency: 0},
+			wantMaxConcurrency: DefaultMaxConcurrency,
+		},
+		{
+			name:               "positive MaxConcurrency is used",
+			config:             &ConsumerManagerConfig{MaxConcurrency: 50},
+			wantMaxConcurrency: 50,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			maxConcurrency := DefaultMaxConcurrency
+
+			if tt.config != nil {
+				if tt.config.MaxConcurrency > 0 {
+					maxConcurrency = tt.config.MaxConcurrency
+				}
+			}
+
+			if maxConcurrency != tt.wantMaxConcurrency {
+				t.Errorf("maxConcurrency = %v, want %v", maxConcurrency, tt.wantMaxConcurrency)
+			}
+		})
+	}
+}
+
+func TestParseTriggerAnnotationInt(t *testing.T) {
+	logger := zap.NewNop().Sugar()
+
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		key         string
+		defaultVal  int
+		want        int
+	}{
+		{
+			name:        "absent key returns default",
+			annotations: map[string]string{},
+			key:         "some-key",
+			defaultVal:  10,
+			want:        10,
+		},
+		{
+			name:        "empty string returns default",
+			annotations: map[string]string{"some-key": ""},
+			key:         "some-key",
+			defaultVal:  10,
+			want:        10,
+		},
+		{
+			name:        "valid positive int is parsed",
+			annotations: map[string]string{"some-key": "42"},
+			key:         "some-key",
+			defaultVal:  10,
+			want:        42,
+		},
+		{
+			name:        "zero returns default",
+			annotations: map[string]string{"some-key": "0"},
+			key:         "some-key",
+			defaultVal:  10,
+			want:        10,
+		},
+		{
+			name:        "negative returns default",
+			annotations: map[string]string{"some-key": "-5"},
+			key:         "some-key",
+			defaultVal:  10,
+			want:        10,
+		},
+		{
+			name:        "non-numeric returns default",
+			annotations: map[string]string{"some-key": "abc"},
+			key:         "some-key",
+			defaultVal:  10,
+			want:        10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseTriggerAnnotationInt(tt.annotations, tt.key, tt.defaultVal, logger)
+			if got != tt.want {
+				t.Errorf("parseTriggerAnnotationInt() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseTriggerAnnotationDuration(t *testing.T) {
+	logger := zap.NewNop().Sugar()
+
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		key         string
+		defaultVal  time.Duration
+		want        time.Duration
+	}{
+		{
+			name:        "absent key returns default",
+			annotations: map[string]string{},
+			key:         "some-key",
+			defaultVal:  200 * time.Millisecond,
+			want:        200 * time.Millisecond,
+		},
+		{
+			name:        "empty string returns default",
+			annotations: map[string]string{"some-key": ""},
+			key:         "some-key",
+			defaultVal:  200 * time.Millisecond,
+			want:        200 * time.Millisecond,
+		},
+		{
+			name:        "valid duration is parsed",
+			annotations: map[string]string{"some-key": "500ms"},
+			key:         "some-key",
+			defaultVal:  200 * time.Millisecond,
+			want:        500 * time.Millisecond,
+		},
+		{
+			name:        "zero duration returns default",
+			annotations: map[string]string{"some-key": "0s"},
+			key:         "some-key",
+			defaultVal:  200 * time.Millisecond,
+			want:        200 * time.Millisecond,
+		},
+		{
+			name:        "negative duration returns default",
+			annotations: map[string]string{"some-key": "-1s"},
+			key:         "some-key",
+			defaultVal:  200 * time.Millisecond,
+			want:        200 * time.Millisecond,
+		},
+		{
+			name:        "non-duration string returns default",
+			annotations: map[string]string{"some-key": "abc"},
+			key:         "some-key",
+			defaultVal:  200 * time.Millisecond,
+			want:        200 * time.Millisecond,
+		},
+		{
+			name:        "nil annotations map returns default without panic",
+			annotations: nil,
+			key:         "some-key",
+			defaultVal:  200 * time.Millisecond,
+			want:        200 * time.Millisecond,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseTriggerAnnotationDuration(tt.annotations, tt.key, tt.defaultVal, logger)
+			if got != tt.want {
+				t.Errorf("parseTriggerAnnotationDuration() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDynamicBatchSizeCapping(t *testing.T) {
+	tests := []struct {
+		name           string
+		capacity       int
+		occupied       int
+		fetchBatchSize int
+		wantBatchSize  int
+	}{
+		{
+			name:           "all free and batchSize fits within capacity",
+			capacity:       20,
+			occupied:       0,
+			fetchBatchSize: 10,
+			wantBatchSize:  10,
+		},
+		{
+			name:           "all free but batchSize exceeds capacity",
+			capacity:       5,
+			occupied:       0,
+			fetchBatchSize: 10,
+			wantBatchSize:  5,
+		},
+		{
+			name:           "partially occupied and batchSize fits within available",
+			capacity:       20,
+			occupied:       5,
+			fetchBatchSize: 10,
+			wantBatchSize:  10,
+		},
+		{
+			name:           "partially occupied and batchSize exceeds available",
+			capacity:       20,
+			occupied:       15,
+			fetchBatchSize: 10,
+			wantBatchSize:  5,
+		},
+		{
+			name:           "one slot free",
+			capacity:       20,
+			occupied:       19,
+			fetchBatchSize: 10,
+			wantBatchSize:  1,
+		},
+		{
+			name:           "all occupied returns zero",
+			capacity:       20,
+			occupied:       20,
+			fetchBatchSize: 10,
+			wantBatchSize:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sem := make(chan struct{}, tt.capacity)
+			for i := 0; i < tt.occupied; i++ {
+				sem <- struct{}{}
+			}
+
+			available := cap(sem) - len(sem)
+			batchSize := tt.fetchBatchSize
+			if available < batchSize {
+				batchSize = available
+			}
+
+			if batchSize != tt.wantBatchSize {
+				t.Errorf("batchSize = %v, want %v (available=%v, fetchBatchSize=%v)",
+					batchSize, tt.wantBatchSize, available, tt.fetchBatchSize)
+			}
+		})
 	}
 }

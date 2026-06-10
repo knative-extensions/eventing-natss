@@ -163,6 +163,44 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 	}
 }
 
+// parseTriggerAnnotationInt reads key from annotations as a positive int,
+// returning defaultVal (with a warning log) when absent, non-numeric, or <= 0.
+func parseTriggerAnnotationInt(annotations map[string]string, key string, defaultVal int, logger *zap.SugaredLogger) int {
+	ann := annotations[key]
+	if ann == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(ann)
+	if err != nil || n <= 0 {
+		logger.Warnw("invalid annotation value, using default",
+			zap.String("key", key),
+			zap.String("annotation", ann),
+			zap.Int("default", defaultVal),
+		)
+		return defaultVal
+	}
+	return n
+}
+
+// parseTriggerAnnotationDuration reads key from annotations as a positive
+// duration, returning defaultVal (with a warning log) when absent, unparseable, or <= 0.
+func parseTriggerAnnotationDuration(annotations map[string]string, key string, defaultVal time.Duration, logger *zap.SugaredLogger) time.Duration {
+	ann := annotations[key]
+	if ann == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(ann)
+	if err != nil || d <= 0 {
+		logger.Warnw("invalid annotation value, using default",
+			zap.String("key", key),
+			zap.String("annotation", ann),
+			zap.Duration("default", defaultVal),
+		)
+		return defaultVal
+	}
+	return d
+}
+
 // SubscribeTrigger creates a pull-based subscription for a trigger's consumer
 func (m *ConsumerManager) SubscribeTrigger(
 	trigger *eventingv1.Trigger,
@@ -232,41 +270,9 @@ func (m *ConsumerManager) SubscribeTrigger(
 	// Resolve per-trigger fetch parameters.
 	// Trigger annotations take precedence; absent or invalid values fall back
 	// to the manager defaults set via env vars on the filter deployment.
-	fetchBatchSize := m.fetchBatchSize
-	if ann := trigger.Annotations[TriggerFetchBatchSizeAnnotation]; ann != "" {
-		if n, err := strconv.Atoi(ann); err == nil && n > 0 {
-			fetchBatchSize = n
-		} else {
-			logger.Warnw("invalid fetch-batch-size annotation, using default",
-				zap.String("annotation", ann),
-				zap.Int("default", fetchBatchSize),
-			)
-		}
-	}
-
-	fetchTimeout := m.fetchTimeout
-	if ann := trigger.Annotations[TriggerFetchTimeoutAnnotation]; ann != "" {
-		if d, err := time.ParseDuration(ann); err == nil && d > 0 {
-			fetchTimeout = d
-		} else {
-			logger.Warnw("invalid fetch-timeout annotation, using default",
-				zap.String("annotation", ann),
-				zap.Duration("default", fetchTimeout),
-			)
-		}
-	}
-
-	maxConcurrency := m.defaultMaxConcurrency
-	if ann := trigger.Annotations[TriggerMaxConcurrencyAnnotation]; ann != "" {
-		if n, err := strconv.Atoi(ann); err == nil && n > 0 {
-			maxConcurrency = n
-		} else {
-			logger.Warnw("invalid max-concurrency annotation, using default",
-				zap.String("annotation", ann),
-				zap.Int("default", maxConcurrency),
-			)
-		}
-	}
+	fetchBatchSize := parseTriggerAnnotationInt(trigger.Annotations, TriggerFetchBatchSizeAnnotation, m.fetchBatchSize, logger)
+	fetchTimeout := parseTriggerAnnotationDuration(trigger.Annotations, TriggerFetchTimeoutAnnotation, m.fetchTimeout, logger)
+	maxConcurrency := parseTriggerAnnotationInt(trigger.Annotations, TriggerMaxConcurrencyAnnotation, m.defaultMaxConcurrency, logger)
 
 	sem := make(chan struct{}, maxConcurrency)
 
