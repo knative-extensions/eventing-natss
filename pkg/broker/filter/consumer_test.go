@@ -203,9 +203,9 @@ func TestDefaultMaxConcurrency(t *testing.T) {
 
 func TestAnnotationConstants(t *testing.T) {
 	tests := []struct {
-		name  string
-		got   string
-		want  string
+		name string
+		got  string
+		want string
 	}{
 		{
 			name: "TriggerMaxConcurrencyAnnotation",
