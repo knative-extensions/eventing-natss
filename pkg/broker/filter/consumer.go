@@ -136,9 +136,15 @@ type TriggerSubscription struct {
 	// cancel stops the current fetch loop only. A new fetch loop with new
 	// parameters can be started after done closes.
 	cancel context.CancelFunc
-	// done is closed by the current fetch loop as soon as it returns, before
-	// it waits for its spawned dispatches to drain.
+	// done is closed by the current fetch loop as soon as it returns.
+	// Restart waits on this before starting a new fetch loop on the same
+	// pull subscription.
 	done chan struct{}
+	// inflight tracks every dispatch goroutine spawned by any fetch loop
+	// for this subscription. unsubscribeLocked waits on it so the NATS
+	// subscription and trigger handler are not torn down while a dispatch
+	// goroutine is still using them (msg.Ack, h.filter.Filter, etc.).
+	inflight sync.WaitGroup
 }
 
 // NewConsumerManager creates a new consumer manager
@@ -289,7 +295,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 		existing.cancel = fetchCancel
 		existing.done = newDone
 
-		go m.fetchLoop(fetchCtx, existing.dispatchCtx, newDone, existing.subscription, existing.handler, existing.ackWait, newBatch, newTimeout, newSem, logger)
+		go m.fetchLoop(fetchCtx, existing.dispatchCtx, newDone, &existing.inflight, existing.subscription, existing.handler, existing.ackWait, newBatch, newTimeout, newSem, logger)
 		return nil
 	}
 
@@ -362,7 +368,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	done := make(chan struct{})
 
 	// Store the subscription
-	m.subscriptions[triggerUID] = &TriggerSubscription{
+	ts := &TriggerSubscription{
 		trigger:        trigger,
 		subscription:   sub,
 		handler:        handler,
@@ -378,6 +384,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 		cancel:         fetchCancel,
 		done:           done,
 	}
+	m.subscriptions[triggerUID] = ts
 
 	logger.Infow("starting fetch loop",
 		zap.Int("fetch_batch_size", fetchBatchSize),
@@ -386,7 +393,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 	)
 
 	// Start the message fetch loop
-	go m.fetchLoop(fetchCtx, dispatchCtx, done, sub, handler, ackWait, fetchBatchSize, fetchTimeout, sem, logger)
+	go m.fetchLoop(fetchCtx, dispatchCtx, done, &ts.inflight, sub, handler, ackWait, fetchBatchSize, fetchTimeout, sem, logger)
 
 	logger.Infow("successfully started pull subscription for trigger consumer")
 	return nil
@@ -408,13 +415,17 @@ func (m *ConsumerManager) SubscribeTrigger(
 //   - dispatchCtx parents each in-flight msgCtx. It survives a fetch-loop
 //     restart so a parameter change does not abort in-progress dispatches.
 //
-// done is closed before draining spawned dispatches, so a new fetch loop can
-// start as soon as the old one stops calling Fetch — without waiting for in-
-// flight HTTP calls to finish.
+// Spawned dispatches are tracked on the subscription-scoped inflight
+// WaitGroup, not a local one. unsubscribeLocked waits on it to drain in-flight
+// dispatches (across any fetch-loop generation) before tearing down the NATS
+// subscription and trigger handler. The fetch loop itself does not wait on
+// dispatches — it closes done and returns as soon as it stops calling Fetch,
+// so a restart can start a new fetch loop without delay.
 func (m *ConsumerManager) fetchLoop(
 	ctx context.Context,
 	dispatchCtx context.Context,
 	done chan struct{},
+	inflight *sync.WaitGroup,
 	sub *nats.Subscription,
 	handler *TriggerHandler,
 	ackWait time.Duration,
@@ -423,11 +434,6 @@ func (m *ConsumerManager) fetchLoop(
 	sem chan struct{},
 	logger *zap.SugaredLogger,
 ) {
-	var wg sync.WaitGroup
-	// LIFO: close(done) runs first when this function returns, then wg.Wait
-	// drains spawned dispatches. The new fetch loop may start as soon as
-	// done closes; this goroutine lives on until its in-flight finish.
-	defer wg.Wait()
 	defer close(done)
 
 	for {
@@ -495,13 +501,13 @@ func (m *ConsumerManager) fetchLoop(
 				}
 			}
 
-			wg.Add(1)
+			inflight.Add(1)
 			go func() {
 				defer func() {
 					if sem != nil {
 						<-sem
 					}
-					wg.Done()
+					inflight.Done()
 				}()
 
 				var msgCtx context.Context
@@ -550,6 +556,14 @@ func (m *ConsumerManager) unsubscribeLocked(triggerUID string) error {
 	if sub.dispatchCancel != nil {
 		sub.dispatchCancel()
 	}
+
+	// Wait for every dispatch goroutine — across any fetch-loop generation —
+	// to exit before tearing down the NATS subscription and trigger handler.
+	// Without this wait, in-flight goroutines could race with Unsubscribe
+	// (msg.Ack on a closed subscription) and with handler.Cleanup (concurrent
+	// h.filter.Filter vs h.filter.Cleanup). Bounded by ackWait via msgCtx;
+	// resolves in milliseconds when the HTTP client respects ctx cancellation.
+	sub.inflight.Wait()
 
 	// Unsubscribe from the pull consumer
 	if err := sub.subscription.Unsubscribe(); err != nil {

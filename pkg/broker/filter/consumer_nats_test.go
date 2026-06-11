@@ -841,6 +841,96 @@ func TestSubscribeTrigger_RestartTriggers(t *testing.T) {
 	}
 }
 
+// TestUnsubscribeTrigger_WaitsForInflightDispatches verifies that
+// UnsubscribeTrigger does not return until every dispatch goroutine spawned
+// by the fetch loop has exited. Without this guarantee, in-flight goroutines
+// could race with sub.Unsubscribe (msg.Ack on a closed subscription) and with
+// handler.Cleanup (concurrent h.filter.Filter vs h.filter.Cleanup).
+func TestUnsubscribeTrigger_WaitsForInflightDispatches(t *testing.T) {
+	s := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, s)
+	conn, js := natsTesting.JsClient(t, s)
+	defer conn.Close()
+
+	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+
+	namespace := "default"
+	brokerName := "drain-broker"
+	triggerUID := "drain-trigger-uid-001"
+
+	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
+
+	// HTTP server that signals when a request arrives, then blocks until the
+	// client's request context is cancelled. dispatchCancel (fired from
+	// UnsubscribeTrigger) propagates through msgCtx, which cancels the
+	// dispatcher's HTTP client, which closes the connection — the server's
+	// r.Context() observes Done and the handler returns.
+	received := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+		case <-time.After(10 * time.Second):
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+		FetchBatchSize: 2,
+		FetchTimeout:   100 * time.Millisecond,
+		MaxConcurrency: 5,
+	})
+
+	broker := makeTestBrokerForNats(namespace, brokerName)
+	trigger := makeTriggerWithUID(namespace, "drain-trigger", brokerName, triggerUID)
+
+	subscriberURL, _ := apis.ParseURL(srv.URL)
+	subscriber := duckv1.Addressable{URL: subscriberURL}
+
+	if err := cm.SubscribeTrigger(trigger, broker, subscriber, nil, nil, nil, nil); err != nil {
+		t.Fatalf("SubscribeTrigger: %v", err)
+	}
+
+	// Capture sub before unsubscribe so we can inspect its inflight WG after.
+	cm.mu.RLock()
+	sub := cm.subscriptions[triggerUID]
+	cm.mu.RUnlock()
+
+	publishSubject := brokerutils.BrokerPublishSubjectName(namespace, brokerName)
+	publishStructuredCE(t, js, publishSubject, "drain-event-id")
+
+	// Wait for a dispatch goroutine to actually be in flight.
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatch never reached the subscriber")
+	}
+
+	// Unsubscribe; this should block until every inflight dispatch goroutine
+	// has exited, then tear down the NATS subscription and handler.
+	if err := cm.UnsubscribeTrigger(triggerUID); err != nil {
+		t.Fatalf("UnsubscribeTrigger: %v", err)
+	}
+
+	// Post-condition: sub.inflight must be fully drained. A fresh Wait must
+	// return effectively immediately. If unsubscribe failed to wait, this Wait
+	// would still block until the dispatch goroutine finally finishes.
+	done := make(chan struct{})
+	go func() {
+		sub.inflight.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Error("sub.inflight was not drained when UnsubscribeTrigger returned")
+	}
+}
+
 // TestSubscribeTrigger_UpdateInPlace verifies that re-subscribing an existing trigger
 // updates the handler in place without creating a new subscription.
 func TestSubscribeTrigger_UpdateInPlace(t *testing.T) {
