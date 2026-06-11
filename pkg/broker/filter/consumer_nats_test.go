@@ -517,6 +517,330 @@ func TestFetchLoop_DynamicBatchSize(t *testing.T) {
 	}
 }
 
+// TestSubscribeTrigger_RestartOnAnnotationChange verifies that changing any of
+// the three fetch-related annotations causes the fetch loop to restart with
+// the new parameters, while the dispatch context (and any in-flight HTTP calls
+// it parents) survives.
+func TestSubscribeTrigger_RestartOnAnnotationChange(t *testing.T) {
+	s := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, s)
+	conn, js := natsTesting.JsClient(t, s)
+	defer conn.Close()
+
+	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+
+	namespace := "default"
+	brokerName := "restart-broker"
+	triggerUID := "restart-trigger-uid-001"
+
+	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
+
+	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+		FetchBatchSize: 5,
+		FetchTimeout:   100 * time.Millisecond,
+		MaxConcurrency: 4,
+	})
+	defer cm.Close() //nolint:errcheck
+
+	broker := makeTestBrokerForNats(namespace, brokerName)
+	trigger := makeTriggerWithUID(namespace, "restart-trigger", brokerName, triggerUID)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	subscriberURL, _ := apis.ParseURL(srv.URL)
+	subscriber := duckv1.Addressable{URL: subscriberURL}
+
+	if err := cm.SubscribeTrigger(trigger, broker, subscriber, nil, nil, nil, nil); err != nil {
+		t.Fatalf("SubscribeTrigger (first): %v", err)
+	}
+
+	cm.mu.RLock()
+	first := cm.subscriptions[triggerUID]
+	firstSem := first.sem
+	firstDone := first.done
+	firstDispatchCtx := first.dispatchCtx
+	cm.mu.RUnlock()
+
+	if got, want := cap(firstSem), 4; got != want {
+		t.Fatalf("initial sem cap = %d, want %d", got, want)
+	}
+
+	// Update annotations on the same trigger UID.
+	trigger.Annotations = map[string]string{
+		TriggerFetchBatchSizeAnnotation: "8",
+		TriggerFetchTimeoutAnnotation:   "250ms",
+		TriggerMaxConcurrencyAnnotation: "12",
+	}
+
+	if err := cm.SubscribeTrigger(trigger, broker, subscriber, nil, nil, nil, nil); err != nil {
+		t.Fatalf("SubscribeTrigger (restart): %v", err)
+	}
+
+	cm.mu.RLock()
+	second := cm.subscriptions[triggerUID]
+	cm.mu.RUnlock()
+
+	if second != first {
+		t.Errorf("subscription pointer changed on restart; in-place update expected")
+	}
+	if got, want := second.fetchBatchSize, 8; got != want {
+		t.Errorf("fetchBatchSize = %d, want %d", got, want)
+	}
+	if got, want := second.fetchTimeout, 250*time.Millisecond; got != want {
+		t.Errorf("fetchTimeout = %v, want %v", got, want)
+	}
+	if got, want := second.maxConcurrency, 12; got != want {
+		t.Errorf("maxConcurrency = %d, want %d", got, want)
+	}
+	if got, want := cap(second.sem), 12; got != want {
+		t.Errorf("sem cap = %d, want %d (new semaphore should be sized to new max-concurrency)", got, want)
+	}
+	if second.sem == firstSem {
+		t.Errorf("sem channel was reused; expected a fresh channel on restart")
+	}
+	if second.done == firstDone {
+		t.Errorf("done channel was reused; expected a fresh channel on restart")
+	}
+	if second.dispatchCtx != firstDispatchCtx {
+		t.Errorf("dispatchCtx changed across restart; expected it to survive")
+	}
+	if second.dispatchCtx.Err() != nil {
+		t.Errorf("dispatchCtx was cancelled across restart: %v", second.dispatchCtx.Err())
+	}
+
+	// Old fetch loop should have observed cancel and closed firstDone.
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Errorf("old fetch loop's done channel was not closed within 2s")
+	}
+}
+
+// TestSubscribeTrigger_NoRestartWhenAnnotationsUnchanged verifies that re-
+// subscribing without changing any fetch-related annotation does not restart
+// the fetch loop.
+func TestSubscribeTrigger_NoRestartWhenAnnotationsUnchanged(t *testing.T) {
+	s := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, s)
+	conn, js := natsTesting.JsClient(t, s)
+	defer conn.Close()
+
+	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+
+	namespace := "default"
+	brokerName := "no-restart-broker"
+	triggerUID := "no-restart-trigger-uid-001"
+
+	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
+
+	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+		FetchBatchSize: 3,
+		FetchTimeout:   100 * time.Millisecond,
+		MaxConcurrency: 6,
+	})
+	defer cm.Close() //nolint:errcheck
+
+	broker := makeTestBrokerForNats(namespace, brokerName)
+	trigger := makeTriggerWithUID(namespace, "no-restart-trigger", brokerName, triggerUID)
+
+	url1, _ := apis.ParseURL("http://localhost:9996")
+	url2, _ := apis.ParseURL("http://localhost:9995")
+
+	if err := cm.SubscribeTrigger(trigger, broker, duckv1.Addressable{URL: url1}, nil, nil, nil, nil); err != nil {
+		t.Fatalf("SubscribeTrigger (first): %v", err)
+	}
+
+	cm.mu.RLock()
+	first := cm.subscriptions[triggerUID]
+	firstSem := first.sem
+	firstDone := first.done
+	cm.mu.RUnlock()
+
+	// Same trigger, no annotations — should be a pure in-place handler update.
+	if err := cm.SubscribeTrigger(trigger, broker, duckv1.Addressable{URL: url2}, nil, nil, nil, nil); err != nil {
+		t.Fatalf("SubscribeTrigger (second): %v", err)
+	}
+
+	cm.mu.RLock()
+	second := cm.subscriptions[triggerUID]
+	cm.mu.RUnlock()
+
+	if second.sem != firstSem {
+		t.Errorf("sem was replaced when annotations did not change")
+	}
+	if second.done != firstDone {
+		t.Errorf("done channel was replaced when annotations did not change")
+	}
+
+	// firstDone should NOT have been closed.
+	select {
+	case <-firstDone:
+		t.Errorf("fetch loop's done channel was closed despite no annotation change")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// TestSubscribeTrigger_RestartTriggers verifies that the fetch loop restarts
+// iff the *effective* fetch parameters would differ — not whenever the raw
+// annotation map changes. Both sides of the comparison run through the same
+// parser, so e.g. an annotation whose value equals the manager default is a
+// no-op, an unparseable annotation is a no-op (both resolve to default), and
+// removing an annotation only restarts if the default differs from the value
+// previously in effect.
+func TestSubscribeTrigger_RestartTriggers(t *testing.T) {
+	s := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, s)
+	conn, js := natsTesting.JsClient(t, s)
+	defer conn.Close()
+
+	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+
+	// Manager defaults: batch=5, timeout=100ms, maxConc=6.
+	cfg := &ConsumerManagerConfig{
+		FetchBatchSize: 5,
+		FetchTimeout:   100 * time.Millisecond,
+		MaxConcurrency: 6,
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	subscriberURL, _ := apis.ParseURL(srv.URL)
+	subscriber := duckv1.Addressable{URL: subscriberURL}
+
+	cases := []struct {
+		name        string
+		firstAnn    map[string]string
+		secondAnn   map[string]string
+		wantRestart bool
+	}{
+		{
+			name:        "no annotations on either side",
+			firstAnn:    nil,
+			secondAnn:   nil,
+			wantRestart: false,
+		},
+		{
+			name:        "same explicit values on both sides",
+			firstAnn:    map[string]string{TriggerFetchBatchSizeAnnotation: "8"},
+			secondAnn:   map[string]string{TriggerFetchBatchSizeAnnotation: "8"},
+			wantRestart: false,
+		},
+		{
+			name:        "annotation value equals manager default",
+			firstAnn:    nil,
+			secondAnn:   map[string]string{TriggerFetchBatchSizeAnnotation: "5"},
+			wantRestart: false,
+		},
+		{
+			name:        "remove annotation whose value equalled default",
+			firstAnn:    map[string]string{TriggerFetchBatchSizeAnnotation: "5"},
+			secondAnn:   nil,
+			wantRestart: false,
+		},
+		{
+			name:        "invalid annotation on both sides resolves to default",
+			firstAnn:    map[string]string{TriggerFetchBatchSizeAnnotation: "garbage"},
+			secondAnn:   map[string]string{TriggerFetchBatchSizeAnnotation: "also-garbage"},
+			wantRestart: false,
+		},
+		{
+			name:        "unrelated annotation added — no fetch params touched",
+			firstAnn:    nil,
+			secondAnn:   map[string]string{"unrelated/key": "anything"},
+			wantRestart: false,
+		},
+		{
+			name:        "batch size changed",
+			firstAnn:    map[string]string{TriggerFetchBatchSizeAnnotation: "8"},
+			secondAnn:   map[string]string{TriggerFetchBatchSizeAnnotation: "16"},
+			wantRestart: true,
+		},
+		{
+			name:        "only fetch-timeout changed",
+			firstAnn:    nil,
+			secondAnn:   map[string]string{TriggerFetchTimeoutAnnotation: "500ms"},
+			wantRestart: true,
+		},
+		{
+			name:        "only max-concurrency changed",
+			firstAnn:    nil,
+			secondAnn:   map[string]string{TriggerMaxConcurrencyAnnotation: "20"},
+			wantRestart: true,
+		},
+		{
+			name:        "removing annotation now diverges from default",
+			firstAnn:    map[string]string{TriggerFetchBatchSizeAnnotation: "9"},
+			secondAnn:   nil,
+			wantRestart: true,
+		},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			brokerName := fmt.Sprintf("restart-cases-broker-%d", i)
+			triggerUID := fmt.Sprintf("restart-cases-uid-%d", i)
+			namespace := "default"
+
+			setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
+
+			cm := newConsumerManagerForTest(t, ctx, conn, js, cfg)
+			defer cm.Close() //nolint:errcheck
+
+			broker := makeTestBrokerForNats(namespace, brokerName)
+			trigger := makeTriggerWithUID(namespace, "trig", brokerName, triggerUID)
+
+			trigger.Annotations = tc.firstAnn
+			if err := cm.SubscribeTrigger(trigger, broker, subscriber, nil, nil, nil, nil); err != nil {
+				t.Fatalf("first SubscribeTrigger: %v", err)
+			}
+
+			cm.mu.RLock()
+			before := cm.subscriptions[triggerUID]
+			beforeDone := before.done
+			beforeSem := before.sem
+			cm.mu.RUnlock()
+
+			trigger.Annotations = tc.secondAnn
+			if err := cm.SubscribeTrigger(trigger, broker, subscriber, nil, nil, nil, nil); err != nil {
+				t.Fatalf("second SubscribeTrigger: %v", err)
+			}
+
+			cm.mu.RLock()
+			after := cm.subscriptions[triggerUID]
+			afterDone := after.done
+			afterSem := after.sem
+			cm.mu.RUnlock()
+
+			restarted := beforeDone != afterDone || beforeSem != afterSem
+
+			if restarted != tc.wantRestart {
+				t.Errorf("restart = %v, want %v", restarted, tc.wantRestart)
+			}
+
+			if tc.wantRestart {
+				// The old done channel must have been closed.
+				select {
+				case <-beforeDone:
+				case <-time.After(2 * time.Second):
+					t.Errorf("restart claimed but old done channel never closed")
+				}
+			} else {
+				// The old done channel must NOT have been closed.
+				select {
+				case <-beforeDone:
+					t.Errorf("no-restart claimed but old done channel was closed")
+				case <-time.After(100 * time.Millisecond):
+				}
+			}
+		})
+	}
+}
+
 // TestSubscribeTrigger_UpdateInPlace verifies that re-subscribing an existing trigger
 // updates the handler in place without creating a new subscription.
 func TestSubscribeTrigger_UpdateInPlace(t *testing.T) {
