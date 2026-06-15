@@ -19,6 +19,7 @@ package filter
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 
@@ -132,10 +133,11 @@ func NewTriggerHandler(
 }
 
 // HandleMessage processes a NATS message, applies filter, and dispatches to subscriber.
-// With pull-based subscriptions, this is called synchronously from the fetch loop.
-func (h *TriggerHandler) HandleMessage(msg *nats.Msg) {
+// ctx should carry an AckWait deadline so that the outbound HTTP call is cancelled
+// before JetStream redelivers the message; use context.WithTimeout(parent, ackWait).
+func (h *TriggerHandler) HandleMessage(ctx context.Context, msg *nats.Msg) {
 	logger := h.logger.With(zap.String("msg_id", msg.Header.Get(nats.MsgIdHdr)))
-	ctx := logging.WithLogger(h.ctx, logger)
+	ctx = logging.WithLogger(ctx, logger)
 
 	h.doHandle(ctx, msg)
 }
@@ -189,7 +191,10 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 	)
 
 	dispatchInfo, err := h.dispatchEvent(ctx, event, msg)
-	if err != nil {
+	if eventProcessingDeadlineExceeded(err) {
+		logger.Warnw("dispatch context expired before subscriber response, message will be redelivered by JetStream", zap.Error(err))
+		return
+	} else if err != nil {
 		logger.Errorw("failed to dispatch event",
 			zap.Error(err),
 			zap.Int("response_code", dispatchInfo.ResponseCode),
@@ -228,6 +233,13 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 		kncloudevents.WithTransformers(&te),
 		kncloudevents.WithRetryConfig(h.noRetryConfig),
 	)
+
+	// Context deadline/cancellation means the AckWait guard fired before we got
+	// a subscriber response. Don't ack/nack/term the message — JetStream will
+	// redeliver it automatically once its own AckWait timer expires.
+	if eventProcessingDeadlineExceeded(err) {
+		return dispatchInfo, err
+	}
 
 	result := determineNatsResult(dispatchInfo.ResponseCode, err)
 
@@ -311,6 +323,10 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	}
 
 	return dispatchInfo, err
+}
+
+func eventProcessingDeadlineExceeded(err error) bool {
+	return err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled))
 }
 
 // responseToEvent parses the subscriber's HTTP response into a CloudEvent.

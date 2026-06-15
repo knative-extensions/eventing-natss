@@ -43,6 +43,7 @@ type envConfig struct {
 	NatsURL        string        `envconfig:"NATS_URL" required:"true"`
 	FetchBatchSize int           `envconfig:"CONSUMER_FETCH_BATCH_SIZE" default:"0"`
 	FetchTimeout   time.Duration `envconfig:"CONSUMER_FETCH_TIMEOUT" default:"0"`
+	MaxConcurrency int           `envconfig:"CONSUMER_MAX_CONCURRENCY" default:"0"`
 }
 
 // NewController creates a new filter controller
@@ -74,6 +75,7 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	consumerConfig := &ConsumerManagerConfig{
 		FetchBatchSize: env.FetchBatchSize,
 		FetchTimeout:   env.FetchTimeout,
+		MaxConcurrency: env.MaxConcurrency,
 	}
 	consumerManager := NewConsumerManager(ctx, natsConn, js, consumerConfig)
 
