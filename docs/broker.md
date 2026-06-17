@@ -163,19 +163,20 @@ spec:
 
 ### Filter Environment Variables
 
-The filter component can be configured using environment variables:
+These variables set the **broker-wide defaults** for the filter deployment. All triggers in the same broker share these defaults unless they override them with per-trigger annotations (see below).
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NATS_URL` | NATS server URL | Required |
 | `POD_NAME` | Pod name for identification | Required |
 | `CONTAINER_NAME` | Container name for identification | Required |
-| `CONSUMER_FETCH_BATCH_SIZE` | Number of messages to fetch per batch | 10 |
-| `CONSUMER_FETCH_TIMEOUT` | Timeout for fetch operations | 500ms |
+| `CONSUMER_FETCH_BATCH_SIZE` | Number of messages to fetch per batch | `10` |
+| `CONSUMER_FETCH_TIMEOUT` | How long a fetch waits for messages before returning empty | `200ms` |
+| `CONSUMER_MAX_CONCURRENCY` | Maximum concurrent in-flight HTTP dispatches per trigger | `20` |
 
 ### Configuring Consumer Fetch via Broker Annotation
 
-You can configure the consumer fetch settings per-broker using the broker annotation:
+Set broker-wide defaults for all triggers using the `natsjetstream.eventing.knative.dev/config` annotation. These are injected as environment variables into the filter deployment.
 
 ```yaml
 apiVersion: eventing.knative.dev/v1
@@ -190,49 +191,59 @@ metadata:
           "replicas": 2,
           "env": [
             {"name": "CONSUMER_FETCH_BATCH_SIZE", "value": "50"},
-            {"name": "CONSUMER_FETCH_TIMEOUT", "value": "1s"}
+            {"name": "CONSUMER_FETCH_TIMEOUT", "value": "1s"},
+            {"name": "CONSUMER_MAX_CONCURRENCY", "value": "40"}
           ]
         }
       }
 ```
 
-### Tuning Consumer Performance
+### Per-Trigger Configuration
 
-**High Throughput** - Increase batch size to fetch more messages per request:
+Each trigger can override the broker-wide defaults via annotations. This lets individual triggers with different throughput or latency requirements coexist in the same broker without affecting each other.
 
-```yaml
-natsjetstream.eventing.knative.dev/config: |
-  {
-    "filter": {
-      "env": [
-        {"name": "CONSUMER_FETCH_BATCH_SIZE", "value": "100"},
-        {"name": "CONSUMER_FETCH_TIMEOUT", "value": "2s"}
-      ]
-    }
-  }
-```
-
-**Low Latency** - Decrease batch size for immediate processing:
+| Annotation | Description | Default |
+|------------|-------------|---------|
+| `natsjetstream.eventing.knative.dev/fetch-batch-size` | Messages fetched per pull request | `CONSUMER_FETCH_BATCH_SIZE` |
+| `natsjetstream.eventing.knative.dev/fetch-timeout` | Wait time per fetch when no messages arrive (Go duration, e.g. `200ms`, `1s`) | `CONSUMER_FETCH_TIMEOUT` |
+| `natsjetstream.eventing.knative.dev/max-concurrency` | Maximum concurrent in-flight HTTP dispatches for this trigger | `CONSUMER_MAX_CONCURRENCY` |
 
 ```yaml
-natsjetstream.eventing.knative.dev/config: |
-  {
-    "filter": {
-      "env": [
-        {"name": "CONSUMER_FETCH_BATCH_SIZE", "value": "1"},
-        {"name": "CONSUMER_FETCH_TIMEOUT", "value": "100ms"}
-      ]
-    }
-  }
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: high-throughput-trigger
+  annotations:
+    natsjetstream.eventing.knative.dev/fetch-batch-size: "100"
+    natsjetstream.eventing.knative.dev/fetch-timeout: "1s"
+    natsjetstream.eventing.knative.dev/max-concurrency: "50"
+spec:
+  broker: my-broker
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: analytics-service
 ```
 
-**Tuning Guidelines:**
+### Backpressure and Concurrency Model
 
-| Scenario | Batch Size | Timeout | Use Case |
-|----------|------------|---------|----------|
-| High Throughput | 50-100 | 1-2s | Batch processing, analytics |
-| Low Latency | 1-5 | 100ms | Real-time notifications |
-| Balanced | 10-20 | 500ms | General purpose (default) |
+The filter dispatches messages concurrently using a per-trigger counting semaphore controlled by `max-concurrency`. The semaphore is acquired **before** fetching each message's dispatch goroutine, so when all slots are occupied the fetch loop stalls and new messages remain in the JetStream stream with their AckWait clocks not yet running. This prevents unbounded goroutine growth and avoids the AckWait expiry / duplicate-delivery problem that arises when messages are fetched faster than they can be processed.
+
+Each dispatched message also carries a context deadline equal to the consumer's `AckWait` (set via `trigger.spec.delivery.timeout`). If the subscriber does not respond within that window the HTTP call is cancelled and JetStream redelivers the message automatically.
+
+Slow triggers affect only their own semaphore — they cannot starve or delay other triggers sharing the same filter pod.
+
+### Tuning Guidelines
+
+| Scenario | Batch Size | Fetch Timeout | Max Concurrency | Use Case |
+|----------|------------|---------------|-----------------|----------|
+| High Throughput | 50–100 | 1–2s | 50–100 | Batch processing, analytics |
+| Low Latency | 1–5 | 100ms | 10–20 | Real-time notifications |
+| Slow Subscriber | 5–10 | 200ms | 2–5 | Rate-limited or expensive downstream |
+| Balanced (default) | 10 | 200ms | 20 | General purpose |
+
+The fetch loop caps each pull request to the number of free semaphore slots, so a batch is never larger than the available dispatch capacity. This means `max-concurrency` and `fetch-batch-size` can be tuned independently — there is no requirement for one to be larger than the other.
 
 ## Architecture
 
@@ -282,10 +293,15 @@ After all retries are exhausted, if a dead letter sink is configured, the event 
 2. Verify the subscriber service is running and accessible
 3. Check filter pod logs: `kubectl logs -l app=natsjs-broker-filter`
 
-### High latency
+### High latency or low throughput
 
-1. Increase `CONSUMER_FETCH_BATCH_SIZE` for better throughput
-2. Check NATS server health and connection
+1. Increase `CONSUMER_FETCH_BATCH_SIZE` (or the trigger annotation) to fetch more messages per round-trip
+2. Increase `CONSUMER_MAX_CONCURRENCY` (or the trigger annotation) to allow more concurrent dispatches
+3. Check NATS server health and connection
+
+### Duplicate message delivery
+
+If consumers are receiving the same event more than once, the most likely cause is that the subscriber is taking longer than `trigger.spec.delivery.timeout` (the consumer's AckWait) to respond. JetStream redelivers the message once AckWait expires. Increase the timeout or reduce subscriber latency.
 
 ### Events going to dead letter sink
 

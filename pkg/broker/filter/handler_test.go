@@ -19,6 +19,7 @@ package filter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -748,5 +749,53 @@ func TestDefaultRetryConfigInitialized(t *testing.T) {
 	}
 	if defaultRetry.Backoff == nil {
 		t.Error("defaultRetry.Backoff should not be nil")
+	}
+}
+
+func TestEventProcessingDeadlineExceeded(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil error returns false",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "plain error returns false",
+			err:  errors.New("some error"),
+			want: false,
+		},
+		{
+			name: "context.DeadlineExceeded returns true",
+			err:  context.DeadlineExceeded,
+			want: true,
+		},
+		{
+			name: "context.Canceled returns true",
+			err:  context.Canceled,
+			want: true,
+		},
+		{
+			name: "wrapped DeadlineExceeded returns true",
+			err:  fmt.Errorf("wrap: %w", context.DeadlineExceeded),
+			want: true,
+		},
+		{
+			name: "wrapped Canceled returns true",
+			err:  fmt.Errorf("wrap: %w", context.Canceled),
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := eventProcessingDeadlineExceeded(tt.err)
+			if got != tt.want {
+				t.Errorf("eventProcessingDeadlineExceeded(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
