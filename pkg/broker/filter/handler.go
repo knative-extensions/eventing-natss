@@ -31,6 +31,11 @@ import (
 	cehttp "github.com/cloudevents/sdk-go/v2/protocol/http"
 	"github.com/cloudevents/sdk-go/v2/types"
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	duckv1 "knative.dev/pkg/apis/duck/v1"
@@ -100,6 +105,11 @@ type TriggerHandler struct {
 	deadLetterSink *duckv1.Addressable
 
 	subscription *nats.Subscription
+
+	// Observability. tracer is used to wrap each dispatch in a span;
+	// dispatchDuration records the per-dispatch HTTP wall time.
+	tracer           trace.Tracer
+	dispatchDuration metric.Float64Histogram
 }
 
 // NewTriggerHandler creates a new handler for a trigger
@@ -112,11 +122,20 @@ func NewTriggerHandler(
 	retryConfig *kncloudevents.RetryConfig,
 	noRetryConfig *kncloudevents.RetryConfig,
 	dispatcher *kncloudevents.Dispatcher,
+	tracer trace.Tracer,
+	dispatchDuration metric.Float64Histogram,
 ) (*TriggerHandler, error) {
 	logger := logging.FromContext(ctx).With(
 		zap.String("trigger", trigger.Name),
 		zap.String("namespace", trigger.Namespace),
 	)
+
+	// Fall back to the global tracer if none was provided, matching
+	// kncloudevents.NewDispatcher's behavior. dispatchDuration is allowed to
+	// stay nil — the histogram record sites already guard.
+	if tracer == nil {
+		tracer = otel.GetTracerProvider().Tracer("knative.dev/eventing-natss/pkg/broker/filter")
+	}
 
 	return &TriggerHandler{
 		logger:           logger,
@@ -129,6 +148,8 @@ func NewTriggerHandler(
 		retryConfig:      retryConfig,
 		noRetryConfig:    noRetryConfig,
 		deadLetterSink:   deadLetterSink,
+		tracer:           tracer,
+		dispatchDuration: dispatchDuration,
 	}, nil
 }
 
@@ -166,10 +187,28 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
+	// Adopt the producer's trace context from the CloudEvent extensions and
+	// start a span that covers filter eval + dispatch + ack/nak/term. Using a
+	// stable span name keeps trace-UI aggregation usable; per-trigger details
+	// live in attributes so they can be filtered without fragmenting names.
+	ctx = tracing.ParseSpanContext(ctx, event)
+	ctx, span := h.tracer.Start(ctx, "broker.filter.dispatch")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("trigger.name", h.trigger.Name),
+		attribute.String("trigger.namespace", h.trigger.Namespace),
+		attribute.String("trigger.uid", string(h.trigger.UID)),
+		attribute.String("subscriber.url", h.subscriber.URL.String()),
+		attribute.String("ce.id", event.ID()),
+		attribute.String("ce.type", event.Type()),
+		attribute.String("ce.source", event.Source()),
+	)
+
 	// Apply filter
 	if h.filter != nil {
 		filterResult := h.filter.Filter(ctx, *event)
 		if filterResult == eventfilter.FailFilter {
+			span.SetAttributes(attribute.String("filter.outcome", "fail"))
 			logger.Debugw("event filtered out",
 				zap.String("type", event.Type()),
 				zap.String("source", event.Source()),
@@ -180,6 +219,7 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 			}
 			return
 		}
+		span.SetAttributes(attribute.String("filter.outcome", "pass"))
 	}
 
 	// Dispatch to subscriber
@@ -191,10 +231,16 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 	)
 
 	dispatchInfo, err := h.dispatchEvent(ctx, event, msg)
+	if dispatchInfo != nil && dispatchInfo.ResponseCode != 0 {
+		span.SetAttributes(attribute.Int("http.response.status_code", dispatchInfo.ResponseCode))
+	}
 	if eventProcessingDeadlineExceeded(err) {
+		span.SetStatus(codes.Error, "dispatch deadline exceeded")
 		logger.Warnw("dispatch context expired before subscriber response, message will be redelivered by JetStream", zap.Error(err))
 		return
 	} else if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		logger.Errorw("failed to dispatch event",
 			zap.Error(err),
 			zap.Int("response_code", dispatchInfo.ResponseCode),
@@ -234,6 +280,17 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 		kncloudevents.WithRetryConfig(h.noRetryConfig),
 	)
 
+	// Record HTTP wall time with low-cardinality labels. Duration is left at
+	// kncloudevents.NoDuration (-1) when the request never made it onto the
+	// wire (e.g. request build / client creation failure); skip those.
+	if h.dispatchDuration != nil && dispatchInfo != nil && dispatchInfo.Duration >= 0 {
+		h.dispatchDuration.Record(ctx, dispatchInfo.Duration.Seconds(),
+			metric.WithAttributes(
+				attribute.String("trigger.name", h.trigger.Name),
+				attribute.String("trigger.namespace", h.trigger.Namespace),
+			))
+	}
+
 	// Context deadline/cancellation means the AckWait guard fired before we got
 	// a subscriber response. Don't ack/nack/term the message — JetStream will
 	// redeliver it automatically once its own AckWait timer expires.
@@ -247,9 +304,17 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	// the subscriber's response so they are available in every code path.
 	responseHeaders := eventingutils.PassThroughHeaders(dispatchInfo.ResponseHeader)
 
+	// Decorate the active span with the delivery attempt. The span was started
+	// in doHandle; SpanFromContext returns the same one. Per-branch nats.result
+	// is set inside the switch so each label reflects the path actually taken
+	// (e.g. NACK on lastTry with no DLS does NOT visit the dead-letter sink).
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(attribute.Int("delivery.attempt", retryNumber))
+
 	// Handle ack/nack/term based on result
 	switch {
 	case protocol.IsACK(result):
+		span.SetAttributes(attribute.String("nats.result", "ack"))
 		// If the subscriber returned a CloudEvent response, forward it to broker ingress for re-routing.
 		if h.brokerIngressURL != nil {
 			responseEvent, parseErr := responseToEvent(ctx, dispatchInfo)
@@ -287,6 +352,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 						zap.Int("response_code", dlsDispatchInfo.ResponseCode),
 					)
 				}
+				span.SetAttributes(attribute.String("nats.result", "ack_after_dls"))
+			} else {
+				span.SetAttributes(attribute.String("nats.result", "ack_retries_exhausted"))
 			}
 
 			// Ack after DLS attempt
@@ -294,6 +362,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 				logger.Errorw("failed to ack message after last retry", zap.Error(err))
 			}
 		} else {
+			span.SetAttributes(attribute.String("nats.result", "nak"))
 			// Nack for retry
 			nakDelay := jsutils.CalculateNakDelayForRetryNumber(retryNumber, h.retryConfig)
 			if err := msg.NakWithDelay(nakDelay, nats.Context(ctx)); err != nil {
@@ -315,6 +384,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 					zap.Int("response_code", dlsDispatchInfo.ResponseCode),
 				)
 			}
+			span.SetAttributes(attribute.String("nats.result", "term_after_dls"))
+		} else {
+			span.SetAttributes(attribute.String("nats.result", "term"))
 		}
 
 		if err := msg.Term(nats.Context(ctx)); err != nil {
