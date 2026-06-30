@@ -110,8 +110,10 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, trigger *eventingv1.Trig
 	trigger.Status.SubscriberURI = subscriberURI
 	trigger.Status.MarkSubscriberResolvedSucceeded()
 
-	// Step 3: Handle dead letter sink if configured
-	if trigger.Spec.Delivery != nil && trigger.Spec.Delivery.DeadLetterSink != nil {
+	// Step 3: Resolve the dead letter sink. A trigger's own DeadLetterSink takes
+	// precedence; otherwise it inherits the broker's already-resolved sink.
+	switch {
+	case trigger.Spec.Delivery != nil && trigger.Spec.Delivery.DeadLetterSink != nil:
 		deadLetterURI, err := r.resolveDeadLetterURI(ctx, trigger)
 		if err != nil {
 			trigger.Status.MarkDeadLetterSinkResolvedFailed("DeadLetterSinkResolveFailed", "Failed to resolve dead letter sink: %v", err)
@@ -119,7 +121,10 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, trigger *eventingv1.Trig
 		}
 		trigger.Status.DeadLetterSinkURI = deadLetterURI
 		trigger.Status.MarkDeadLetterSinkResolvedSucceeded()
-	} else {
+	case broker.Status.DeadLetterSinkURI != nil:
+		trigger.Status.DeadLetterSinkURI = broker.Status.DeadLetterSinkURI
+		trigger.Status.MarkDeadLetterSinkResolvedSucceeded()
+	default:
 		trigger.Status.MarkDeadLetterSinkNotConfigured()
 	}
 
@@ -283,13 +288,13 @@ func (r *Reconciler) buildConsumerConfig(trigger *eventingv1.Trigger, broker *ev
 	ackWait := 30 * time.Second
 	maxDeliver := 3
 
-	// Apply delivery configuration from trigger spec
-	if trigger.Spec.Delivery != nil {
-		if trigger.Spec.Delivery.Retry != nil {
-			maxDeliver = int(*trigger.Spec.Delivery.Retry) + 1
+	// Apply effective delivery: trigger spec overrides broker spec field-by-field.
+	if delivery := brokerutils.EffectiveDelivery(trigger, broker); delivery != nil {
+		if delivery.Retry != nil {
+			maxDeliver = int(*delivery.Retry) + 1
 		}
-		if trigger.Spec.Delivery.Timeout != nil {
-			timeout, err := period.Parse(*trigger.Spec.Delivery.Timeout)
+		if delivery.Timeout != nil {
+			timeout, err := period.Parse(*delivery.Timeout)
 			if err == nil {
 				ackWait, _ = timeout.Duration()
 			}

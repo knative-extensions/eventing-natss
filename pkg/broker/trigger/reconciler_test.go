@@ -504,6 +504,41 @@ func TestBuildConsumerConfig(t *testing.T) {
 			wantAckPolicy:  nats.AckExplicitPolicy,
 			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
 		},
+		{
+			name:    "inherits broker delivery when trigger has none",
+			trigger: newTriggerWithSubscriber(testNamespace, testTriggerName, testBrokerName, "subscriber.example.com"),
+			broker: func() *eventingv1.Broker {
+				retry, timeout := int32(5), "PT1M"
+				b := newReadyBroker(testNamespace, testBrokerName)
+				b.Spec.Delivery = &eventingduckv1.DeliverySpec{Retry: &retry, Timeout: &timeout}
+				return b
+			}(),
+			consumerName:   "test-consumer",
+			wantAckWait:    time.Minute,
+			wantMaxDeliver: 6,
+			wantAckPolicy:  nats.AckExplicitPolicy,
+			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
+		},
+		{
+			name: "trigger delivery overrides broker field-by-field",
+			trigger: func() *eventingv1.Trigger {
+				retry := int32(1)
+				trigger := newTriggerWithSubscriber(testNamespace, testTriggerName, testBrokerName, "subscriber.example.com")
+				trigger.Spec.Delivery = &eventingduckv1.DeliverySpec{Retry: &retry}
+				return trigger
+			}(),
+			broker: func() *eventingv1.Broker {
+				retry, timeout := int32(5), "PT1M"
+				b := newReadyBroker(testNamespace, testBrokerName)
+				b.Spec.Delivery = &eventingduckv1.DeliverySpec{Retry: &retry, Timeout: &timeout}
+				return b
+			}(),
+			consumerName:   "test-consumer",
+			wantAckWait:    time.Minute, // inherited from broker (trigger has no timeout)
+			wantMaxDeliver: 2,           // trigger retry wins
+			wantAckPolicy:  nats.AckExplicitPolicy,
+			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
+		},
 	}
 
 	for _, tc := range tests {

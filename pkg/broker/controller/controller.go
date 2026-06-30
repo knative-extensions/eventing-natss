@@ -28,6 +28,7 @@ import (
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
+	"knative.dev/pkg/resolver"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/eventing/pkg/client/injection/reconciler/eventing/v1/broker"
@@ -143,6 +144,9 @@ func NewController(
 
 	// Create controller implementation
 	impl := broker.NewImpl(ctx, r, constants.BrokerClassName)
+
+	// Create URI resolver for resolving the dead letter sink address
+	r.uriResolver = resolver.NewURIResolverFromTracker(ctx, impl.Tracker)
 
 	// Set up event handlers for Broker resources
 	brokerInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
