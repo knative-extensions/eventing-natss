@@ -36,6 +36,7 @@ import (
 	"knative.dev/eventing/pkg/kncloudevents"
 
 	"knative.dev/eventing-natss/pkg/broker/constants"
+	brokerutils "knative.dev/eventing-natss/pkg/broker/utils"
 )
 
 // FilterReconciler reconciles triggers and manages consumer subscriptions
@@ -158,10 +159,10 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 		deadLetterSink = &duckv1.Addressable{URL: trigger.Status.DeadLetterSinkURI.DeepCopy()}
 	}
 
-	// Build retry config from trigger delivery spec
+	// Build retry config from the effective delivery spec (trigger overrides broker).
 	var retryConfig *kncloudevents.RetryConfig
-	if trigger.Spec.Delivery != nil {
-		config, err := kncloudevents.RetryConfigFromDeliverySpec(*trigger.Spec.Delivery)
+	if delivery := brokerutils.EffectiveDelivery(trigger, broker); delivery != nil {
+		config, err := kncloudevents.RetryConfigFromDeliverySpec(*delivery)
 		if err != nil {
 			logger.Warnw("failed to build retry config from delivery spec", zap.Error(err))
 		} else {
