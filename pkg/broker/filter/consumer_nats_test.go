@@ -1026,11 +1026,11 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 	for _, a := range dispatchSpan.Attributes {
 		attrs[string(a.Key)] = a.Value.AsString()
 	}
-	if attrs["trigger.name"] != "obs-trigger" {
-		t.Errorf("span trigger.name = %q, want %q", attrs["trigger.name"], "obs-trigger")
+	if attrs["kn.trigger.name"] != "obs-trigger" {
+		t.Errorf("span kn.trigger.name = %q, want %q", attrs["kn.trigger.name"], "obs-trigger")
 	}
-	if attrs["trigger.namespace"] != namespace {
-		t.Errorf("span trigger.namespace = %q, want %q", attrs["trigger.namespace"], namespace)
+	if attrs["kn.trigger.namespace"] != namespace {
+		t.Errorf("span kn.trigger.namespace = %q, want %q", attrs["kn.trigger.namespace"], namespace)
 	}
 	if attrs["ce.id"] != "obs-event-id" {
 		t.Errorf("span ce.id = %q, want %q", attrs["ce.id"], "obs-event-id")
