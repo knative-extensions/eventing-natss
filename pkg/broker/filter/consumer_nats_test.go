@@ -974,8 +974,8 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 			defer cm.mu.RUnlock()
 			for _, sub := range cm.subscriptions {
 				obs.Observe(int64(len(sub.sem)), otelmetric.WithAttributes(
-					attribute.String("trigger.name", sub.trigger.Name),
-					attribute.String("trigger.namespace", sub.trigger.Namespace),
+					attribute.String("kn.trigger.name", sub.trigger.Name),
+					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
 				))
 			}
 			return nil
