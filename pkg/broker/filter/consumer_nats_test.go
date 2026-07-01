@@ -141,9 +141,18 @@ func newConsumerManagerForTest(t *testing.T, ctx context.Context, conn *nats.Con
 	dispatchDuration, err := meter.Float64Histogram(
 		"kn.eventing.dispatch.duration",
 		otelmetric.WithUnit("s"),
+		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
 	)
 	if err != nil {
 		t.Fatalf("create dispatch duration histogram: %v", err)
+	}
+	processDuration, err := meter.Float64Histogram(
+		"kn.eventing.broker.filter.process.duration",
+		otelmetric.WithUnit("s"),
+		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
+	)
+	if err != nil {
+		t.Fatalf("create process duration histogram: %v", err)
 	}
 
 	cm := &ConsumerManager{
@@ -157,6 +166,7 @@ func newConsumerManagerForTest(t *testing.T, ctx context.Context, conn *nats.Con
 		dispatcher:            dispatcher,
 		tracer:                tracer,
 		dispatchDuration:      dispatchDuration,
+		processDuration:       processDuration,
 		subscriptions:         make(map[string]*TriggerSubscription),
 	}
 
@@ -167,8 +177,8 @@ func newConsumerManagerForTest(t *testing.T, ctx context.Context, conn *nats.Con
 			defer cm.mu.RUnlock()
 			for _, sub := range cm.subscriptions {
 				obs.Observe(int64(len(sub.sem)), otelmetric.WithAttributes(
-					attribute.String("trigger.name", sub.trigger.Name),
-					attribute.String("trigger.namespace", sub.trigger.Namespace),
+					attribute.String("kn.trigger.name", sub.trigger.Name),
+					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
 				))
 			}
 			return nil
@@ -927,9 +937,18 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 	dispatchDuration, err := meter.Float64Histogram(
 		"kn.eventing.dispatch.duration",
 		otelmetric.WithUnit("s"),
+		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
 	)
 	if err != nil {
 		t.Fatalf("create dispatch histogram: %v", err)
+	}
+	processDuration, err := meter.Float64Histogram(
+		"kn.eventing.broker.filter.process.duration",
+		otelmetric.WithUnit("s"),
+		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
+	)
+	if err != nil {
+		t.Fatalf("create process histogram: %v", err)
 	}
 
 	cm := &ConsumerManager{
@@ -943,6 +962,7 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 		dispatcher:            kncloudevents.NewDispatcher(eventingtls.ClientConfig{}, nil),
 		tracer:                tracer,
 		dispatchDuration:      dispatchDuration,
+		processDuration:       processDuration,
 		subscriptions:         make(map[string]*TriggerSubscription),
 	}
 	defer cm.Close() //nolint:errcheck
@@ -1025,13 +1045,17 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 		t.Fatalf("metric reader Collect: %v", err)
 	}
 
-	var sawDuration, sawInflight bool
+	var sawDuration, sawProcess, sawInflight bool
 	for _, sm := range rm.ScopeMetrics {
 		for _, m := range sm.Metrics {
 			switch m.Name {
 			case "kn.eventing.dispatch.duration":
 				if h, ok := m.Data.(metricdata.Histogram[float64]); ok && len(h.DataPoints) > 0 {
 					sawDuration = true
+				}
+			case "kn.eventing.broker.filter.process.duration":
+				if h, ok := m.Data.(metricdata.Histogram[float64]); ok && len(h.DataPoints) > 0 {
+					sawProcess = true
 				}
 			case "kn.eventing.broker.filter.dispatches.inflight":
 				if g, ok := m.Data.(metricdata.Gauge[int64]); ok && len(g.DataPoints) >= 0 {
@@ -1046,6 +1070,9 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 	}
 	if !sawDuration {
 		t.Error("kn.eventing.dispatch.duration histogram had no data points")
+	}
+	if !sawProcess {
+		t.Error("kn.eventing.broker.filter.process.duration histogram had no data points")
 	}
 	if !sawInflight {
 		t.Error("kn.eventing.broker.filter.dispatches.inflight gauge was not collected")

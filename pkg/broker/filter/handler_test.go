@@ -551,7 +551,7 @@ func TestNewTriggerHandler(t *testing.T) {
 	subscriberURL, _ := apis.ParseURL("http://subscriber.example.com")
 	subscriber := duckv1.Addressable{URL: subscriberURL}
 
-	handler, err := NewTriggerHandler(ctx, trigger, subscriber, nil, nil, nil, nil, nil, nil, nil)
+	handler, err := NewTriggerHandler(ctx, trigger, subscriber, nil, nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewTriggerHandler() unexpected error: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestNewTriggerHandler_WithOptionalParams(t *testing.T) {
 	retryConfig := &kncloudevents.RetryConfig{RetryMax: 3}
 	noRetryConfig := &kncloudevents.RetryConfig{RetryMax: 0}
 
-	handler, err := NewTriggerHandler(ctx, trigger, subscriber, brokerIngress, dls, retryConfig, noRetryConfig, nil, nil, nil)
+	handler, err := NewTriggerHandler(ctx, trigger, subscriber, brokerIngress, dls, retryConfig, noRetryConfig, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewTriggerHandler() unexpected error: %v", err)
 	}

@@ -47,6 +47,12 @@ import (
 // same as the channel's (kn.eventing.dispatch.duration) so they aggregate.
 const otelScope = "knative.dev/eventing-natss/pkg/broker/filter"
 
+// latencyBounds are the explicit histogram bucket boundaries (in seconds) for
+// the dispatch.duration metric. They must match upstream eventing's channel
+// dispatcher (pkg/channel/fanout) so the shared kn.eventing.dispatch.duration
+// metric aggregates cleanly across channels and brokers.
+var latencyBounds = []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}
+
 const (
 	// DefaultFetchBatchSize is the default number of messages to fetch in each batch
 	DefaultFetchBatchSize = 10
@@ -118,6 +124,7 @@ type ConsumerManager struct {
 	// is registered once and walks m.subscriptions on each collection cycle.
 	tracer           trace.Tracer
 	dispatchDuration metric.Float64Histogram
+	processDuration  metric.Float64Histogram
 
 	// Map of trigger UID to subscription
 	subscriptions map[string]*TriggerSubscription
@@ -196,10 +203,22 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 		"kn.eventing.dispatch.duration",
 		metric.WithDescription("The duration to dispatch the event"),
 		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(latencyBounds...),
 	)
 	if err != nil {
 		logger.Warnw("failed to create dispatch duration histogram; metric will be skipped", zap.Error(err))
 		dispatchDuration = nil
+	}
+
+	processDuration, err := meter.Float64Histogram(
+		"kn.eventing.broker.filter.process.duration",
+		metric.WithDescription("The duration of pre-dispatch processing (message decode and filter evaluation)"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(latencyBounds...),
+	)
+	if err != nil {
+		logger.Warnw("failed to create process duration histogram; metric will be skipped", zap.Error(err))
+		processDuration = nil
 	}
 
 	cm := &ConsumerManager{
@@ -213,6 +232,7 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 		dispatcher:            dispatcher,
 		tracer:                tracer,
 		dispatchDuration:      dispatchDuration,
+		processDuration:       processDuration,
 		subscriptions:         make(map[string]*TriggerSubscription),
 	}
 
@@ -228,8 +248,8 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 			defer cm.mu.RUnlock()
 			for _, sub := range cm.subscriptions {
 				obs.Observe(int64(len(sub.sem)), metric.WithAttributes(
-					attribute.String("trigger.name", sub.trigger.Name),
-					attribute.String("trigger.namespace", sub.trigger.Namespace),
+					attribute.String("kn.trigger.name", sub.trigger.Name),
+					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
 				))
 			}
 			return nil
@@ -369,6 +389,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 		m.dispatcher,
 		m.tracer,
 		m.dispatchDuration,
+		m.processDuration,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create trigger handler: %w", err)

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -107,9 +108,11 @@ type TriggerHandler struct {
 	subscription *nats.Subscription
 
 	// Observability. tracer is used to wrap each dispatch in a span;
-	// dispatchDuration records the per-dispatch HTTP wall time.
+	// dispatchDuration records the per-dispatch HTTP wall time; processDuration
+	// records the pre-dispatch work (message decode + filter evaluation).
 	tracer           trace.Tracer
 	dispatchDuration metric.Float64Histogram
+	processDuration  metric.Float64Histogram
 }
 
 // NewTriggerHandler creates a new handler for a trigger
@@ -124,6 +127,7 @@ func NewTriggerHandler(
 	dispatcher *kncloudevents.Dispatcher,
 	tracer trace.Tracer,
 	dispatchDuration metric.Float64Histogram,
+	processDuration metric.Float64Histogram,
 ) (*TriggerHandler, error) {
 	logger := logging.FromContext(ctx).With(
 		zap.String("trigger", trigger.Name),
@@ -150,6 +154,7 @@ func NewTriggerHandler(
 		deadLetterSink:   deadLetterSink,
 		tracer:           tracer,
 		dispatchDuration: dispatchDuration,
+		processDuration:  processDuration,
 	}, nil
 }
 
@@ -166,6 +171,27 @@ func (h *TriggerHandler) HandleMessage(ctx context.Context, msg *nats.Msg) {
 // doHandle processes the message synchronously
 func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 	logger := logging.FromContext(ctx)
+
+	// Record the pre-dispatch processing time (message decode + filter eval).
+	// recordProcess is idempotent: it is called explicitly just before dispatch
+	// and via defer, so any early return (unknown encoding, decode failure,
+	// filtered out) is captured exactly once and dispatch time is never
+	// included. It reads the ctx variable at call time, so the span context set
+	// up below is used once available.
+	processStart := time.Now()
+	processRecorded := false
+	recordProcess := func() {
+		if processRecorded || h.processDuration == nil {
+			return
+		}
+		processRecorded = true
+		h.processDuration.Record(ctx, time.Since(processStart).Seconds(),
+			metric.WithAttributes(
+				attribute.String("kn.trigger.name", h.trigger.Name),
+				attribute.String("kn.trigger.namespace", h.trigger.Namespace),
+			))
+	}
+	defer recordProcess()
 
 	// Convert NATS message to CloudEvents message
 	message := cejs.NewMessage(msg)
@@ -195,10 +221,10 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 	ctx, span := h.tracer.Start(ctx, "broker.filter.dispatch")
 	defer span.End()
 	span.SetAttributes(
-		attribute.String("trigger.name", h.trigger.Name),
-		attribute.String("trigger.namespace", h.trigger.Namespace),
-		attribute.String("trigger.uid", string(h.trigger.UID)),
-		attribute.String("subscriber.url", h.subscriber.URL.String()),
+		attribute.String("kn.trigger.name", h.trigger.Name),
+		attribute.String("kn.trigger.namespace", h.trigger.Namespace),
+		attribute.String("kn.trigger.uid", string(h.trigger.UID)),
+		attribute.String("messaging.destination.name", h.subscriber.URL.String()),
 		attribute.String("ce.id", event.ID()),
 		attribute.String("ce.type", event.Type()),
 		attribute.String("ce.source", event.Source()),
@@ -229,6 +255,10 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		zap.String("source", event.Source()),
 		zap.String("id", event.ID()),
 	)
+
+	// Pre-dispatch work is done; record it before the HTTP call so dispatch
+	// time (tracked separately by dispatchDuration) is excluded.
+	recordProcess()
 
 	dispatchInfo, err := h.dispatchEvent(ctx, event, msg)
 	if dispatchInfo != nil && dispatchInfo.ResponseCode != 0 {
@@ -286,8 +316,8 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	if h.dispatchDuration != nil && dispatchInfo != nil && dispatchInfo.Duration >= 0 {
 		h.dispatchDuration.Record(ctx, dispatchInfo.Duration.Seconds(),
 			metric.WithAttributes(
-				attribute.String("trigger.name", h.trigger.Name),
-				attribute.String("trigger.namespace", h.trigger.Namespace),
+				attribute.String("kn.trigger.name", h.trigger.Name),
+				attribute.String("kn.trigger.namespace", h.trigger.Namespace),
 			))
 	}
 
