@@ -54,6 +54,12 @@ func EffectiveDelivery(trigger *eventingv1.Trigger, broker *eventingv1.Broker) *
 	if out.BackoffDelay == nil {
 		out.BackoffDelay = b.BackoffDelay
 	}
+	if out.RetryAfterMax == nil {
+		out.RetryAfterMax = b.RetryAfterMax
+	}
+	if out.Format == nil {
+		out.Format = b.Format
+	}
 	if out.DeadLetterSink == nil {
 		out.DeadLetterSink = b.DeadLetterSink
 	}
