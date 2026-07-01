@@ -87,7 +87,7 @@ func newTestHandler(t *testing.T, ctx context.Context, subscriberURL string, fil
 	subscriber := duckv1.Addressable{URL: u}
 	trigger := makeTrigger("default", "test-trigger", filterType)
 	dispatcher := newTestDispatcher(ctx)
-	h, err := NewTriggerHandler(ctx, trigger, subscriber, nil, nil, nil, nil, dispatcher, nil, nil)
+	h, err := NewTriggerHandler(ctx, trigger, subscriber, nil, nil, nil, nil, dispatcher, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewTriggerHandler: %v", err)
 	}
