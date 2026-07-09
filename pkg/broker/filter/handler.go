@@ -22,6 +22,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -31,6 +32,11 @@ import (
 	cehttp "github.com/cloudevents/sdk-go/v2/protocol/http"
 	"github.com/cloudevents/sdk-go/v2/types"
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	duckv1 "knative.dev/pkg/apis/duck/v1"
@@ -100,6 +106,13 @@ type TriggerHandler struct {
 	deadLetterSink *duckv1.Addressable
 
 	subscription *nats.Subscription
+
+	// Observability. tracer is used to wrap each dispatch in a span;
+	// dispatchDuration records the per-dispatch HTTP wall time; processDuration
+	// records the pre-dispatch work (message decode + filter evaluation).
+	tracer           trace.Tracer
+	dispatchDuration metric.Float64Histogram
+	processDuration  metric.Float64Histogram
 }
 
 // NewTriggerHandler creates a new handler for a trigger
@@ -112,11 +125,21 @@ func NewTriggerHandler(
 	retryConfig *kncloudevents.RetryConfig,
 	noRetryConfig *kncloudevents.RetryConfig,
 	dispatcher *kncloudevents.Dispatcher,
+	tracer trace.Tracer,
+	dispatchDuration metric.Float64Histogram,
+	processDuration metric.Float64Histogram,
 ) (*TriggerHandler, error) {
 	logger := logging.FromContext(ctx).With(
 		zap.String("trigger", trigger.Name),
 		zap.String("namespace", trigger.Namespace),
 	)
+
+	// Fall back to the global tracer if none was provided, matching
+	// kncloudevents.NewDispatcher's behavior. dispatchDuration is allowed to
+	// stay nil — the histogram record sites already guard.
+	if tracer == nil {
+		tracer = otel.GetTracerProvider().Tracer("knative.dev/eventing-natss/pkg/broker/filter")
+	}
 
 	return &TriggerHandler{
 		logger:           logger,
@@ -129,6 +152,9 @@ func NewTriggerHandler(
 		retryConfig:      retryConfig,
 		noRetryConfig:    noRetryConfig,
 		deadLetterSink:   deadLetterSink,
+		tracer:           tracer,
+		dispatchDuration: dispatchDuration,
+		processDuration:  processDuration,
 	}, nil
 }
 
@@ -145,6 +171,27 @@ func (h *TriggerHandler) HandleMessage(ctx context.Context, msg *nats.Msg) {
 // doHandle processes the message synchronously
 func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 	logger := logging.FromContext(ctx)
+
+	// Record the pre-dispatch processing time (message decode + filter eval).
+	// recordProcess is idempotent: it is called explicitly just before dispatch
+	// and via defer, so any early return (unknown encoding, decode failure,
+	// filtered out) is captured exactly once and dispatch time is never
+	// included. It reads the ctx variable at call time, so the span context set
+	// up below is used once available.
+	processStart := time.Now()
+	processRecorded := false
+	recordProcess := func() {
+		if processRecorded || h.processDuration == nil {
+			return
+		}
+		processRecorded = true
+		h.processDuration.Record(ctx, time.Since(processStart).Seconds(),
+			metric.WithAttributes(
+				attribute.String("kn.trigger.name", h.trigger.Name),
+				attribute.String("kn.trigger.namespace", h.trigger.Namespace),
+			))
+	}
+	defer recordProcess()
 
 	// Convert NATS message to CloudEvents message
 	message := cejs.NewMessage(msg)
@@ -166,10 +213,28 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
+	// Adopt the producer's trace context from the CloudEvent extensions and
+	// start a span that covers filter eval + dispatch + ack/nak/term. Using a
+	// stable span name keeps trace-UI aggregation usable; per-trigger details
+	// live in attributes so they can be filtered without fragmenting names.
+	ctx = tracing.ParseSpanContext(ctx, event)
+	ctx, span := h.tracer.Start(ctx, "broker.filter.dispatch")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("kn.trigger.name", h.trigger.Name),
+		attribute.String("kn.trigger.namespace", h.trigger.Namespace),
+		attribute.String("kn.trigger.uid", string(h.trigger.UID)),
+		attribute.String("messaging.destination.name", h.subscriber.URL.String()),
+		attribute.String("cloudevents.event.id", event.ID()),
+		attribute.String("cloudevents.event.type", event.Type()),
+		attribute.String("cloudevents.event.source", event.Source()),
+	)
+
 	// Apply filter
 	if h.filter != nil {
 		filterResult := h.filter.Filter(ctx, *event)
 		if filterResult == eventfilter.FailFilter {
+			span.SetAttributes(attribute.String("filter.outcome", "fail"))
 			logger.Debugw("event filtered out",
 				zap.String("type", event.Type()),
 				zap.String("source", event.Source()),
@@ -180,6 +245,7 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 			}
 			return
 		}
+		span.SetAttributes(attribute.String("filter.outcome", "pass"))
 	}
 
 	// Dispatch to subscriber
@@ -190,11 +256,21 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		zap.String("id", event.ID()),
 	)
 
+	// Pre-dispatch work is done; record it before the HTTP call so dispatch
+	// time (tracked separately by dispatchDuration) is excluded.
+	recordProcess()
+
 	dispatchInfo, err := h.dispatchEvent(ctx, event, msg)
+	if dispatchInfo != nil && dispatchInfo.ResponseCode != 0 {
+		span.SetAttributes(attribute.Int("http.response.status_code", dispatchInfo.ResponseCode))
+	}
 	if eventProcessingDeadlineExceeded(err) {
+		span.SetStatus(codes.Error, "dispatch deadline exceeded")
 		logger.Warnw("dispatch context expired before subscriber response, message will be redelivered by JetStream", zap.Error(err))
 		return
 	} else if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		logger.Errorw("failed to dispatch event",
 			zap.Error(err),
 			zap.Int("response_code", dispatchInfo.ResponseCode),
@@ -234,6 +310,17 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 		kncloudevents.WithRetryConfig(h.noRetryConfig),
 	)
 
+	// Record HTTP wall time with low-cardinality labels. Duration is left at
+	// kncloudevents.NoDuration (-1) when the request never made it onto the
+	// wire (e.g. request build / client creation failure); skip those.
+	if h.dispatchDuration != nil && dispatchInfo != nil && dispatchInfo.Duration >= 0 {
+		h.dispatchDuration.Record(ctx, dispatchInfo.Duration.Seconds(),
+			metric.WithAttributes(
+				attribute.String("kn.trigger.name", h.trigger.Name),
+				attribute.String("kn.trigger.namespace", h.trigger.Namespace),
+			))
+	}
+
 	// Context deadline/cancellation means the AckWait guard fired before we got
 	// a subscriber response. Don't ack/nack/term the message — JetStream will
 	// redeliver it automatically once its own AckWait timer expires.
@@ -247,9 +334,17 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	// the subscriber's response so they are available in every code path.
 	responseHeaders := eventingutils.PassThroughHeaders(dispatchInfo.ResponseHeader)
 
+	// Decorate the active span with the delivery attempt. The span was started
+	// in doHandle; SpanFromContext returns the same one. Per-branch nats.result
+	// is set inside the switch so each label reflects the path actually taken
+	// (e.g. NACK on lastTry with no DLS does NOT visit the dead-letter sink).
+	span := trace.SpanFromContext(ctx)
+	span.SetAttributes(attribute.Int("delivery.attempt", retryNumber))
+
 	// Handle ack/nack/term based on result
 	switch {
 	case protocol.IsACK(result):
+		span.SetAttributes(attribute.String("nats.result", "ack"))
 		// If the subscriber returned a CloudEvent response, forward it to broker ingress for re-routing.
 		if h.brokerIngressURL != nil {
 			responseEvent, parseErr := responseToEvent(ctx, dispatchInfo)
@@ -287,6 +382,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 						zap.Int("response_code", dlsDispatchInfo.ResponseCode),
 					)
 				}
+				span.SetAttributes(attribute.String("nats.result", "ack_after_dls"))
+			} else {
+				span.SetAttributes(attribute.String("nats.result", "ack_retries_exhausted"))
 			}
 
 			// Ack after DLS attempt
@@ -294,6 +392,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 				logger.Errorw("failed to ack message after last retry", zap.Error(err))
 			}
 		} else {
+			span.SetAttributes(attribute.String("nats.result", "nak"))
 			// Nack for retry
 			nakDelay := jsutils.CalculateNakDelayForRetryNumber(retryNumber, h.retryConfig)
 			if err := msg.NakWithDelay(nakDelay, nats.Context(ctx)); err != nil {
@@ -315,6 +414,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 					zap.Int("response_code", dlsDispatchInfo.ResponseCode),
 				)
 			}
+			span.SetAttributes(attribute.String("nats.result", "term_after_dls"))
+		} else {
+			span.SetAttributes(attribute.String("nats.result", "term"))
 		}
 
 		if err := msg.Term(nats.Context(ctx)); err != nil {
