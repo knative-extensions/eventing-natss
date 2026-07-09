@@ -1032,8 +1032,14 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 	if attrs["kn.trigger.namespace"] != namespace {
 		t.Errorf("span kn.trigger.namespace = %q, want %q", attrs["kn.trigger.namespace"], namespace)
 	}
-	if attrs["ce.id"] != "obs-event-id" {
-		t.Errorf("span ce.id = %q, want %q", attrs["ce.id"], "obs-event-id")
+	if attrs["cloudevents.event.id"] != "obs-event-id" {
+		t.Errorf("span cloudevents.event.id = %q, want %q", attrs["cloudevents.event.id"], "obs-event-id")
+	}
+	if attrs["cloudevents.event.type"] != "test.type" {
+		t.Errorf("span cloudevents.event.type = %q, want %q", attrs["cloudevents.event.type"], "test.type")
+	}
+	if attrs["cloudevents.event.source"] != "test/source" {
+		t.Errorf("span cloudevents.event.source = %q, want %q", attrs["cloudevents.event.source"], "test/source")
 	}
 	if attrs["nats.result"] != "ack" {
 		t.Errorf("span nats.result = %q, want %q", attrs["nats.result"], "ack")

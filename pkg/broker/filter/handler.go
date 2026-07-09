@@ -225,9 +225,9 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		attribute.String("kn.trigger.namespace", h.trigger.Namespace),
 		attribute.String("kn.trigger.uid", string(h.trigger.UID)),
 		attribute.String("messaging.destination.name", h.subscriber.URL.String()),
-		attribute.String("ce.id", event.ID()),
-		attribute.String("ce.type", event.Type()),
-		attribute.String("ce.source", event.Source()),
+		attribute.String("cloudevents.event.id", event.ID()),
+		attribute.String("cloudevents.event.type", event.Type()),
+		attribute.String("cloudevents.event.source", event.Source()),
 	)
 
 	// Apply filter
