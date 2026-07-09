@@ -25,6 +25,10 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	duckv1 "knative.dev/pkg/apis/duck/v1"
@@ -37,6 +41,17 @@ import (
 
 	brokerutils "knative.dev/eventing-natss/pkg/broker/utils"
 )
+
+// otelScope is the OTel instrumentation scope used for the broker filter's
+// tracer and meter. Channel parity: dispatch.duration histogram is named the
+// same as the channel's (kn.eventing.dispatch.duration) so they aggregate.
+const otelScope = "knative.dev/eventing-natss/pkg/broker/filter"
+
+// latencyBounds are the explicit histogram bucket boundaries (in seconds) for
+// the dispatch.duration metric. They must match upstream eventing's channel
+// dispatcher (pkg/channel/fanout) so the shared kn.eventing.dispatch.duration
+// metric aggregates cleanly across channels and brokers.
+var latencyBounds = []float64{0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10}
 
 const (
 	// DefaultFetchBatchSize is the default number of messages to fetch in each batch
@@ -104,6 +119,13 @@ type ConsumerManager struct {
 	// Event dispatcher
 	dispatcher *kncloudevents.Dispatcher
 
+	// Observability instruments. Resolved from the global OTel providers in
+	// NewConsumerManager; passed to each TriggerHandler. The inflight gauge
+	// is registered once and walks m.subscriptions on each collection cycle.
+	tracer           trace.Tracer
+	dispatchDuration metric.Float64Histogram
+	processDuration  metric.Float64Histogram
+
 	// Map of trigger UID to subscription
 	subscriptions map[string]*TriggerSubscription
 	mu            sync.RWMutex
@@ -149,6 +171,8 @@ type TriggerSubscription struct {
 
 // NewConsumerManager creates a new consumer manager
 func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamContext, config *ConsumerManagerConfig) *ConsumerManager {
+	logger := logging.FromContext(ctx)
+
 	// Create OIDC token provider and dispatcher
 	oidcTokenProvider := auth.NewOIDCTokenProvider(ctx)
 	dispatcher := kncloudevents.NewDispatcher(eventingtls.ClientConfig{}, oidcTokenProvider)
@@ -170,8 +194,35 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 		}
 	}
 
-	return &ConsumerManager{
-		logger:                logging.FromContext(ctx),
+	// Resolve tracer + meter from the global OTel providers. When no real
+	// provider is registered these are no-ops, so this is safe to call
+	// unconditionally regardless of how the host wires observability.
+	tracer := otel.GetTracerProvider().Tracer(otelScope)
+	meter := otel.GetMeterProvider().Meter(otelScope)
+	dispatchDuration, err := meter.Float64Histogram(
+		"kn.eventing.dispatch.duration",
+		metric.WithDescription("The duration to dispatch the event"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(latencyBounds...),
+	)
+	if err != nil {
+		logger.Warnw("failed to create dispatch duration histogram; metric will be skipped", zap.Error(err))
+		dispatchDuration = nil
+	}
+
+	processDuration, err := meter.Float64Histogram(
+		"kn.eventing.broker.filter.process.duration",
+		metric.WithDescription("The duration of pre-dispatch processing (message decode and filter evaluation)"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(latencyBounds...),
+	)
+	if err != nil {
+		logger.Warnw("failed to create process duration histogram; metric will be skipped", zap.Error(err))
+		processDuration = nil
+	}
+
+	cm := &ConsumerManager{
+		logger:                logger,
 		ctx:                   ctx,
 		js:                    js,
 		conn:                  conn,
@@ -179,8 +230,35 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 		fetchTimeout:          fetchTimeout,
 		defaultMaxConcurrency: maxConcurrency,
 		dispatcher:            dispatcher,
+		tracer:                tracer,
+		dispatchDuration:      dispatchDuration,
+		processDuration:       processDuration,
 		subscriptions:         make(map[string]*TriggerSubscription),
 	}
+
+	// Observable gauge: in-flight dispatches per trigger. len(sem) is the
+	// number of currently-held semaphore slots, which equals the number of
+	// dispatch goroutines this trigger has in flight. Read under m.mu so the
+	// subscription map is stable while the callback iterates.
+	if _, err := meter.Int64ObservableGauge(
+		"kn.eventing.broker.filter.dispatches.inflight",
+		metric.WithDescription("Current number of in-flight dispatch goroutines per trigger"),
+		metric.WithInt64Callback(func(_ context.Context, obs metric.Int64Observer) error {
+			cm.mu.RLock()
+			defer cm.mu.RUnlock()
+			for _, sub := range cm.subscriptions {
+				obs.Observe(int64(len(sub.sem)), metric.WithAttributes(
+					attribute.String("kn.trigger.name", sub.trigger.Name),
+					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
+				))
+			}
+			return nil
+		}),
+	); err != nil {
+		logger.Warnw("failed to register inflight observable gauge; metric will be skipped", zap.Error(err))
+	}
+
+	return cm
 }
 
 // parseTriggerAnnotationInt reads key from annotations as a positive int,
@@ -309,6 +387,9 @@ func (m *ConsumerManager) SubscribeTrigger(
 		retryConfig,
 		noRetryConfig,
 		m.dispatcher,
+		m.tracer,
+		m.dispatchDuration,
+		m.processDuration,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create trigger handler: %w", err)

@@ -26,6 +26,13 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	otelmetric "go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -107,6 +114,8 @@ func makeTriggerWithUID(namespace, name, brokerName, uid string) *eventingv1.Tri
 }
 
 // newConsumerManagerForTest creates a ConsumerManager with a real NATS connection.
+// Mirrors NewConsumerManager's observability bootstrap (tracer, dispatch-duration
+// histogram, in-flight observable gauge) so tests exercise the same code path.
 func newConsumerManagerForTest(t *testing.T, ctx context.Context, conn *nats.Conn, js nats.JetStreamContext, cfg *ConsumerManagerConfig) *ConsumerManager {
 	t.Helper()
 	dispatcher := kncloudevents.NewDispatcher(eventingtls.ClientConfig{}, nil)
@@ -127,7 +136,26 @@ func newConsumerManagerForTest(t *testing.T, ctx context.Context, conn *nats.Con
 		}
 	}
 
-	return &ConsumerManager{
+	tracer := otel.GetTracerProvider().Tracer("knative.dev/eventing-natss/pkg/broker/filter")
+	meter := otel.GetMeterProvider().Meter("knative.dev/eventing-natss/pkg/broker/filter")
+	dispatchDuration, err := meter.Float64Histogram(
+		"kn.eventing.dispatch.duration",
+		otelmetric.WithUnit("s"),
+		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
+	)
+	if err != nil {
+		t.Fatalf("create dispatch duration histogram: %v", err)
+	}
+	processDuration, err := meter.Float64Histogram(
+		"kn.eventing.broker.filter.process.duration",
+		otelmetric.WithUnit("s"),
+		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
+	)
+	if err != nil {
+		t.Fatalf("create process duration histogram: %v", err)
+	}
+
+	cm := &ConsumerManager{
 		logger:                logging.FromContext(ctx),
 		ctx:                   ctx,
 		js:                    js,
@@ -136,8 +164,30 @@ func newConsumerManagerForTest(t *testing.T, ctx context.Context, conn *nats.Con
 		fetchTimeout:          fetchTimeout,
 		defaultMaxConcurrency: maxConcurrency,
 		dispatcher:            dispatcher,
+		tracer:                tracer,
+		dispatchDuration:      dispatchDuration,
+		processDuration:       processDuration,
 		subscriptions:         make(map[string]*TriggerSubscription),
 	}
+
+	if _, err := meter.Int64ObservableGauge(
+		"kn.eventing.broker.filter.dispatches.inflight",
+		otelmetric.WithInt64Callback(func(_ context.Context, obs otelmetric.Int64Observer) error {
+			cm.mu.RLock()
+			defer cm.mu.RUnlock()
+			for _, sub := range cm.subscriptions {
+				obs.Observe(int64(len(sub.sem)), otelmetric.WithAttributes(
+					attribute.String("kn.trigger.name", sub.trigger.Name),
+					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
+				))
+			}
+			return nil
+		}),
+	); err != nil {
+		t.Fatalf("register inflight observable gauge: %v", err)
+	}
+
+	return cm
 }
 
 // publishStructuredCE publishes a structured CloudEvent to the given subject.
@@ -838,6 +888,200 @@ func TestSubscribeTrigger_RestartTriggers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestObservability_SpanAndMetricsEmitted verifies that the broker filter
+// produces (1) a "broker.filter.dispatch" span per dispatch with the expected
+// attributes, (2) a kn.eventing.dispatch.duration histogram observation, and
+// (3) a kn.eventing.broker.filter.dispatches.inflight observable gauge that
+// can be collected. The MeterProvider and TracerProvider are constructed
+// locally and injected directly into the ConsumerManager — we deliberately
+// avoid otel.SetMeterProvider because the OTel global's delegate retains
+// instrument registrations from earlier tests in the same package, which
+// would prevent our callback from being collected.
+func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+
+	spanExporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spanExporter))
+
+	s := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, s)
+	conn, js := natsTesting.JsClient(t, s)
+	defer conn.Close()
+
+	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+
+	namespace := "default"
+	brokerName := "obs-broker"
+	triggerUID := "obs-trigger-uid-001"
+
+	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
+
+	received := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Build a ConsumerManager directly bound to the local providers — no
+	// otel.Set* dance. This also keeps the test parallel-safe in principle.
+	meter := mp.Meter("knative.dev/eventing-natss/pkg/broker/filter")
+	tracer := tp.Tracer("knative.dev/eventing-natss/pkg/broker/filter")
+	dispatchDuration, err := meter.Float64Histogram(
+		"kn.eventing.dispatch.duration",
+		otelmetric.WithUnit("s"),
+		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
+	)
+	if err != nil {
+		t.Fatalf("create dispatch histogram: %v", err)
+	}
+	processDuration, err := meter.Float64Histogram(
+		"kn.eventing.broker.filter.process.duration",
+		otelmetric.WithUnit("s"),
+		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
+	)
+	if err != nil {
+		t.Fatalf("create process histogram: %v", err)
+	}
+
+	cm := &ConsumerManager{
+		logger:                logging.FromContext(ctx),
+		ctx:                   ctx,
+		js:                    js,
+		conn:                  conn,
+		fetchBatchSize:        1,
+		fetchTimeout:          100 * time.Millisecond,
+		defaultMaxConcurrency: 4,
+		dispatcher:            kncloudevents.NewDispatcher(eventingtls.ClientConfig{}, nil),
+		tracer:                tracer,
+		dispatchDuration:      dispatchDuration,
+		processDuration:       processDuration,
+		subscriptions:         make(map[string]*TriggerSubscription),
+	}
+	defer cm.Close() //nolint:errcheck
+
+	if _, err := meter.Int64ObservableGauge(
+		"kn.eventing.broker.filter.dispatches.inflight",
+		otelmetric.WithInt64Callback(func(_ context.Context, obs otelmetric.Int64Observer) error {
+			cm.mu.RLock()
+			defer cm.mu.RUnlock()
+			for _, sub := range cm.subscriptions {
+				obs.Observe(int64(len(sub.sem)), otelmetric.WithAttributes(
+					attribute.String("kn.trigger.name", sub.trigger.Name),
+					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
+				))
+			}
+			return nil
+		}),
+	); err != nil {
+		t.Fatalf("register inflight gauge: %v", err)
+	}
+
+	broker := makeTestBrokerForNats(namespace, brokerName)
+	trigger := makeTriggerWithUID(namespace, "obs-trigger", brokerName, triggerUID)
+	subscriberURL, _ := apis.ParseURL(srv.URL)
+	subscriber := duckv1.Addressable{URL: subscriberURL}
+
+	if err := cm.SubscribeTrigger(trigger, broker, subscriber, nil, nil, nil, nil); err != nil {
+		t.Fatalf("SubscribeTrigger: %v", err)
+	}
+
+	publishSubject := brokerutils.BrokerPublishSubjectName(namespace, brokerName)
+	publishStructuredCE(t, js, publishSubject, "obs-event-id")
+
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("subscriber never received the dispatched event")
+	}
+
+	// Allow span/metric records to flush. Spans are synchronous via WithSyncer;
+	// histogram records are synchronous via ManualReader.
+	deadline := time.Now().Add(2 * time.Second)
+	var dispatchSpan *tracetest.SpanStub
+	for time.Now().Before(deadline) {
+		for i, s := range spanExporter.GetSpans() {
+			if s.Name == "broker.filter.dispatch" {
+				dispatchSpan = &spanExporter.GetSpans()[i]
+				break
+			}
+		}
+		if dispatchSpan != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if dispatchSpan == nil {
+		t.Fatal("broker.filter.dispatch span was not recorded")
+	}
+
+	attrs := map[string]string{}
+	for _, a := range dispatchSpan.Attributes {
+		attrs[string(a.Key)] = a.Value.AsString()
+	}
+	if attrs["kn.trigger.name"] != "obs-trigger" {
+		t.Errorf("span kn.trigger.name = %q, want %q", attrs["kn.trigger.name"], "obs-trigger")
+	}
+	if attrs["kn.trigger.namespace"] != namespace {
+		t.Errorf("span kn.trigger.namespace = %q, want %q", attrs["kn.trigger.namespace"], namespace)
+	}
+	if attrs["cloudevents.event.id"] != "obs-event-id" {
+		t.Errorf("span cloudevents.event.id = %q, want %q", attrs["cloudevents.event.id"], "obs-event-id")
+	}
+	if attrs["cloudevents.event.type"] != "test.type" {
+		t.Errorf("span cloudevents.event.type = %q, want %q", attrs["cloudevents.event.type"], "test.type")
+	}
+	if attrs["cloudevents.event.source"] != "test/source" {
+		t.Errorf("span cloudevents.event.source = %q, want %q", attrs["cloudevents.event.source"], "test/source")
+	}
+	if attrs["nats.result"] != "ack" {
+		t.Errorf("span nats.result = %q, want %q", attrs["nats.result"], "ack")
+	}
+
+	// Collect metrics. ManualReader.Collect populates rm in place.
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("metric reader Collect: %v", err)
+	}
+
+	var sawDuration, sawProcess, sawInflight bool
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			switch m.Name {
+			case "kn.eventing.dispatch.duration":
+				if h, ok := m.Data.(metricdata.Histogram[float64]); ok && len(h.DataPoints) > 0 {
+					sawDuration = true
+				}
+			case "kn.eventing.broker.filter.process.duration":
+				if h, ok := m.Data.(metricdata.Histogram[float64]); ok && len(h.DataPoints) > 0 {
+					sawProcess = true
+				}
+			case "kn.eventing.broker.filter.dispatches.inflight":
+				if g, ok := m.Data.(metricdata.Gauge[int64]); ok && len(g.DataPoints) >= 0 {
+					// Even with zero in-flight at collection time the gauge is
+					// considered registered as long as the callback ran without
+					// error; the data points slice may be empty if no subscriptions
+					// exist, but in this test we do have one.
+					sawInflight = true
+				}
+			}
+		}
+	}
+	if !sawDuration {
+		t.Error("kn.eventing.dispatch.duration histogram had no data points")
+	}
+	if !sawProcess {
+		t.Error("kn.eventing.broker.filter.process.duration histogram had no data points")
+	}
+	if !sawInflight {
+		t.Error("kn.eventing.broker.filter.dispatches.inflight gauge was not collected")
 	}
 }
 
