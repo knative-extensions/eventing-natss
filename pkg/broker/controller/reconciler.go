@@ -39,7 +39,9 @@ import (
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/network"
 	pkgreconciler "knative.dev/pkg/reconciler"
+	"knative.dev/pkg/resolver"
 
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
@@ -77,6 +79,9 @@ type Reconciler struct {
 
 	// NATS JetStream connection
 	js nats.JetStreamContext
+
+	// URI resolver for resolving the dead letter sink address
+	uriResolver *resolver.URIResolver
 
 	// NATS URL for data plane components
 	natsURL string
@@ -172,12 +177,17 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 	// Step 9: Mark TriggerChannel as ready (we use JetStream instead of a channel)
 	b.Status.GetConditionSet().Manage(&b.Status).MarkTrue(eventingv1.BrokerConditionTriggerChannel)
 
-	// Step 10: Mark DeadLetterSink condition
+	// Step 10: Resolve the dead letter sink. Triggers without their own
+	// delivery inherit this resolved address (see trigger reconciler).
 	if b.Spec.Delivery == nil || b.Spec.Delivery.DeadLetterSink == nil {
 		b.Status.MarkDeadLetterSinkNotConfigured()
 	} else {
-		// TODO: Resolve dead letter sink URI and mark as succeeded
-		b.Status.MarkDeadLetterSinkNotConfigured()
+		dlsAddr, err := r.resolveDeadLetterSink(ctx, b)
+		if err != nil {
+			b.Status.MarkDeadLetterSinkResolvedFailed("DeadLetterSinkResolveFailed", "Failed to resolve dead letter sink: %v", err)
+			return fmt.Errorf("failed to resolve dead letter sink: %w", err)
+		}
+		b.Status.MarkDeadLetterSinkResolvedSucceeded(eventingduckv1.NewDeliveryStatusFromAddressable(dlsAddr))
 	}
 
 	// Step 11: Mark EventPolicies as ready (not using OIDC authentication)
@@ -216,6 +226,26 @@ func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, 
 	}
 
 	return nil
+}
+
+// resolveDeadLetterSink resolves the broker's dead letter sink to an Addressable.
+// A Ref without a namespace defaults to the broker's namespace.
+func (r *Reconciler) resolveDeadLetterSink(ctx context.Context, b *eventingv1.Broker) (*duckv1.Addressable, error) {
+	dest := b.Spec.Delivery.DeadLetterSink
+	destination := duckv1.Destination{URI: dest.URI}
+	if dest.Ref != nil {
+		namespace := dest.Ref.Namespace
+		if namespace == "" {
+			namespace = b.Namespace
+		}
+		destination.Ref = &duckv1.KReference{
+			Kind:       dest.Ref.Kind,
+			Namespace:  namespace,
+			Name:       dest.Ref.Name,
+			APIVersion: dest.Ref.APIVersion,
+		}
+	}
+	return r.uriResolver.AddressableFromDestinationV1(ctx, destination, b)
 }
 
 // getBrokerConfig loads the broker configuration with the following precedence:

@@ -35,6 +35,7 @@ import (
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/resolver"
 
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	triggerreconciler "knative.dev/eventing/pkg/client/injection/reconciler/eventing/v1/trigger"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
@@ -110,16 +111,36 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, trigger *eventingv1.Trig
 	trigger.Status.SubscriberURI = subscriberURI
 	trigger.Status.MarkSubscriberResolvedSucceeded()
 
-	// Step 3: Handle dead letter sink if configured
-	if trigger.Spec.Delivery != nil && trigger.Spec.Delivery.DeadLetterSink != nil {
-		deadLetterURI, err := r.resolveDeadLetterURI(ctx, trigger)
+	// Step 3: Resolve the dead letter sink following whole-spec precedence. If
+	// the trigger sets any delivery, its spec is used in its entirety (so the
+	// broker's sink is NOT inherited); otherwise the trigger inherits the
+	// broker's already-resolved sink. The full DeliveryStatus (URI + CA certs +
+	// OIDC audience) is carried over so TLS/OIDC-protected sinks work.
+	switch {
+	case brokerutils.DeliveryIsSet(trigger.Spec.Delivery):
+		if trigger.Spec.Delivery.DeadLetterSink == nil {
+			// Trigger has its own delivery but no dead letter sink: it opts out;
+			// do not fall back to the broker's sink.
+			trigger.Status.MarkDeadLetterSinkNotConfigured()
+			break
+		}
+		dlsAddr, err := r.resolveDeadLetterSink(ctx, trigger)
 		if err != nil {
 			trigger.Status.MarkDeadLetterSinkResolvedFailed("DeadLetterSinkResolveFailed", "Failed to resolve dead letter sink: %v", err)
 			return fmt.Errorf("failed to resolve dead letter sink: %w", err)
 		}
-		trigger.Status.DeadLetterSinkURI = deadLetterURI
+		trigger.Status.DeliveryStatus = eventingduckv1.NewDeliveryStatusFromAddressable(dlsAddr)
 		trigger.Status.MarkDeadLetterSinkResolvedSucceeded()
-	} else {
+	case broker.Status.DeadLetterSinkURI != nil:
+		trigger.Status.DeliveryStatus = broker.Status.DeliveryStatus
+		trigger.Status.MarkDeadLetterSinkResolvedSucceeded()
+	case broker.Spec.Delivery != nil && broker.Spec.Delivery.DeadLetterSink != nil:
+		// The broker declares a dead letter sink but its status URI is not
+		// resolved yet. Surface a transient error and requeue rather than
+		// falling through to "not configured", which would be misleading.
+		trigger.Status.MarkDeadLetterSinkResolvedFailed("BrokerDeadLetterSinkNotResolved", "Broker %q dead letter sink is not resolved yet", trigger.Spec.Broker)
+		return fmt.Errorf("broker %q dead letter sink is not resolved yet", trigger.Spec.Broker)
+	default:
 		trigger.Status.MarkDeadLetterSinkNotConfigured()
 	}
 
@@ -201,12 +222,10 @@ func (r *Reconciler) resolveSubscriberURI(ctx context.Context, trigger *eventing
 	return r.uriResolver.URIFromDestinationV1(ctx, destination, trigger)
 }
 
-// resolveDeadLetterURI resolves the dead letter sink URI from the trigger spec
-func (r *Reconciler) resolveDeadLetterURI(ctx context.Context, trigger *eventingv1.Trigger) (*apis.URL, error) {
-	if trigger.Spec.Delivery == nil || trigger.Spec.Delivery.DeadLetterSink == nil {
-		return nil, nil
-	}
-
+// resolveDeadLetterSink resolves the trigger's own dead letter sink to an
+// Addressable. Resolving to a full Addressable (rather than just a URL) retains
+// the CA certs and OIDC audience needed to deliver to a TLS/OIDC-protected sink.
+func (r *Reconciler) resolveDeadLetterSink(ctx context.Context, trigger *eventingv1.Trigger) (*duckv1.Addressable, error) {
 	dest := trigger.Spec.Delivery.DeadLetterSink
 
 	// Convert to duckv1.Destination for the resolver
@@ -226,7 +245,7 @@ func (r *Reconciler) resolveDeadLetterURI(ctx context.Context, trigger *eventing
 		}
 	}
 
-	return r.uriResolver.URIFromDestinationV1(ctx, destination, trigger)
+	return r.uriResolver.AddressableFromDestinationV1(ctx, destination, trigger)
 }
 
 // reconcileConsumer creates or updates the JetStream consumer for the trigger
@@ -283,13 +302,13 @@ func (r *Reconciler) buildConsumerConfig(trigger *eventingv1.Trigger, broker *ev
 	ackWait := 30 * time.Second
 	maxDeliver := 3
 
-	// Apply delivery configuration from trigger spec
-	if trigger.Spec.Delivery != nil {
-		if trigger.Spec.Delivery.Retry != nil {
-			maxDeliver = int(*trigger.Spec.Delivery.Retry) + 1
+	// Apply effective delivery: trigger spec overrides broker spec field-by-field.
+	if delivery := brokerutils.EffectiveDelivery(trigger, broker); delivery != nil {
+		if delivery.Retry != nil {
+			maxDeliver = int(*delivery.Retry) + 1
 		}
-		if trigger.Spec.Delivery.Timeout != nil {
-			timeout, err := period.Parse(*trigger.Spec.Delivery.Timeout)
+		if delivery.Timeout != nil {
+			timeout, err := period.Parse(*delivery.Timeout)
 			if err == nil {
 				ackWait, _ = timeout.Duration()
 			}
