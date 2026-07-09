@@ -21,47 +21,31 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 )
 
-// EffectiveDelivery merges a trigger's delivery spec over its broker's,
-// returning the trigger's value for each field when set and falling back to the
-// broker's otherwise. This implements Knative semantics where Broker.Spec.Delivery
-// is the default for every trigger and Trigger.Spec.Delivery overrides it
-// field-by-field. Returns nil when neither configures delivery.
+// DeliveryIsSet reports whether the delivery spec configures anything. A nil
+// spec, or a non-nil spec with every field unset, is considered not set.
+func DeliveryIsSet(d *eventingduckv1.DeliverySpec) bool {
+	return d != nil && (d.DeadLetterSink != nil ||
+		d.Retry != nil ||
+		d.Timeout != nil ||
+		d.BackoffPolicy != nil ||
+		d.BackoffDelay != nil ||
+		d.RetryAfterMax != nil ||
+		d.Format != nil)
+}
+
+// EffectiveDelivery returns the delivery spec that applies to a trigger. The
+// trigger's spec takes precedence as a whole: if the trigger sets any delivery
+// field, its spec is used in its entirety and nothing is taken from the broker.
+// The broker's spec is used only when the trigger configures no delivery. This
+// matches Knative semantics, where Trigger.Spec.Delivery overrides
+// Broker.Spec.Delivery wholesale rather than field-by-field. Returns nil when
+// neither configures delivery.
 func EffectiveDelivery(trigger *eventingv1.Trigger, broker *eventingv1.Broker) *eventingduckv1.DeliverySpec {
-	var t, b *eventingduckv1.DeliverySpec
-	if trigger != nil {
-		t = trigger.Spec.Delivery
+	if trigger != nil && DeliveryIsSet(trigger.Spec.Delivery) {
+		return trigger.Spec.Delivery
 	}
 	if broker != nil {
-		b = broker.Spec.Delivery
+		return broker.Spec.Delivery
 	}
-	switch {
-	case t == nil:
-		return b
-	case b == nil:
-		return t
-	}
-
-	out := *t
-	if out.Retry == nil {
-		out.Retry = b.Retry
-	}
-	if out.Timeout == nil {
-		out.Timeout = b.Timeout
-	}
-	if out.BackoffPolicy == nil {
-		out.BackoffPolicy = b.BackoffPolicy
-	}
-	if out.BackoffDelay == nil {
-		out.BackoffDelay = b.BackoffDelay
-	}
-	if out.RetryAfterMax == nil {
-		out.RetryAfterMax = b.RetryAfterMax
-	}
-	if out.Format == nil {
-		out.Format = b.Format
-	}
-	if out.DeadLetterSink == nil {
-		out.DeadLetterSink = b.DeadLetterSink
-	}
-	return &out
+	return nil
 }

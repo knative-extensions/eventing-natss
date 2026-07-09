@@ -111,12 +111,19 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, trigger *eventingv1.Trig
 	trigger.Status.SubscriberURI = subscriberURI
 	trigger.Status.MarkSubscriberResolvedSucceeded()
 
-	// Step 3: Resolve the dead letter sink. A trigger's own DeadLetterSink takes
-	// precedence; otherwise it inherits the broker's already-resolved sink. In
-	// both cases the full DeliveryStatus (URI + CA certs + OIDC audience) is
-	// carried over so TLS/OIDC-protected sinks can be delivered to.
+	// Step 3: Resolve the dead letter sink following whole-spec precedence. If
+	// the trigger sets any delivery, its spec is used in its entirety (so the
+	// broker's sink is NOT inherited); otherwise the trigger inherits the
+	// broker's already-resolved sink. The full DeliveryStatus (URI + CA certs +
+	// OIDC audience) is carried over so TLS/OIDC-protected sinks work.
 	switch {
-	case trigger.Spec.Delivery != nil && trigger.Spec.Delivery.DeadLetterSink != nil:
+	case brokerutils.DeliveryIsSet(trigger.Spec.Delivery):
+		if trigger.Spec.Delivery.DeadLetterSink == nil {
+			// Trigger has its own delivery but no dead letter sink: it opts out;
+			// do not fall back to the broker's sink.
+			trigger.Status.MarkDeadLetterSinkNotConfigured()
+			break
+		}
 		dlsAddr, err := r.resolveDeadLetterSink(ctx, trigger)
 		if err != nil {
 			trigger.Status.MarkDeadLetterSinkResolvedFailed("DeadLetterSinkResolveFailed", "Failed to resolve dead letter sink: %v", err)

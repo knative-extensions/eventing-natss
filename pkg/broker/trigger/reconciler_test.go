@@ -520,7 +520,7 @@ func TestBuildConsumerConfig(t *testing.T) {
 			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
 		},
 		{
-			name: "trigger delivery overrides broker field-by-field",
+			name: "trigger delivery replaces broker wholesale",
 			trigger: func() *eventingv1.Trigger {
 				retry := int32(1)
 				trigger := newTriggerWithSubscriber(testNamespace, testTriggerName, testBrokerName, "subscriber.example.com")
@@ -534,8 +534,8 @@ func TestBuildConsumerConfig(t *testing.T) {
 				return b
 			}(),
 			consumerName:   "test-consumer",
-			wantAckWait:    time.Minute, // inherited from broker (trigger has no timeout)
-			wantMaxDeliver: 2,           // trigger retry wins
+			wantAckWait:    30 * time.Second, // trigger spec wins wholesale; its unset timeout is NOT inherited
+			wantMaxDeliver: 2,                // trigger retry + 1
 			wantAckPolicy:  nats.AckExplicitPolicy,
 			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
 		},
