@@ -35,6 +35,7 @@ import (
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/resolver"
 
+	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	triggerreconciler "knative.dev/eventing/pkg/client/injection/reconciler/eventing/v1/trigger"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
@@ -111,19 +112,27 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, trigger *eventingv1.Trig
 	trigger.Status.MarkSubscriberResolvedSucceeded()
 
 	// Step 3: Resolve the dead letter sink. A trigger's own DeadLetterSink takes
-	// precedence; otherwise it inherits the broker's already-resolved sink.
+	// precedence; otherwise it inherits the broker's already-resolved sink. In
+	// both cases the full DeliveryStatus (URI + CA certs + OIDC audience) is
+	// carried over so TLS/OIDC-protected sinks can be delivered to.
 	switch {
 	case trigger.Spec.Delivery != nil && trigger.Spec.Delivery.DeadLetterSink != nil:
-		deadLetterURI, err := r.resolveDeadLetterURI(ctx, trigger)
+		dlsAddr, err := r.resolveDeadLetterSink(ctx, trigger)
 		if err != nil {
 			trigger.Status.MarkDeadLetterSinkResolvedFailed("DeadLetterSinkResolveFailed", "Failed to resolve dead letter sink: %v", err)
 			return fmt.Errorf("failed to resolve dead letter sink: %w", err)
 		}
-		trigger.Status.DeadLetterSinkURI = deadLetterURI
+		trigger.Status.DeliveryStatus = eventingduckv1.NewDeliveryStatusFromAddressable(dlsAddr)
 		trigger.Status.MarkDeadLetterSinkResolvedSucceeded()
 	case broker.Status.DeadLetterSinkURI != nil:
-		trigger.Status.DeadLetterSinkURI = broker.Status.DeadLetterSinkURI
+		trigger.Status.DeliveryStatus = broker.Status.DeliveryStatus
 		trigger.Status.MarkDeadLetterSinkResolvedSucceeded()
+	case broker.Spec.Delivery != nil && broker.Spec.Delivery.DeadLetterSink != nil:
+		// The broker declares a dead letter sink but its status URI is not
+		// resolved yet. Surface a transient error and requeue rather than
+		// falling through to "not configured", which would be misleading.
+		trigger.Status.MarkDeadLetterSinkResolvedFailed("BrokerDeadLetterSinkNotResolved", "Broker %q dead letter sink is not resolved yet", trigger.Spec.Broker)
+		return fmt.Errorf("broker %q dead letter sink is not resolved yet", trigger.Spec.Broker)
 	default:
 		trigger.Status.MarkDeadLetterSinkNotConfigured()
 	}
@@ -206,12 +215,10 @@ func (r *Reconciler) resolveSubscriberURI(ctx context.Context, trigger *eventing
 	return r.uriResolver.URIFromDestinationV1(ctx, destination, trigger)
 }
 
-// resolveDeadLetterURI resolves the dead letter sink URI from the trigger spec
-func (r *Reconciler) resolveDeadLetterURI(ctx context.Context, trigger *eventingv1.Trigger) (*apis.URL, error) {
-	if trigger.Spec.Delivery == nil || trigger.Spec.Delivery.DeadLetterSink == nil {
-		return nil, nil
-	}
-
+// resolveDeadLetterSink resolves the trigger's own dead letter sink to an
+// Addressable. Resolving to a full Addressable (rather than just a URL) retains
+// the CA certs and OIDC audience needed to deliver to a TLS/OIDC-protected sink.
+func (r *Reconciler) resolveDeadLetterSink(ctx context.Context, trigger *eventingv1.Trigger) (*duckv1.Addressable, error) {
 	dest := trigger.Spec.Delivery.DeadLetterSink
 
 	// Convert to duckv1.Destination for the resolver
@@ -231,7 +238,7 @@ func (r *Reconciler) resolveDeadLetterURI(ctx context.Context, trigger *eventing
 		}
 	}
 
-	return r.uriResolver.URIFromDestinationV1(ctx, destination, trigger)
+	return r.uriResolver.AddressableFromDestinationV1(ctx, destination, trigger)
 }
 
 // reconcileConsumer creates or updates the JetStream consumer for the trigger

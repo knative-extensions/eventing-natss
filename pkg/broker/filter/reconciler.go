@@ -153,10 +153,16 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 		brokerIngressURL = &duckv1.Addressable{URL: broker.Status.Address.URL.DeepCopy()}
 	}
 
-	// Get dead letter sink if configured
+	// Get dead letter sink if configured. Carry the CA certs and OIDC audience
+	// resolved into the trigger status so delivery to a TLS/OIDC-protected sink
+	// works, not just the URL.
 	var deadLetterSink *duckv1.Addressable
 	if trigger.Status.DeadLetterSinkURI != nil {
-		deadLetterSink = &duckv1.Addressable{URL: trigger.Status.DeadLetterSinkURI.DeepCopy()}
+		deadLetterSink = &duckv1.Addressable{
+			URL:      trigger.Status.DeadLetterSinkURI.DeepCopy(),
+			CACerts:  trigger.Status.DeadLetterSinkCACerts,
+			Audience: trigger.Status.DeadLetterSinkAudience,
+		}
 	}
 
 	// Build retry config from the effective delivery spec (trigger overrides broker).
