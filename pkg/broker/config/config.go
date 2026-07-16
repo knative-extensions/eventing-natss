@@ -134,7 +134,7 @@ func BuildNatsStreamConfig(streamName, publishSubject string, config *NatsJetStr
 
 	if config == nil || config.Stream == nil {
 		// Use defaults
-		streamConfig.Retention = nats.InterestPolicy
+		streamConfig.Retention = nats.LimitsPolicy
 		streamConfig.Storage = nats.FileStorage
 		streamConfig.Replicas = 1
 		streamConfig.Discard = nats.DiscardOld
@@ -148,7 +148,9 @@ func BuildNatsStreamConfig(streamName, publishSubject string, config *NatsJetStr
 		streamConfig.Subjects = append(streamConfig.Subjects, sc.AdditionalSubjects...)
 	}
 
-	streamConfig.Retention = utils.ConvertRetentionPolicy(sc.Retention, nats.InterestPolicy)
+	// Default to Limits (not Interest) so a stream without a consumer still
+	// retains messages — e.g. a broker whose triggers/filter are not yet created.
+	streamConfig.Retention = utils.ConvertRetentionPolicy(sc.Retention, nats.LimitsPolicy)
 	streamConfig.MaxConsumers = sc.MaxConsumers
 	streamConfig.MaxMsgs = sc.MaxMsgs
 	streamConfig.MaxBytes = sc.MaxBytes
