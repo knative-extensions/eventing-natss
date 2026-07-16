@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/client-go/tools/cache"
 
+	"k8s.io/apimachinery/pkg/types"
 	kubeclient "knative.dev/pkg/client/injection/kube/client"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
@@ -34,6 +35,7 @@ import (
 	"knative.dev/eventing/pkg/client/injection/reconciler/eventing/v1/broker"
 
 	brokerinformer "knative.dev/eventing/pkg/client/injection/informers/eventing/v1/broker"
+	triggerinformer "knative.dev/eventing/pkg/client/injection/informers/eventing/v1/trigger"
 	deploymentinformer "knative.dev/pkg/client/injection/kube/informers/apps/v1/deployment"
 	configmapinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/configmap"
 	serviceinformer "knative.dev/pkg/client/injection/kube/informers/core/v1/service"
@@ -112,6 +114,7 @@ func NewController(
 
 	// Get informers
 	brokerInformer := brokerinformer.Get(ctx)
+	triggerInformer := triggerinformer.Get(ctx)
 	deploymentInformer := deploymentinformer.Get(ctx)
 	serviceInformer := serviceinformer.Get(ctx)
 	configMapInformer := configmapinformer.Get(ctx)
@@ -128,6 +131,7 @@ func NewController(
 
 		deploymentLister: deploymentInformer.Lister(),
 		serviceLister:    serviceInformer.Lister(),
+		triggerLister:    triggerInformer.Lister(),
 
 		contractManager: contractManager,
 
@@ -166,7 +170,27 @@ func NewController(
 		Handler:    controller.HandleAll(impl.EnqueueControllerOf),
 	})
 
+	// Watch Triggers so a broker is re-reconciled when a trigger referencing it
+	// is added or removed — this is what creates/deletes the per-broker filter.
+	triggerInformer.Informer().AddEventHandler(controller.HandleAll(enqueueBrokerOfTrigger(impl)))
+
 	logger.Info("NATS JetStream Broker controller initialized")
 
 	return impl
+}
+
+// enqueueBrokerOfTrigger returns a handler that enqueues the broker referenced
+// by a trigger. Enqueuing a broker of another class is a harmless no-op since
+// ReconcileKind only runs for our broker class. Handles delete tombstones.
+func enqueueBrokerOfTrigger(impl *controller.Impl) func(obj interface{}) {
+	return func(obj interface{}) {
+		if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
+			obj = tombstone.Obj
+		}
+		trigger, ok := obj.(*eventingv1.Trigger)
+		if !ok || trigger.Spec.Broker == "" {
+			return
+		}
+		impl.EnqueueKey(types.NamespacedName{Namespace: trigger.Namespace, Name: trigger.Spec.Broker})
+	}
 }
