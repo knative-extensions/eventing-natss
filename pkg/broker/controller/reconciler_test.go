@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/nats-io/nats.go"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -28,16 +29,26 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	appsv1listers "k8s.io/client-go/listers/apps/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	clienttesting "k8s.io/client-go/testing"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 
 	"go.uber.org/zap"
+	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
+	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
+	"knative.dev/eventing-natss/pkg/broker/contract"
 	"knative.dev/eventing-natss/pkg/broker/controller/resources"
+	brokerutils "knative.dev/eventing-natss/pkg/broker/utils"
+	natsTesting "knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/testing"
 )
 
 const (
@@ -145,6 +156,363 @@ func TestDeleteFilter(t *testing.T) {
 		}
 		if cond := b.Status.GetCondition(eventingv1.BrokerConditionFilter); cond == nil || cond.IsTrue() {
 			t.Errorf("expected BrokerConditionFilter to be marked failed, got %v", cond)
+		}
+	})
+}
+
+func testContext() context.Context {
+	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
+	return controller.WithEventRecorder(ctx, record.NewFakeRecorder(100))
+}
+
+func newDeploymentLister(objs ...*appsv1.Deployment) appsv1listers.DeploymentLister {
+	idx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	for _, o := range objs {
+		_ = idx.Add(o)
+	}
+	return appsv1listers.NewDeploymentLister(idx)
+}
+
+func newServiceLister(objs ...*corev1.Service) corev1listers.ServiceLister {
+	idx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	for _, o := range objs {
+		_ = idx.Add(o)
+	}
+	return corev1listers.NewServiceLister(idx)
+}
+
+func deploymentWithReady(ns, name string, ready int32) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Status:     appsv1.DeploymentStatus{ReadyReplicas: ready},
+	}
+}
+
+func TestReconcileDataplaneRBAC(t *testing.T) {
+	kube := kubefake.NewSimpleClientset()
+	r := &Reconciler{kubeClientSet: kube, filterServiceAccount: "dp-sa"}
+	ctx := testContext()
+	b := testBroker(testNamespace, testBrokerName)
+
+	if err := r.reconcileDataplaneRBAC(ctx, b); err != nil {
+		t.Fatalf("reconcileDataplaneRBAC() error: %v", err)
+	}
+	if _, err := kube.CoreV1().ServiceAccounts(testNamespace).Get(ctx, "dp-sa", metav1.GetOptions{}); err != nil {
+		t.Errorf("service account not created: %v", err)
+	}
+	crbName := DataplaneClusterRoleName + "-" + testNamespace
+	if _, err := kube.RbacV1().ClusterRoleBindings().Get(ctx, crbName, metav1.GetOptions{}); err != nil {
+		t.Errorf("cluster role binding not created: %v", err)
+	}
+	// Running again is a no-op (resources already exist).
+	if err := r.reconcileDataplaneRBAC(ctx, b); err != nil {
+		t.Errorf("second reconcileDataplaneRBAC() error: %v", err)
+	}
+}
+
+func TestGetBrokerConfig(t *testing.T) {
+	ctx := testContext()
+
+	t.Run("from broker annotation", func(t *testing.T) {
+		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset()}
+		b := testBroker(testNamespace, testBrokerName)
+		b.Annotations = map[string]string{brokerconfig.BrokerConfigAnnotation: `{"stream":{"replicas":3}}`}
+		cfg, err := r.getBrokerConfig(ctx, b)
+		if err != nil {
+			t.Fatalf("getBrokerConfig() error: %v", err)
+		}
+		if cfg.Stream == nil || cfg.Stream.Replicas != 3 {
+			t.Errorf("Stream.Replicas = %+v, want 3", cfg.Stream)
+		}
+	})
+
+	t.Run("hardcoded defaults when no configmap", func(t *testing.T) {
+		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset()}
+		b := testBroker(testNamespace, testBrokerName)
+		cfg, err := r.getBrokerConfig(ctx, b)
+		if err != nil {
+			t.Fatalf("getBrokerConfig() error: %v", err)
+		}
+		if cfg.Stream.Replicas != 1 {
+			t.Errorf("Stream.Replicas = %d, want 1 (default)", cfg.Stream.Replicas)
+		}
+	})
+}
+
+func TestReconcileStream(t *testing.T) {
+	s := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, s)
+	conn, js := natsTesting.JsClient(t, s)
+	defer conn.Close()
+
+	r := &Reconciler{js: js}
+	ctx := testContext()
+	b := testBroker(testNamespace, testBrokerName)
+	streamName := brokerutils.BrokerStreamName(b)
+	publish := brokerutils.BrokerPublishSubjectName(b.Namespace, b.Name)
+
+	if err := r.reconcileStream(ctx, b, streamName, publish, brokerconfig.DefaultBrokerConfig()); err != nil {
+		t.Fatalf("reconcileStream() error: %v", err)
+	}
+	if _, err := js.StreamInfo(streamName); err != nil {
+		t.Fatalf("stream not created: %v", err)
+	}
+	// Idempotent when the stream already exists.
+	if err := r.reconcileStream(ctx, b, streamName, publish, brokerconfig.DefaultBrokerConfig()); err != nil {
+		t.Errorf("second reconcileStream() error: %v", err)
+	}
+}
+
+func TestPropagateIngressAvailability(t *testing.T) {
+	const ingressNS, ingressName = "knative-eventing", "nats-broker-ingress"
+	tests := []struct {
+		name      string
+		dep       *appsv1.Deployment
+		wantReady bool
+	}{
+		{name: "ready", dep: deploymentWithReady(ingressNS, ingressName, 1), wantReady: true},
+		{name: "no ready replicas", dep: deploymentWithReady(ingressNS, ingressName, 0), wantReady: false},
+		{name: "missing", dep: nil, wantReady: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var deps []*appsv1.Deployment
+			if tc.dep != nil {
+				deps = append(deps, tc.dep)
+			}
+			r := &Reconciler{deploymentLister: newDeploymentLister(deps...), ingressServiceName: ingressName, ingressNamespace: ingressNS}
+			b := testBroker(testNamespace, testBrokerName)
+			if err := r.propagateIngressAvailability(testContext(), b); err != nil {
+				t.Fatalf("propagateIngressAvailability() error: %v", err)
+			}
+			cond := b.Status.GetCondition(eventingv1.BrokerConditionIngress)
+			if tc.wantReady != (cond != nil && cond.IsTrue()) {
+				t.Errorf("ingress condition = %v, wantReady %v", cond, tc.wantReady)
+			}
+		})
+	}
+}
+
+func TestPropagateFilterAvailability(t *testing.T) {
+	filterName := resources.FilterName(testBrokerName)
+	tests := []struct {
+		name      string
+		dep       *appsv1.Deployment
+		wantReady bool
+	}{
+		{name: "ready", dep: deploymentWithReady(testNamespace, filterName, 1), wantReady: true},
+		{name: "no ready replicas", dep: deploymentWithReady(testNamespace, filterName, 0), wantReady: false},
+		{name: "missing", dep: nil, wantReady: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var deps []*appsv1.Deployment
+			if tc.dep != nil {
+				deps = append(deps, tc.dep)
+			}
+			r := &Reconciler{deploymentLister: newDeploymentLister(deps...)}
+			b := testBroker(testNamespace, testBrokerName)
+			if err := r.propagateFilterAvailability(testContext(), b, nil); err != nil {
+				t.Fatalf("propagateFilterAvailability() error: %v", err)
+			}
+			cond := b.Status.GetCondition(eventingv1.BrokerConditionFilter)
+			if tc.wantReady != (cond != nil && cond.IsTrue()) {
+				t.Errorf("filter condition = %v, wantReady %v", cond, tc.wantReady)
+			}
+		})
+	}
+}
+
+func TestReconcileFilterServiceCreate(t *testing.T) {
+	kube := kubefake.NewSimpleClientset()
+	r := &Reconciler{kubeClientSet: kube, serviceLister: newServiceLister()}
+	b := testBroker(testNamespace, testBrokerName)
+
+	svc, err := r.reconcileFilterService(testContext(), b)
+	if err != nil {
+		t.Fatalf("reconcileFilterService() error: %v", err)
+	}
+	if svc == nil {
+		t.Fatal("reconcileFilterService() returned nil service")
+	}
+	if _, gerr := kube.CoreV1().Services(testNamespace).Get(context.Background(), resources.FilterName(testBrokerName), metav1.GetOptions{}); gerr != nil {
+		t.Errorf("filter service not created: %v", gerr)
+	}
+}
+
+func TestReconcileFilterDeploymentCreate(t *testing.T) {
+	kube := kubefake.NewSimpleClientset()
+	r := &Reconciler{
+		kubeClientSet:        kube,
+		deploymentLister:     newDeploymentLister(),
+		filterImage:          "filter:latest",
+		filterServiceAccount: "dp-sa",
+		natsURL:              "nats://localhost:4222",
+	}
+	b := testBroker(testNamespace, testBrokerName)
+
+	if err := r.reconcileFilterDeployment(testContext(), b, "TEST_STREAM", brokerconfig.DefaultBrokerConfig()); err != nil {
+		t.Fatalf("reconcileFilterDeployment() error: %v", err)
+	}
+	if _, gerr := kube.AppsV1().Deployments(testNamespace).Get(context.Background(), resources.FilterName(testBrokerName), metav1.GetOptions{}); gerr != nil {
+		t.Errorf("filter deployment not created: %v", gerr)
+	}
+}
+
+func TestReconcileFilterServiceUpdate(t *testing.T) {
+	name := resources.FilterName(testBrokerName)
+	// Existing service with an empty spec differs from the expected spec, so the
+	// update branch runs.
+	existing := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: name}}
+	kube := kubefake.NewSimpleClientset(existing)
+	r := &Reconciler{kubeClientSet: kube, serviceLister: newServiceLister(existing)}
+
+	if _, err := r.reconcileFilterService(testContext(), testBroker(testNamespace, testBrokerName)); err != nil {
+		t.Fatalf("reconcileFilterService() error: %v", err)
+	}
+	got, err := kube.CoreV1().Services(testNamespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get service: %v", err)
+	}
+	if len(got.Spec.Ports) == 0 {
+		t.Error("service spec was not updated to the expected spec")
+	}
+}
+
+func TestReconcileFilterDeploymentUpdate(t *testing.T) {
+	name := resources.FilterName(testBrokerName)
+	existing := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: testNamespace, Name: name}}
+	kube := kubefake.NewSimpleClientset(existing)
+	r := &Reconciler{
+		kubeClientSet:        kube,
+		deploymentLister:     newDeploymentLister(existing),
+		filterImage:          "filter:latest",
+		filterServiceAccount: "dp-sa",
+		natsURL:              "nats://localhost:4222",
+	}
+
+	if err := r.reconcileFilterDeployment(testContext(), testBroker(testNamespace, testBrokerName), "TEST_STREAM", brokerconfig.DefaultBrokerConfig()); err != nil {
+		t.Fatalf("reconcileFilterDeployment() error: %v", err)
+	}
+	got, err := kube.AppsV1().Deployments(testNamespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get deployment: %v", err)
+	}
+	if len(got.Spec.Template.Spec.Containers) == 0 {
+		t.Error("deployment spec was not updated to the expected spec")
+	}
+}
+
+func TestEnqueueBrokerOfTrigger(t *testing.T) {
+	var got []types.NamespacedName
+	h := enqueueBrokerOfTrigger(func(k types.NamespacedName) { got = append(got, k) })
+
+	h(testTrigger(testNamespace, "t1", "broker-a"))                                                // enqueues broker-a
+	h(&corev1.Pod{})                                                                               // not a trigger → ignored
+	h(cache.DeletedFinalStateUnknown{Key: "k", Obj: testTrigger(testNamespace, "t2", "broker-b")}) // tombstone → broker-b
+	h(testTrigger(testNamespace, "t3", ""))                                                        // empty broker ref → ignored
+
+	want := []types.NamespacedName{
+		{Namespace: testNamespace, Name: "broker-a"},
+		{Namespace: testNamespace, Name: "broker-b"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("enqueued %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("enqueued[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFinalizeKind(t *testing.T) {
+	t.Setenv("SYSTEM_NAMESPACE", "knative-eventing")
+
+	s := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, s)
+	conn, js := natsTesting.JsClient(t, s)
+	defer conn.Close()
+
+	kube := kubefake.NewSimpleClientset()
+	cmLister := corev1listers.NewConfigMapLister(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}))
+	r := &Reconciler{js: js, contractManager: contract.NewManager(kube, cmLister)}
+	ctx := testContext()
+	b := testBroker(testNamespace, testBrokerName)
+
+	streamName := brokerutils.BrokerStreamName(b)
+	if _, err := js.AddStream(&nats.StreamConfig{
+		Name:     streamName,
+		Subjects: []string{brokerutils.BrokerPublishSubjectName(b.Namespace, b.Name) + ".>"},
+	}); err != nil {
+		t.Fatalf("AddStream() error: %v", err)
+	}
+
+	if err := r.FinalizeKind(ctx, b); err != nil {
+		t.Fatalf("FinalizeKind() error: %v", err)
+	}
+	if _, err := js.StreamInfo(streamName); !errors.Is(err, nats.ErrStreamNotFound) {
+		t.Errorf("stream not deleted: got err %v", err)
+	}
+}
+
+func TestReconcileKind(t *testing.T) {
+	const ingressNS, ingressName = "knative-eventing", "nats-broker-ingress"
+
+	setup := func(t *testing.T, triggers ...*eventingv1.Trigger) (*Reconciler, *kubefake.Clientset) {
+		t.Setenv("SYSTEM_NAMESPACE", ingressNS)
+		s := natsTesting.RunBasicJetstreamServer()
+		t.Cleanup(func() { natsTesting.ShutdownJSServerAndRemoveStorage(t, s) })
+		conn, js := natsTesting.JsClient(t, s)
+		t.Cleanup(func() { conn.Close() })
+
+		kube := kubefake.NewSimpleClientset()
+		cmLister := corev1listers.NewConfigMapLister(cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}))
+		triggerLister := newFakeTriggerLister()
+		for _, tr := range triggers {
+			triggerLister.add(tr)
+		}
+		r := &Reconciler{
+			kubeClientSet:        kube,
+			js:                   js,
+			triggerLister:        triggerLister,
+			deploymentLister:     newDeploymentLister(deploymentWithReady(ingressNS, ingressName, 1)),
+			serviceLister:        newServiceLister(),
+			contractManager:      contract.NewManager(kube, cmLister),
+			filterImage:          "filter:latest",
+			filterServiceAccount: "dp-sa",
+			natsURL:              "nats://localhost:4222",
+			ingressServiceName:   ingressName,
+			ingressNamespace:     ingressNS,
+		}
+		return r, kube
+	}
+
+	t.Run("no triggers: no filter created, filter condition NoTriggers", func(t *testing.T) {
+		r, kube := setup(t)
+		b := testBroker(testNamespace, testBrokerName)
+
+		if err := r.ReconcileKind(testContext(), b); err != nil {
+			t.Fatalf("ReconcileKind() error: %v", err)
+		}
+		if _, err := kube.AppsV1().Deployments(testNamespace).Get(context.Background(), resources.FilterName(testBrokerName), metav1.GetOptions{}); !apierrs.IsNotFound(err) {
+			t.Errorf("filter deployment should not exist, got err %v", err)
+		}
+		cond := b.Status.GetCondition(eventingv1.BrokerConditionFilter)
+		if cond == nil || cond.Reason != "NoTriggers" {
+			t.Errorf("filter condition = %v, want reason NoTriggers", cond)
+		}
+	})
+
+	t.Run("with a trigger: filter deployment is created", func(t *testing.T) {
+		r, kube := setup(t, testTrigger(testNamespace, "t1", testBrokerName))
+		b := testBroker(testNamespace, testBrokerName)
+
+		if err := r.ReconcileKind(testContext(), b); err != nil {
+			t.Fatalf("ReconcileKind() error: %v", err)
+		}
+		if _, err := kube.AppsV1().Deployments(testNamespace).Get(context.Background(), resources.FilterName(testBrokerName), metav1.GetOptions{}); err != nil {
+			t.Errorf("filter deployment should be created: %v", err)
 		}
 	})
 }

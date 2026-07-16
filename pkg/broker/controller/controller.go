@@ -172,7 +172,7 @@ func NewController(
 
 	// Watch Triggers so a broker is re-reconciled when a trigger referencing it
 	// is added or removed — this is what creates/deletes the per-broker filter.
-	triggerInformer.Informer().AddEventHandler(controller.HandleAll(enqueueBrokerOfTrigger(impl)))
+	triggerInformer.Informer().AddEventHandler(controller.HandleAll(enqueueBrokerOfTrigger(impl.EnqueueKey)))
 
 	logger.Info("NATS JetStream Broker controller initialized")
 
@@ -182,7 +182,7 @@ func NewController(
 // enqueueBrokerOfTrigger returns a handler that enqueues the broker referenced
 // by a trigger. Enqueuing a broker of another class is a harmless no-op since
 // ReconcileKind only runs for our broker class. Handles delete tombstones.
-func enqueueBrokerOfTrigger(impl *controller.Impl) func(obj interface{}) {
+func enqueueBrokerOfTrigger(enqueue func(types.NamespacedName)) func(obj interface{}) {
 	return func(obj interface{}) {
 		if tombstone, ok := obj.(cache.DeletedFinalStateUnknown); ok {
 			obj = tombstone.Obj
@@ -191,6 +191,6 @@ func enqueueBrokerOfTrigger(impl *controller.Impl) func(obj interface{}) {
 		if !ok || trigger.Spec.Broker == "" {
 			return
 		}
-		impl.EnqueueKey(types.NamespacedName{Namespace: trigger.Namespace, Name: trigger.Spec.Broker})
+		enqueue(types.NamespacedName{Namespace: trigger.Namespace, Name: trigger.Spec.Broker})
 	}
 }
