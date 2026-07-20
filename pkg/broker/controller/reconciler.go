@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	appsv1listers "k8s.io/client-go/listers/apps/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -43,6 +44,7 @@ import (
 
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
+	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 	"knative.dev/eventing-natss/pkg/broker/contract"
@@ -73,6 +75,9 @@ type Reconciler struct {
 	// Listers for Kubernetes resources
 	deploymentLister appsv1listers.DeploymentLister
 	serviceLister    corev1listers.ServiceLister
+
+	// Lister for Triggers, used to decide whether a broker needs a filter
+	triggerLister eventinglisters.TriggerLister
 
 	// Contract manager for updating shared ingress configuration
 	contractManager *contract.Manager
@@ -148,20 +153,35 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 		return err
 	}
 
-	// Step 5: Reconcile filter deployment
-	if err := r.reconcileFilterDeployment(ctx, b, streamName, brokerCfg); err != nil {
-		return err
-	}
-
-	// Step 6: Reconcile filter service
-	filterService, err := r.reconcileFilterService(ctx, b)
+	// Steps 5-7: The per-broker filter only dispatches events to trigger
+	// subscribers, so it is needed only when triggers exist. Ingress and the
+	// JetStream stream (steps 2-4) are always reconciled, so events are still
+	// received and stored regardless of triggers — a filter created later
+	// consumes the buffered messages.
+	hasTriggers, err := r.hasTriggers(b)
 	if err != nil {
-		return err
+		b.Status.MarkFilterFailed("TriggerListFailed", "Failed to list triggers: %v", err)
+		return fmt.Errorf("failed to list triggers: %w", err)
 	}
-
-	// Step 7: Check filter deployment readiness
-	if err := r.propagateFilterAvailability(ctx, b, filterService); err != nil {
-		return err
+	if hasTriggers {
+		if err := r.reconcileFilterDeployment(ctx, b, streamName, brokerCfg); err != nil {
+			return err
+		}
+		filterService, err := r.reconcileFilterService(ctx, b)
+		if err != nil {
+			return err
+		}
+		if err := r.propagateFilterAvailability(ctx, b, filterService); err != nil {
+			return err
+		}
+	} else {
+		// No triggers reference this broker: tear down the filter if present and
+		// mark the condition ready so the broker still becomes Ready (required
+		// before any trigger can be created against it).
+		if err := r.deleteFilter(ctx, b); err != nil {
+			return err
+		}
+		b.Status.GetConditionSet().Manage(&b.Status).MarkTrueWithReason(eventingv1.BrokerConditionFilter, "NoTriggers", "No triggers reference this broker")
 	}
 
 	// Step 8: Set broker address to shared ingress with path
@@ -424,6 +444,39 @@ func (r *Reconciler) reconcileFilterService(ctx context.Context, b *eventingv1.B
 	}
 
 	return existing, nil
+}
+
+// hasTriggers reports whether any Trigger in the broker's namespace references it.
+func (r *Reconciler) hasTriggers(b *eventingv1.Broker) (bool, error) {
+	triggers, err := r.triggerLister.Triggers(b.Namespace).List(labels.Everything())
+	if err != nil {
+		return false, err
+	}
+	for _, t := range triggers {
+		if t.Spec.Broker == b.Name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// deleteFilter removes the filter deployment and service for a broker with no
+// triggers. Missing resources are treated as already deleted.
+func (r *Reconciler) deleteFilter(ctx context.Context, b *eventingv1.Broker) pkgreconciler.Event {
+	logger := logging.FromContext(ctx)
+	name := resources.FilterName(b.Name)
+
+	if err := r.kubeClientSet.AppsV1().Deployments(b.Namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrs.IsNotFound(err) {
+		logger.Errorw("Failed to delete filter deployment", zap.Error(err))
+		b.Status.MarkFilterFailed("FilterDeploymentDeleteFailed", "Failed to delete filter deployment: %v", err)
+		return fmt.Errorf("failed to delete filter deployment: %w", err)
+	}
+	if err := r.kubeClientSet.CoreV1().Services(b.Namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil && !apierrs.IsNotFound(err) {
+		logger.Errorw("Failed to delete filter service", zap.Error(err))
+		b.Status.MarkFilterFailed("FilterServiceDeleteFailed", "Failed to delete filter service: %v", err)
+		return fmt.Errorf("failed to delete filter service: %w", err)
+	}
+	return nil
 }
 
 // FinalizeKind cleans up resources when the broker is deleted
