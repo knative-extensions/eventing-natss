@@ -129,18 +129,95 @@ func TestStartTraceFromMessageTraceStateIsNil(t *testing.T) {
 }
 
 func TestSerializeTraceTransformers(t *testing.T) {
-	msg := cloudevents.NewEvent()
-	headerCarrier := propagation.HeaderCarrier{}
-	headerCarrier.Set(traceParentHeader, tp)
-	headerCarrier.Set(traceStateHeader, ts)
-	ctx := format.Extract(context.Background(), headerCarrier)
-	transformers := SerializeTraceTransformers(ctx)
-	message := binding.ToMessage(&msg)
-	event, _ := binding.ToEvent(context.Background(), message, transformers...)
-	if tp != event.Extensions()[traceParentHeader] {
-		t.Fatalf("Traceparent is incorrect, expected: %v, actual: %v", tp, event.Extensions()[traceParentHeader])
+	const existingTraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	const existingTraceState = "vendor=value"
+
+	contextWithTrace := func(traceParent, traceState string) context.Context {
+		headerCarrier := propagation.HeaderCarrier{}
+		headerCarrier.Set(traceParentHeader, traceParent)
+		if traceState != "" {
+			headerCarrier.Set(traceStateHeader, traceState)
+		}
+		return format.Extract(context.Background(), headerCarrier)
 	}
-	if ts != event.Extensions()[traceStateHeader] {
-		t.Fatalf("Tracestate is incorrect, expected: %v, actual: %v", tp, event.Extensions()[traceStateHeader])
+
+	tests := []struct {
+		name                string
+		ctx                 context.Context
+		existingTraceParent interface{}
+		existingTraceState  interface{}
+		wantTraceParent     interface{}
+		wantTraceState      interface{}
+	}{
+		{
+			name:            "inject context when extension is absent",
+			ctx:             contextWithTrace(tp, ts),
+			wantTraceParent: tp,
+			wantTraceState:  ts,
+		},
+		{
+			name:                "preserve existing extension",
+			ctx:                 contextWithTrace(tp, ts),
+			existingTraceParent: existingTraceParent,
+			existingTraceState:  existingTraceState,
+			wantTraceParent:     existingTraceParent,
+			wantTraceState:      existingTraceState,
+		},
+		{
+			name:                "do not mix intermediary tracestate into existing traceparent",
+			ctx:                 contextWithTrace(tp, ts),
+			existingTraceParent: existingTraceParent,
+			wantTraceParent:     existingTraceParent,
+		},
+		{
+			name: "do not add empty extensions without context",
+			ctx:  context.Background(),
+		},
+		{
+			name:               "remove stale tracestate when injecting a new traceparent",
+			ctx:                contextWithTrace(tp, ""),
+			existingTraceState: existingTraceState,
+			wantTraceParent:    tp,
+		},
+		{
+			name:                "preserve existing extension without context",
+			ctx:                 context.Background(),
+			existingTraceParent: existingTraceParent,
+			existingTraceState:  existingTraceState,
+			wantTraceParent:     existingTraceParent,
+			wantTraceState:      existingTraceState,
+		},
+		{
+			name:                "preserve non-empty extension without parsing it",
+			ctx:                 contextWithTrace(tp, ts),
+			existingTraceParent: "invalid-but-owned-by-the-producer",
+			existingTraceState:  existingTraceState,
+			wantTraceParent:     "invalid-but-owned-by-the-producer",
+			wantTraceState:      existingTraceState,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			msg := cloudevents.NewEvent()
+			if test.existingTraceParent != nil {
+				msg.SetExtension(traceParentHeader, test.existingTraceParent)
+			}
+			if test.existingTraceState != nil {
+				msg.SetExtension(traceStateHeader, test.existingTraceState)
+			}
+
+			message := binding.ToMessage(&msg)
+			event, err := binding.ToEvent(context.Background(), message, SerializeTraceTransformers(test.ctx)...)
+			if err != nil {
+				t.Fatalf("Failed to transform event: %v", err)
+			}
+			if got := event.Extensions()[traceParentHeader]; got != test.wantTraceParent {
+				t.Fatalf("Traceparent is incorrect, expected: %v, actual: %v", test.wantTraceParent, got)
+			}
+			if got := event.Extensions()[traceStateHeader]; got != test.wantTraceState {
+				t.Fatalf("Tracestate is incorrect, expected: %v, actual: %v", test.wantTraceState, got)
+			}
+		})
 	}
 }
