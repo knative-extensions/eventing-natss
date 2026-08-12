@@ -31,6 +31,11 @@ import (
 	"knative.dev/eventing-natss/pkg/broker/contract"
 )
 
+const (
+	testTraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	testTraceState  = "vendor=value"
+)
+
 func runBasicJetStreamServer(t *testing.T) *natsserver.Server {
 	t.Helper()
 	opts := natstest.DefaultTestOptions
@@ -38,6 +43,29 @@ func runBasicJetStreamServer(t *testing.T) *natsserver.Server {
 	opts.JetStream = true
 	opts.StoreDir = t.TempDir() // Use temp dir to isolate test state
 	return natstest.RunServer(&opts)
+}
+
+func assertStoredEventTraceContext(t *testing.T, js nats.JetStreamContext, streamName, eventID string) {
+	t.Helper()
+
+	storedMessage, err := js.GetMsg(streamName, 1)
+	if err != nil {
+		t.Fatalf("Failed to get stored message: %v", err)
+	}
+	if got := storedMessage.Header.Get(nats.MsgIdHdr); got != eventID {
+		t.Errorf("Nats-Msg-Id = %q, want %q", got, eventID)
+	}
+
+	var storedEvent map[string]interface{}
+	if err := json.Unmarshal(storedMessage.Data, &storedEvent); err != nil {
+		t.Fatalf("Failed to decode stored CloudEvent: %v", err)
+	}
+	if got := storedEvent["traceparent"]; got != testTraceParent {
+		t.Errorf("traceparent = %v, want %q", got, testTraceParent)
+	}
+	if got := storedEvent["tracestate"]; got != testTraceState {
+		t.Errorf("tracestate = %v, want %q", got, testTraceState)
+	}
 }
 
 func TestNewHandler(t *testing.T) {
@@ -290,6 +318,8 @@ func TestServeHTTP_ValidCloudEvent(t *testing.T) {
 		"type":        "test.type",
 		"source":      "test/source",
 		"id":          "test-id-123",
+		"traceparent": testTraceParent,
+		"tracestate":  testTraceState,
 		"data":        map[string]string{"key": "value"},
 	}
 
@@ -313,6 +343,8 @@ func TestServeHTTP_ValidCloudEvent(t *testing.T) {
 	if streamInfo.State.Msgs != 1 {
 		t.Errorf("Stream message count = %v, want 1", streamInfo.State.Msgs)
 	}
+
+	assertStoredEventTraceContext(t, js, "TEST_STREAM", "test-id-123")
 }
 
 func TestServeHTTP_BinaryCloudEvent(t *testing.T) {
@@ -367,6 +399,8 @@ func TestServeHTTP_BinaryCloudEvent(t *testing.T) {
 	req.Header.Set("ce-type", "test.type")
 	req.Header.Set("ce-source", "test/source")
 	req.Header.Set("ce-id", "binary-test-id")
+	req.Header.Set("ce-traceparent", testTraceParent)
+	req.Header.Set("ce-tracestate", testTraceState)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -374,6 +408,8 @@ func TestServeHTTP_BinaryCloudEvent(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Errorf("Status code = %v, want %v", w.Code, http.StatusAccepted)
 	}
+
+	assertStoredEventTraceContext(t, js, "BINARY_STREAM", "binary-test-id")
 }
 
 func TestServeHTTP_MultiplesBrokers(t *testing.T) {
