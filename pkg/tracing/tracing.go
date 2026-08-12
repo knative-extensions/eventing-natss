@@ -11,7 +11,6 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
-	"github.com/cloudevents/sdk-go/v2/binding/transformer"
 	"github.com/cloudevents/sdk-go/v2/event"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
@@ -27,19 +26,34 @@ var (
 	format = propagation.TraceContext{}
 )
 
+// SerializeTraceTransformers preserves an existing CloudEvents tracing extension,
+// or injects the supplied context when the event does not already have one.
 func SerializeTraceTransformers(ctx context.Context) []binding.Transformer {
 	headerCarrier := propagation.HeaderCarrier{}
 	format.Inject(ctx, headerCarrier)
-	return []binding.Transformer{
-		keyValTransformer(traceParentHeader, headerCarrier.Get(traceParentHeader)),
-		keyValTransformer(traceStateHeader, headerCarrier.Get(traceStateHeader)),
-	}
-}
 
-func keyValTransformer(key string, value string) binding.TransformerFunc {
-	return transformer.SetExtension(key, func(_ interface{}) (interface{}, error) {
-		return value, nil
-	})
+	return []binding.Transformer{binding.TransformerFunc(func(reader binding.MessageMetadataReader, writer binding.MessageMetadataWriter) error {
+		// The CloudEvents tracing extension represents the starting trace of a
+		// multi-hop transmission. Intermediaries must not replace it with a hop context.
+		if traceParent, ok := reader.GetExtension(traceParentHeader).(string); ok && traceParent != "" {
+			return nil
+		}
+
+		traceParent := headerCarrier.Get(traceParentHeader)
+		if traceParent == "" {
+			return nil
+		}
+
+		if err := writer.SetExtension(traceParentHeader, traceParent); err != nil {
+			return err
+		}
+
+		traceState := headerCarrier.Get(traceStateHeader)
+		if traceState == "" {
+			return writer.SetExtension(traceStateHeader, nil)
+		}
+		return writer.SetExtension(traceStateHeader, traceState)
+	})}
 }
 
 func StartTraceFromMessage(logger *zap.Logger, inCtx context.Context, message *event.Event, tracer trace.Tracer, spanName string) (context.Context, trace.Span) {
