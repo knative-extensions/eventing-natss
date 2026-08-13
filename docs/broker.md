@@ -32,6 +32,7 @@ Handles event delivery to trigger subscribers:
 ### Ingress (`natsjs-broker-ingress`)
 
 Receives events via HTTP and publishes them to JetStream streams.
+The shared ingress uses a HorizontalPodAutoscaler and requires the Kubernetes resource metrics API.
 
 ## Installation
 
