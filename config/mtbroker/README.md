@@ -5,9 +5,9 @@
 1. For an installation of a simple NATS JetStream server, a setup is provided:
 
    ```shell
-   kubectl apply -f ./config/broker/natsjsm.yaml
-   kubectl apply -f ./config/broker/config-nats.yaml
-   kubectl apply -f ./config/broker/config-br-default-channel-jsm.yaml
+   kubectl apply -f ./config/mtbroker/natsjsm.yaml
+   kubectl apply -f ./config/mtbroker/config-nats.yaml
+   kubectl apply -f ./config/mtbroker/config-br-default-channel-jsm.yaml
    ```
 
    NATS JetStream is also deployed as a StatefulSet, using "nats-jetstream" ConfigMap

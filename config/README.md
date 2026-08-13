@@ -22,7 +22,7 @@ They do not offer:
 ## Deployment steps
 
 1. Setup [Knative Eventing](http://knative.dev/docs/install).
-2. If not done already, install a [JetStream Broker](./broker/README.md)
+2. If not done already, install [NATS JetStream](./mtbroker/README.md)
 3. Apply the NATSS configuration (from project root):
 
    ```shell
