@@ -37,6 +37,8 @@ For each Broker that has at least one Trigger, the controller creates a
 The shared `nats-broker-ingress` Deployment receives events over HTTP and
 publishes them to JetStream streams for all NATS JetStream Brokers in the
 cluster.
+The shared ingress uses a HorizontalPodAutoscaler and requires the Kubernetes
+resource metrics API.
 
 ## Install the NATS JetStream Broker
 
