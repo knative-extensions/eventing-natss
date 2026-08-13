@@ -61,6 +61,13 @@ func (m *Manager) GetContract(ctx context.Context) (*Contract, error) {
 
 // UpdateBroker adds or updates a broker in the contract ConfigMap
 func (m *Manager) UpdateBroker(ctx context.Context, broker BrokerContract) error {
+	_, err := m.UpdateBrokerIfChanged(ctx, broker)
+	return err
+}
+
+// UpdateBrokerIfChanged adds or updates a broker and reports whether it wrote
+// the contract ConfigMap.
+func (m *Manager) UpdateBrokerIfChanged(ctx context.Context, broker BrokerContract) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -74,7 +81,7 @@ func (m *Manager) UpdateBroker(ctx context.Context, broker BrokerContract) error
 
 			data, err := SerializeContract(contract)
 			if err != nil {
-				return err
+				return false, err
 			}
 
 			cm = &corev1.ConfigMap{
@@ -94,22 +101,24 @@ func (m *Manager) UpdateBroker(ctx context.Context, broker BrokerContract) error
 			}
 
 			_, err = m.client.CoreV1().ConfigMaps(m.namespace).Create(ctx, cm, metav1.CreateOptions{})
-			return err
+			return err == nil, err
 		}
-		return err
+		return false, err
 	}
 
 	// Update existing ConfigMap
 	contract, err := ParseContract(cm)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	contract.SetBroker(broker)
+	if !contract.SetBrokerIfChanged(broker) {
+		return false, nil
+	}
 
 	data, err := SerializeContract(contract)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if cm.Data == nil {
@@ -123,7 +132,7 @@ func (m *Manager) UpdateBroker(ctx context.Context, broker BrokerContract) error
 	cm.Annotations[ContractGenerationAnnotation] = fmt.Sprintf("%d", contract.Generation)
 
 	_, err = m.client.CoreV1().ConfigMaps(m.namespace).Update(ctx, cm, metav1.UpdateOptions{})
-	return err
+	return err == nil, err
 }
 
 // DeleteBroker removes a broker from the contract ConfigMap

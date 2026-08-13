@@ -274,6 +274,88 @@ func TestManager_UpdateBroker_AnnotationUpdated(t *testing.T) {
 	}
 }
 
+func TestManager_UpdateBroker_SteadyStateDoesNotWrite(t *testing.T) {
+	existingCM := contractConfigMap(&Contract{Brokers: make(map[string]BrokerContract)})
+	client := fake.NewClientset(existingCM)
+	manager := &Manager{
+		client:    client,
+		lister:    newFakeConfigMapLister(),
+		namespace: testSystemNamespace,
+	}
+	broker := BrokerContract{
+		UID: "uid-1", Namespace: "ns", Name: "br", StreamName: "stream-1",
+		PublishSubject: "broker.ns.br", Path: "/ns/br", Generation: 4,
+	}
+	countWrites := func() int {
+		writes := 0
+		for _, action := range client.Actions() {
+			if action.GetResource().Resource == "configmaps" &&
+				(action.GetVerb() == "create" || action.GetVerb() == "update") {
+				writes++
+			}
+		}
+		return writes
+	}
+	getContract := func() *Contract {
+		t.Helper()
+		cm, err := client.CoreV1().ConfigMaps(testSystemNamespace).Get(
+			context.Background(), ConfigMapName, metav1.GetOptions{},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract, err := ParseContract(cm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return contract
+	}
+
+	wrote, err := manager.UpdateBrokerIfChanged(context.Background(), broker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wrote {
+		t.Fatal("initial UpdateBrokerIfChanged() changed = false, want true")
+	}
+	if got := getContract().Generation; got != 1 {
+		t.Fatalf("Generation after initial UpdateBroker() = %d, want 1", got)
+	}
+	if got := countWrites(); got != 1 {
+		t.Fatalf("ConfigMap writes after initial UpdateBroker() = %d, want 1", got)
+	}
+
+	wrote, err = manager.UpdateBrokerIfChanged(context.Background(), broker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wrote {
+		t.Fatal("identical UpdateBrokerIfChanged() changed = true, want false")
+	}
+	if got := getContract().Generation; got != 1 {
+		t.Fatalf("Generation after identical UpdateBroker() = %d, want unchanged 1", got)
+	}
+	if got := countWrites(); got != 1 {
+		t.Fatalf("ConfigMap writes after identical UpdateBroker() = %d, want unchanged 1", got)
+	}
+
+	changedContract := broker
+	changedContract.PublishSubject = "broker.ns.br.changed"
+	wrote, err = manager.UpdateBrokerIfChanged(context.Background(), changedContract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wrote {
+		t.Fatal("changed UpdateBrokerIfChanged() changed = false, want true")
+	}
+	if got := getContract().Generation; got != 2 {
+		t.Fatalf("Generation after changed UpdateBroker() = %d, want 2", got)
+	}
+	if got := countWrites(); got != 2 {
+		t.Fatalf("ConfigMap writes after changed UpdateBroker() = %d, want 2", got)
+	}
+}
+
 // --- DeleteBroker tests ---
 
 func TestManager_DeleteBroker_ConfigMapNotFound(t *testing.T) {

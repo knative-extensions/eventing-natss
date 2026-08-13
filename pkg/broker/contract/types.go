@@ -88,13 +88,24 @@ func (c *Contract) GetBrokerByPath(path string) (BrokerContract, bool) {
 	return BrokerContract{}, false
 }
 
-// SetBroker adds or updates a broker in the contract
+// SetBroker adds or updates a broker in the contract.
 func (c *Contract) SetBroker(broker BrokerContract) {
+	c.SetBrokerIfChanged(broker)
+}
+
+// SetBrokerIfChanged adds or updates a broker and reports whether the
+// serialized contract changed.
+func (c *Contract) SetBrokerIfChanged(broker BrokerContract) bool {
 	if c.Brokers == nil {
 		c.Brokers = make(map[string]BrokerContract)
 	}
-	c.Brokers[BrokerKey(broker.Namespace, broker.Name)] = broker
+	key := BrokerKey(broker.Namespace, broker.Name)
+	if existing, ok := c.Brokers[key]; ok && existing == broker {
+		return false
+	}
+	c.Brokers[key] = broker
 	c.Generation++
+	return true
 }
 
 // DeleteBroker removes a broker from the contract
