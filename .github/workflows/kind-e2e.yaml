@@ -50,14 +50,14 @@ jobs:
           test-suite: ./test/experimental
 
     env:
-      KO_DOCKER_REPO: kind.local
+      KO_DOCKER_REPO: registry.localhost:5000/knative
       SYSTEM_NAMESPACE: knative-eventing
 
     steps:
     - name: Defaults
       run: |
         if [[ "${{ secrets.SLACK_WEBHOOK }}" != "" ]]; then
-          echo "SLACK_WEBHOOK=exists" >> $GITHUB_ENV
+          echo "SLACK_WEBHOOK=exists" >> "$GITHUB_ENV"
         fi
 
     - name: Set up Go
@@ -96,6 +96,7 @@ jobs:
         k8s-version: ${{ matrix.k8s-version }}
         kind-worker-count: 1
         cluster-suffix: cluster.local
+        registry-authority: registry.localhost:5000
 
     - name: Install NATS
       run: |
@@ -103,9 +104,9 @@ jobs:
 
         kubectl apply -f ./config/mtbroker/natsjsm.yaml
         # Create a ConfigMap that we use to instruct Broker to create nats channels.
-        kubectl create namespace ${SYSTEM_NAMESPACE}
-        kubectl apply -n ${SYSTEM_NAMESPACE} -f ./config/mtbroker/config-br-default-channel-jsm.yaml
-        kubectl apply -n ${SYSTEM_NAMESPACE} -f ./config/mtbroker/config-nats.yaml
+        kubectl create namespace "${SYSTEM_NAMESPACE}"
+        kubectl apply -n "${SYSTEM_NAMESPACE}" -f ./config/mtbroker/config-br-default-channel-jsm.yaml
+        kubectl apply -n "${SYSTEM_NAMESPACE}" -f ./config/mtbroker/config-nats.yaml
 
         set +x
         source ./vendor/knative.dev/hack/infra-library.sh
@@ -154,7 +155,7 @@ jobs:
       run: |
         set -e
         source ./vendor/knative.dev/hack/infra-library.sh
-        wait_until_pods_running ${SYSTEM_NAMESPACE}
+        wait_until_pods_running "${SYSTEM_NAMESPACE}"
 
         # For debugging.
         kubectl get pods --all-namespaces
@@ -167,9 +168,12 @@ jobs:
 
     - name: Collect system diagnostics
       if: ${{ failure() }}
+      continue-on-error: true
+      timeout-minutes: 5
       uses: chainguard-dev/actions/kind-diag@v1.6.41
       with:
-        namespace-resources: pods,brokers,channels,triggers,events
+        cluster-resources: nodes,namespaces,crds
+        namespace-resources: pods,services,deployments.apps,statefulsets.apps,jobs.batch,events,horizontalpodautoscalers.autoscaling,brokers.eventing.knative.dev,channels.messaging.knative.dev,natsjetstreamchannels.messaging.knative.dev,triggers.eventing.knative.dev
         artifact-name: kind-e2e-${{ matrix.k8s-version }}-${{ matrix.eventing-version }}-${{ strategy.job-index }}
 
     - name: Post failure notice to Slack
