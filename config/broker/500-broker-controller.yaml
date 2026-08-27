@@ -21,7 +21,6 @@ metadata:
     nats.eventing.knative.dev/release: devel
     eventing.knative.dev/brokerRole: controller
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: natsjetstream-broker-controller
@@ -31,6 +30,16 @@ spec:
         app: natsjetstream-broker-controller
         eventing.knative.dev/brokerRole: controller
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: natsjetstream-broker-controller
+                topologyKey: kubernetes.io/hostname
+              weight: 100
+
       serviceAccountName: natsjetstream-broker-controller
       containers:
         - name: controller
