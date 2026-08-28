@@ -110,7 +110,14 @@ func CalcRequestTimeout(numDelivered int, ackWait time.Duration) time.Duration {
 	return deadline
 }
 
-func CalculateNakDelayForRetryNumber(attemptNum int, config *kncloudevents.RetryConfig) time.Duration {
+// CalculateNakDelayForRetryNumber calculates the NAK delay for a JetStream
+// delivery. JetStream's NumDelivered is one-based, while Knative's retry
+// backoff callback receives a zero-based retry attempt.
+func CalculateNakDelayForRetryNumber(numDelivered int, config *kncloudevents.RetryConfig) time.Duration {
+	attemptNum := numDelivered - 1
+	if attemptNum < 0 {
+		attemptNum = 0
+	}
 	backoff, backoffDelay := parseBackoffFuncAndDelay(config)
 	return backoff(attemptNum, backoffDelay)
 }
