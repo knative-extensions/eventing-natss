@@ -162,6 +162,60 @@ func TestNatssChannelValidation(t *testing.T) {
 			},
 			want: apis.ErrInvalidValue(int32(-1), "retry").ViaField("delivery").ViaIndex(0).ViaField("subscribers").ViaField("spec"),
 		},
+		"backoff max accepted when feature enabled": {
+			ctx: feature.ToContext(context.Background(), feature.Flags{
+				feature.DeliveryBackoffMax: feature.Enabled,
+			}),
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("PT2S")},
+				}},
+			},
+		},
+		"backoff max rejected when feature disabled": {
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("PT2S")},
+				}},
+			},
+			want: apis.ErrDisallowedFields("backoffMax").ViaField("delivery").ViaField("spec"),
+		},
+		"invalid default backoff max": {
+			ctx: feature.ToContext(context.Background(), feature.Flags{
+				feature.DeliveryBackoffMax: feature.Enabled,
+			}),
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("PT0S")},
+				}},
+			},
+			want: apis.ErrInvalidValue("PT0S", "backoffMax").ViaField("delivery").ViaField("spec"),
+		},
+		"negative default backoff max": {
+			ctx: feature.ToContext(context.Background(), feature.Flags{
+				feature.DeliveryBackoffMax: feature.Enabled,
+			}),
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("-PT1S")},
+				}},
+			},
+			want: apis.ErrInvalidValue("-PT1S", "backoffMax").ViaField("delivery").ViaField("spec"),
+		},
+		"invalid subscriber backoff max": {
+			ctx: feature.ToContext(context.Background(), feature.Flags{
+				feature.DeliveryBackoffMax: feature.Enabled,
+			}),
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					SubscribableSpec: eventingduckv1.SubscribableSpec{Subscribers: []eventingduckv1.SubscriberSpec{{
+						SubscriberURI: aURL,
+						Delivery:      &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("not-a-duration")},
+					}}},
+				}},
+			},
+			want: apis.ErrInvalidValue("not-a-duration", "backoffMax").ViaField("delivery").ViaIndex(0).ViaField("subscribers").ViaField("spec"),
+		},
 	}
 
 	for n, test := range testCases {
