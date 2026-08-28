@@ -17,14 +17,21 @@ limitations under the License.
 package utils
 
 import (
+	"net/http"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/nats-io/nats.go"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing/pkg/kncloudevents"
+
+	_ "unsafe"
 )
+
+//go:linkname generateBackoffFn knative.dev/eventing/pkg/kncloudevents.generateBackoffFn
+func generateBackoffFn(config *kncloudevents.RetryConfig) retryablehttp.Backoff
 
 func ConvertJsDeliverPolicy(in v1alpha1.DeliverPolicy, def jetstream.DeliverPolicy) jetstream.DeliverPolicy {
 	switch in {
@@ -110,7 +117,7 @@ func CalcRequestTimeout(numDelivered int, ackWait time.Duration) time.Duration {
 // CalculateNakDelayForRetryNumber calculates the NAK delay for a JetStream
 // delivery. JetStream's NumDelivered is one-based, while Knative's retry
 // backoff callback receives a zero-based retry attempt.
-func CalculateNakDelayForRetryNumber(numDelivered int, config *kncloudevents.RetryConfig) time.Duration {
+func CalculateNakDelayForRetryNumber(numDelivered int, config *kncloudevents.RetryConfig, response *http.Response) time.Duration {
 	if config == nil || config.Backoff == nil {
 		return 0
 	}
@@ -118,5 +125,5 @@ func CalculateNakDelayForRetryNumber(numDelivered int, config *kncloudevents.Ret
 	if attemptNum < 0 {
 		attemptNum = 0
 	}
-	return config.Backoff(attemptNum, nil)
+	return generateBackoffFn(config)(0, 0, attemptNum, response)
 }
