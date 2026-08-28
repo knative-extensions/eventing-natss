@@ -38,7 +38,7 @@ permissions:
 jobs:
 
   e2e-tests:
-    name: e2e tests (${{ matrix.k8s-version }}, ${{ matrix.eventing-version }})
+    name: e2e tests (${{ matrix.k8s-version }}, ${{ matrix.eventing-version }}, ${{ matrix.test-suite }})
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -53,6 +53,15 @@ jobs:
         - knative-v1.23.0
         # Build the Eventing revision selected by go.mod.
         - go.mod
+
+        test-suite:
+        - ./test/e2e
+        - ./test/experimental
+
+        exclude:
+        # Experimental tests exercise the API selected by go.mod.
+        - eventing-version: knative-v1.23.0
+          test-suite: ./test/experimental
 
     env:
       KO_DOCKER_REPO: kind.local
@@ -141,6 +150,11 @@ jobs:
         ko apply --platform=linux/amd64 -R -f ./config/core/
         ko apply --platform=linux/amd64 -f ./config/brokers/mt-channel-broker/
 
+    - name: Apply experimental features config
+      if: matrix.test-suite == './test/experimental'
+      run: |
+        kubectl apply -f ./test/experimental/config
+
     - name: Install NATS Eventing components
       run: |
         set -x
@@ -163,7 +177,7 @@ jobs:
       run: |
         # Run the tests tagged as e2e on the KinD cluster.
         go test -race -count=1 -parallel=12 -timeout=90m -tags=e2e \
-          ./test/e2e
+          ${{ matrix.test-suite }}
 
     - name: Collect system diagnostics
       if: ${{ failure() }}
@@ -214,6 +228,6 @@ jobs:
         SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
         SLACK_CHANNEL: 'eventing-delivery'
         MSG_MINIMAL: 'true'
-        SLACK_TITLE: Periodic e2e for NATS on KinD on (${{ matrix.k8s-version }}, ${{ matrix.eventing-version }}) failed.
+        SLACK_TITLE: Periodic e2e for NATS on KinD on (${{ matrix.k8s-version }}, ${{ matrix.eventing-version }}, ${{ matrix.test-suite }}) failed.
         SLACK_MESSAGE: |
           For detailed logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
