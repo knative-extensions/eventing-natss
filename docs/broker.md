@@ -14,38 +14,50 @@ The NATS JetStream Broker is a Knative Eventing Broker implementation backed by 
 
 ## Components
 
-The broker consists of two main components:
+The NATS JetStream Broker has three components:
 
-### Broker Controller (`natsjs-broker-controller`)
+### Broker controller
 
-Reconciles `Broker` resources with the `NatsJetStreamBroker` class annotation. Creates:
-- JetStream streams for event storage
+The `natsjetstream-broker-controller` Deployment reconciles `Broker` resources
+that use the `NatsJetStreamBroker` class and creates JetStream streams for event
+storage.
 
-### Filter (`natsjs-broker-filter`)
+### Filter
 
-Handles event delivery to trigger subscribers:
+For each Broker that has at least one Trigger, the controller creates a
+`<broker-name>-broker-filter` Deployment. The filter:
+
 - Consumes events from JetStream streams
 - Applies trigger filters to events
 - Dispatches matching events to subscriber endpoints
 - Handles retries and dead letter sinks
 
-### Ingress (`natsjs-broker-ingress`)
+### Ingress
 
-Receives events via HTTP and publishes them to JetStream streams.
+The shared `nats-broker-ingress` Deployment receives events over HTTP and
+publishes them to JetStream streams for all NATS JetStream Brokers in the
+cluster.
 
-## Installation
+## Install the NATS JetStream Broker
 
-1. Install NATS JetStream:
+Before you install the NATS JetStream Broker, you must have:
 
-```shell
-kubectl apply -f ./config/broker/nats.yaml
-```
+- Knative Eventing installed
+- [`ko`](https://ko.build/install/) installed
 
-2. Install the broker controller and data plane:
+From the root directory of this repository:
 
-```shell
-ko apply -f ./config/broker
-```
+1. Install NATS JetStream by running the command:
+
+    ```bash
+    kubectl apply -f ./config/mtbroker/natsjsm.yaml
+    ```
+
+1. Install the Broker controller and data plane by running the command:
+
+    ```bash
+    ko apply -f ./config/broker
+    ```
 
 ## Usage
 
@@ -291,7 +303,11 @@ After all retries are exhausted, if a dead letter sink is configured, the event 
 
 1. Check that the trigger filter matches the event attributes
 2. Verify the subscriber service is running and accessible
-3. Check filter pod logs: `kubectl logs -l app=natsjs-broker-filter`
+3. Check the filter Pod logs by running the command:
+
+    ```bash
+    kubectl logs -l eventing.knative.dev/role=filter -n <namespace>
+    ```
 
 ### High latency or low throughput
 
