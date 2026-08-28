@@ -29,6 +29,7 @@ func DeliveryIsSet(d *eventingduckv1.DeliverySpec) bool {
 		d.Timeout != nil ||
 		d.BackoffPolicy != nil ||
 		d.BackoffDelay != nil ||
+		d.BackoffMax != nil ||
 		d.RetryAfterMax != nil ||
 		d.Format != nil)
 }

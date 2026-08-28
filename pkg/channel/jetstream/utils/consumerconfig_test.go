@@ -24,17 +24,23 @@ import (
 	"knative.dev/eventing/pkg/kncloudevents"
 )
 
-func TestCalculateNakDelayUsesZeroBasedAttempt(t *testing.T) {
+func TestCalculateNakDelayForRetryNumber(t *testing.T) {
 	delay := "PT1S"
+	backoffMax := "PT2S"
 	exponential := eventingduckv1.BackoffPolicyExponential
 	linear := eventingduckv1.BackoffPolicyLinear
 
-	newConfig := func(policy eventingduckv1.BackoffPolicyType) *kncloudevents.RetryConfig {
+	newConfig := func(policy eventingduckv1.BackoffPolicyType, max *string) *kncloudevents.RetryConfig {
 		t.Helper()
-		return &kncloudevents.RetryConfig{
+		config, err := kncloudevents.RetryConfigFromDeliverySpec(eventingduckv1.DeliverySpec{
 			BackoffPolicy: &policy,
 			BackoffDelay:  &delay,
+			BackoffMax:    max,
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
+		return &config
 	}
 
 	tests := []struct {
@@ -43,14 +49,17 @@ func TestCalculateNakDelayUsesZeroBasedAttempt(t *testing.T) {
 		config       *kncloudevents.RetryConfig
 		want         time.Duration
 	}{
-		{name: "first exponential retry", numDelivered: 1, config: newConfig(exponential), want: time.Second},
-		{name: "second exponential retry", numDelivered: 2, config: newConfig(exponential), want: 2 * time.Second},
-		{name: "fourth exponential retry", numDelivered: 4, config: newConfig(exponential), want: 8 * time.Second},
-		{name: "first linear retry", numDelivered: 1, config: newConfig(linear), want: 0},
-		{name: "second linear retry", numDelivered: 2, config: newConfig(linear), want: time.Second},
-		{name: "fourth linear retry", numDelivered: 4, config: newConfig(linear), want: 3 * time.Second},
-		{name: "zero delivery number is clamped", numDelivered: 0, config: newConfig(exponential), want: time.Second},
-		{name: "negative delivery number is clamped", numDelivered: -1, config: newConfig(exponential), want: time.Second},
+		{name: "nil config", numDelivered: 1, want: 0},
+		{name: "config without backoff", numDelivered: 1, config: &kncloudevents.RetryConfig{}, want: 0},
+		{name: "first exponential retry", numDelivered: 1, config: newConfig(exponential, &backoffMax), want: time.Second},
+		{name: "second exponential retry", numDelivered: 2, config: newConfig(exponential, &backoffMax), want: 2 * time.Second},
+		{name: "capped exponential retry", numDelivered: 4, config: newConfig(exponential, &backoffMax), want: 2 * time.Second},
+		{name: "first linear retry", numDelivered: 1, config: newConfig(linear, &backoffMax), want: 0},
+		{name: "second linear retry", numDelivered: 2, config: newConfig(linear, &backoffMax), want: time.Second},
+		{name: "capped linear retry", numDelivered: 4, config: newConfig(linear, &backoffMax), want: 2 * time.Second},
+		{name: "zero delivery number is clamped", numDelivered: 0, config: newConfig(exponential, &backoffMax), want: time.Second},
+		{name: "negative delivery number is clamped", numDelivered: -1, config: newConfig(exponential, &backoffMax), want: time.Second},
+		{name: "huge retry stays capped", numDelivered: int(^uint(0) >> 1), config: newConfig(exponential, &backoffMax), want: 2 * time.Second},
 	}
 
 	for _, tt := range tests {
