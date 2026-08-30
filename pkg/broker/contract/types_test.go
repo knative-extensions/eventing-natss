@@ -129,6 +129,39 @@ func TestContract_SetBroker(t *testing.T) {
 			t.Errorf("StreamName = %q, want %q", got, "new")
 		}
 	})
+
+	t.Run("identical broker is a steady-state no-op", func(t *testing.T) {
+		broker := BrokerContract{
+			UID: "uid-1", Namespace: "ns", Name: "br", StreamName: "stream-1",
+			PublishSubject: "broker.ns.br", Path: "/ns/br", Generation: 4,
+		}
+		contract := &Contract{Brokers: make(map[string]BrokerContract)}
+
+		if changed := contract.SetBrokerIfChanged(broker); !changed {
+			t.Fatal("initial SetBrokerIfChanged() changed = false, want true")
+		}
+		if contract.Generation != 1 {
+			t.Fatalf("Generation after initial SetBroker() = %d, want 1", contract.Generation)
+		}
+		if changed := contract.SetBrokerIfChanged(broker); changed {
+			t.Fatal("identical SetBrokerIfChanged() changed = true, want false")
+		}
+		if contract.Generation != 1 {
+			t.Fatalf("Generation after identical SetBroker() = %d, want unchanged 1", contract.Generation)
+		}
+
+		changed := broker
+		changed.StreamName = "stream-2"
+		if changedContract := contract.SetBrokerIfChanged(changed); !changedContract {
+			t.Fatal("changed SetBrokerIfChanged() changed = false, want true")
+		}
+		if contract.Generation != 2 {
+			t.Fatalf("Generation after changed SetBroker() = %d, want 2", contract.Generation)
+		}
+		if got := contract.Brokers["ns/br"].StreamName; got != "stream-2" {
+			t.Fatalf("stored StreamName = %q, want %q", got, "stream-2")
+		}
+	})
 }
 
 func TestContract_DeleteBroker(t *testing.T) {
