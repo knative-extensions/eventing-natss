@@ -33,7 +33,6 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
-	"github.com/hashicorp/go-retryablehttp"
 	"k8s.io/apimachinery/pkg/types"
 	jsutils "knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 
@@ -46,9 +45,6 @@ import (
 
 //go:linkname getClientForAddressable knative.dev/eventing/pkg/kncloudevents.getClientForAddressable
 func getClientForAddressable(addressable duckv1.Addressable) (*http.Client, error)
-
-//go:linkname generateBackoffFn knative.dev/eventing/pkg/kncloudevents.generateBackoffFn
-func generateBackoffFn(config *kncloudevents.RetryConfig) retryablehttp.Backoff
 
 //go:linkname sanitizeAddressable knative.dev/eventing/pkg/kncloudevents.sanitizeAddressable
 func sanitizeAddressable(addressable *duckv1.Addressable) *duckv1.Addressable
@@ -275,7 +271,11 @@ func processDispatchResult(ctx context.Context, msg *nats.Msg, retryConfig *kncl
 			logger.Error("failed to Ack message after successful delivery to subscriber", zap.Error(err))
 		}
 	case protocol.IsNACK(result):
-		if err := msg.NakWithDelay(jsutils.CalculateNakDelayForRetryNumber(retryNumber, retryConfig), nats.Context(ctx)); err != nil {
+		response := &http.Response{
+			StatusCode: dispatchExecutionInfo.ResponseCode,
+			Header:     dispatchExecutionInfo.ResponseHeader,
+		}
+		if err := msg.NakWithDelay(jsutils.CalculateNakDelayForRetryNumber(retryNumber, retryConfig, response), nats.Context(ctx)); err != nil {
 			logger.Error("failed to Nack message after failed delivery to subscriber", zap.Error(err))
 		}
 	default:

@@ -43,11 +43,21 @@ func (c *NatsJetStreamChannel) Validate(ctx context.Context) *apis.FieldError {
 
 func (cs *NatsJetStreamChannelSpec) Validate(ctx context.Context) *apis.FieldError {
 	var errs *apis.FieldError
+	if cs.Delivery != nil {
+		if fe := cs.Delivery.Validate(ctx); fe != nil {
+			errs = errs.Also(fe.ViaField("delivery"))
+		}
+	}
 	for i, subscriber := range cs.Subscribers {
 		if subscriber.ReplyURI == nil && subscriber.SubscriberURI == nil {
 			fe := apis.ErrMissingField("replyURI", "subscriberURI")
 			fe.Details = "expected at least one of, got none"
 			errs = errs.Also(fe.ViaField(fmt.Sprintf("subscriber[%d]", i)).ViaField("subscribable"))
+		}
+		if subscriber.Delivery != nil {
+			if fe := subscriber.Delivery.Validate(ctx); fe != nil {
+				errs = errs.Also(fe.ViaField("delivery").ViaIndex(i).ViaField("subscribers"))
+			}
 		}
 	}
 	return errs

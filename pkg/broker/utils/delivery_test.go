@@ -27,6 +27,7 @@ import (
 
 func TestDeliveryIsSet(t *testing.T) {
 	r := int32(1)
+	backoffMax := "PT10M"
 	tests := []struct {
 		name string
 		spec *eventingduckv1.DeliverySpec
@@ -35,6 +36,7 @@ func TestDeliveryIsSet(t *testing.T) {
 		{name: "nil", spec: nil, want: false},
 		{name: "empty", spec: &eventingduckv1.DeliverySpec{}, want: false},
 		{name: "retry set", spec: &eventingduckv1.DeliverySpec{Retry: &r}, want: true},
+		{name: "backoff max set", spec: &eventingduckv1.DeliverySpec{BackoffMax: &backoffMax}, want: true},
 		{name: "dls set", spec: &eventingduckv1.DeliverySpec{DeadLetterSink: &duckv1.Destination{}}, want: true},
 	}
 	for _, tc := range tests {
@@ -59,6 +61,7 @@ func TestEffectiveDelivery(t *testing.T) {
 	tDLS := &duckv1.Destination{}
 	bDLS := &duckv1.Destination{}
 	r2, r5 := int32(2), int32(5)
+	backoffMax := "PT4S"
 
 	tests := []struct {
 		name      string
@@ -67,6 +70,7 @@ func TestEffectiveDelivery(t *testing.T) {
 		wantSpec  *eventingduckv1.DeliverySpec // expected identity of the returned spec
 		wantRetry *int32
 		wantDLS   *duckv1.Destination
+		wantMax   *string
 	}{
 		{name: "both nil"},
 		{
@@ -94,6 +98,14 @@ func TestEffectiveDelivery(t *testing.T) {
 			broker:    &eventingduckv1.DeliverySpec{Retry: &r5, DeadLetterSink: bDLS},
 			wantRetry: &r5, wantDLS: bDLS,
 		},
+		{
+			name:      "trigger backoff max alone wins wholesale",
+			trigger:   &eventingduckv1.DeliverySpec{BackoffMax: &backoffMax},
+			broker:    &eventingduckv1.DeliverySpec{Retry: &r5, DeadLetterSink: bDLS},
+			wantMax:   &backoffMax,
+			wantRetry: nil,
+			wantDLS:   nil,
+		},
 	}
 
 	for _, tc := range tests {
@@ -110,6 +122,9 @@ func TestEffectiveDelivery(t *testing.T) {
 			}
 			if got.DeadLetterSink != tc.wantDLS {
 				t.Errorf("DeadLetterSink = %v, want %v", got.DeadLetterSink, tc.wantDLS)
+			}
+			if got.BackoffMax != tc.wantMax {
+				t.Errorf("BackoffMax = %v, want %v", got.BackoffMax, tc.wantMax)
 			}
 		})
 	}

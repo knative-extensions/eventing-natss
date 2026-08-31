@@ -560,15 +560,10 @@ func TestDispatchMessage(t *testing.T) {
 			var retryConfig kncloudevents.RetryConfig
 			if tc.delivery == nil {
 				retryConfig = kncloudevents.NoRetries()
-				backoffLinear := v1.BackoffPolicyLinear
-				retryConfig.BackoffPolicy = &backoffLinear
-				backoffDelay := "5s"
-				retryConfig.BackoffDelay = &backoffDelay
 			} else {
-				retryConfig = kncloudevents.RetryConfig{
-					RetryMax:      int(*tc.delivery.Retry),
-					BackoffPolicy: tc.delivery.BackoffPolicy,
-					BackoffDelay:  tc.delivery.BackoffDelay,
+				retryConfig, err = kncloudevents.RetryConfigFromDeliverySpec(*tc.delivery)
+				if err != nil {
+					t.Fatal(err)
 				}
 			}
 
