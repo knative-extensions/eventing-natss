@@ -139,14 +139,17 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 	}
 
 	// Step 4: Reconcile ingress service
-	if err := r.contractManager.UpdateBroker(ctx, brokerContract); err != nil {
+	contractUpdated, err := r.contractManager.UpdateBrokerIfChanged(ctx, brokerContract)
+	if err != nil {
 		logger.Errorw("Failed to update contract", zap.Error(err))
 		controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeWarning, ReasonContractFailed, err.Error())
 		b.Status.MarkIngressFailed("ContractUpdateFailed", "Failed to update contract ConfigMap: %v", err)
 		return fmt.Errorf("failed to update contract: %w", err)
 	}
 
-	controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonContractUpdated, "Contract updated")
+	if contractUpdated {
+		controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonContractUpdated, "Contract updated")
+	}
 
 	// Step 4: Check shared ingress deployment readiness
 	if err := r.propagateIngressAvailability(ctx, b); err != nil {
