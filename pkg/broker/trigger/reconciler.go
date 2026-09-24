@@ -171,19 +171,26 @@ func (r *Reconciler) FinalizeKind(ctx context.Context, trigger *eventingv1.Trigg
 	logger := logging.FromContext(ctx)
 	logger.Infow("Finalizing trigger", zap.String("trigger", trigger.Name))
 
-	// Get the broker to find the stream name
-	_, err := r.brokerLister.Brokers(trigger.Namespace).Get(trigger.Spec.Broker)
-	if err != nil && apierrs.IsNotFound(err) {
-		// Broker is gone, nothing to clean up
-		logger.Warnw("Broker not found during finalization")
+	// Resolve the stream name from the broker so a custom stream-name annotation
+	// is honored. If the broker is already gone, its stream is gone too, so the
+	// consumer delete below tolerates ErrStreamNotFound; fall back to the
+	// generated name in that case.
+	streamName := brokerutils.BrokerStreamNameByNsAndName(trigger.Namespace, trigger.Spec.Broker)
+	if broker, err := r.brokerLister.Brokers(trigger.Namespace).Get(trigger.Spec.Broker); err != nil {
+		if apierrs.IsNotFound(err) {
+			logger.Warnw("Broker not found during finalization")
+		} else {
+			return fmt.Errorf("failed to get broker: %w", err)
+		}
+	} else {
+		streamName = brokerutils.BrokerStreamName(broker)
 	}
 
-	streamName := brokerutils.BrokerStreamNameByNsAndName(trigger.Namespace, trigger.Spec.Broker)
 	consumerName := brokerutils.TriggerConsumerName(string(trigger.UID))
 
 	// Delete the consumer. Treat stream-not-found and consumer-not-found as
 	// warnings — if the stream is gone the consumer is implicitly gone too.
-	err = r.js.DeleteConsumer(streamName, consumerName)
+	err := r.js.DeleteConsumer(streamName, consumerName)
 	if err != nil {
 		if errors.Is(err, nats.ErrConsumerNotFound) || errors.Is(err, nats.ErrStreamNotFound) {
 			logger.Warnw("Consumer already gone during trigger finalization", zap.Error(err), zap.String("consumer", consumerName))

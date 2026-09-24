@@ -515,6 +515,32 @@ func TestReconcileKind(t *testing.T) {
 			t.Errorf("filter deployment should be created: %v", err)
 		}
 	})
+
+	t.Run("custom stream-name annotation is used", func(t *testing.T) {
+		r, _ := setup(t)
+		b := testBroker(testNamespace, testBrokerName)
+		b.Annotations = map[string]string{brokerutils.BrokerStreamNameAnnotation: "MY_CUSTOM_STREAM"}
+
+		if err := r.ReconcileKind(testContext(), b); err != nil {
+			t.Fatalf("ReconcileKind() error: %v", err)
+		}
+		if _, err := r.js.StreamInfo("MY_CUSTOM_STREAM"); err != nil {
+			t.Errorf("custom-named stream not created: %v", err)
+		}
+	})
+
+	t.Run("invalid stream-name annotation fails reconciliation", func(t *testing.T) {
+		r, _ := setup(t)
+		b := testBroker(testNamespace, testBrokerName)
+		b.Annotations = map[string]string{brokerutils.BrokerStreamNameAnnotation: "bad.stream.name"}
+
+		if err := r.ReconcileKind(testContext(), b); err == nil {
+			t.Error("ReconcileKind() expected an error for an invalid stream name, got nil")
+		}
+		if cond := b.Status.GetCondition(eventingv1.BrokerConditionIngress); cond == nil || cond.IsTrue() {
+			t.Errorf("expected BrokerConditionIngress to be marked failed, got %v", cond)
+		}
+	})
 }
 
 // fakeTriggerLister implements eventinglisters.TriggerLister for testing.
