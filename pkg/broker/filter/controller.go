@@ -22,18 +22,14 @@ import (
 
 	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
-	"k8s.io/client-go/tools/cache"
 
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
 
-	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	brokerinformer "knative.dev/eventing/pkg/client/injection/informers/eventing/v1/broker"
 	triggerinformer "knative.dev/eventing/pkg/client/injection/informers/eventing/v1/trigger"
-	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
-	"knative.dev/eventing-natss/pkg/broker/constants"
 	commonnats "knative.dev/eventing-natss/pkg/common/nats"
 )
 
@@ -53,6 +49,10 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	env := &envConfig{}
 	if err := envconfig.Process("", env); err != nil {
 		logger.Fatalw("Failed to process environment variables", zap.Error(err))
+	}
+	scope, err := BrokerScopeFromEnv()
+	if err != nil {
+		logger.Fatalw("Failed to configure Broker scope", zap.Error(err))
 	}
 
 	// Create NATS connection using URL from environment variable
@@ -86,6 +86,7 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		brokerInformer.Lister(),
 		consumerManager,
 	)
+	reconciler.brokerScope = &scope
 
 	// Create controller using the filter reconciler which implements
 	// reconciler.Interface via its Reconcile(ctx, key) method.
@@ -98,33 +99,10 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	// Events are enqueued into the work queue and reconciled via
 	// FilterReconciler.Reconcile, giving us rate limiting, dedup,
 	// per-key serialization, and backoff on errors.
-	triggerInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
-		FilterFunc: filterTriggersByBrokerClass(brokerInformer.Lister()),
-		Handler:    controller.HandleAll(impl.Enqueue),
-	})
+	// Enqueue ownership changes too, so a Trigger moving to another Broker
+	// retires its old local subscription instead of being filtered out.
+	triggerInformer.Informer().AddEventHandler(controller.HandleAll(impl.Enqueue))
 
 	logger.Info("Filter controller initialized")
 	return impl
-}
-
-// filterTriggersByBrokerClass returns a filter function that only passes triggers
-// referencing brokers of class NatsJetStreamBroker
-func filterTriggersByBrokerClass(brokerLister eventinglisters.BrokerLister) func(obj interface{}) bool {
-	return func(obj interface{}) bool {
-		trigger, ok := obj.(*eventingv1.Trigger)
-		if !ok {
-			return false
-		}
-
-		// Get the broker referenced by this trigger
-		broker, err := brokerLister.Brokers(trigger.Namespace).Get(trigger.Spec.Broker)
-		if err != nil {
-			// If we can't get the broker, include the trigger anyway
-			// and let the reconciler handle the error
-			return true
-		}
-
-		// Check if the broker is of class NatsJetStreamBroker
-		return broker.GetAnnotations()[eventingv1.BrokerClassAnnotationKey] == constants.BrokerClassName
-	}
 }
