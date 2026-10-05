@@ -21,12 +21,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 	"knative.dev/pkg/kmeta"
 	"knative.dev/pkg/system"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
+	"knative.dev/eventing-natss/pkg/broker/constants"
 )
 
 const (
@@ -115,10 +117,11 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
-					ServiceAccountName:        args.ServiceAccountName,
-					NodeSelector:              nodeSelector,
-					Affinity:                  affinity,
-					TopologySpreadConstraints: topologySpreadConstraints,
+					ServiceAccountName:            args.ServiceAccountName,
+					TerminationGracePeriodSeconds: ptr.To(int64(constants.FilterTerminationGracePeriod.Seconds())),
+					NodeSelector:                  nodeSelector,
+					Affinity:                      affinity,
+					TopologySpreadConstraints:     topologySpreadConstraints,
 					Containers: []corev1.Container{
 						{
 							Name:      FilterContainerName,

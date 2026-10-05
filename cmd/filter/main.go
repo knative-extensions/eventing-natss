@@ -29,19 +29,30 @@ import (
 
 func main() {
 	component := "natsjs-broker-filter"
-
-	ctx := signals.NewContext()
+	signalCtx := signals.NewContext()
 	scope, err := filter.BrokerScopeFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx = configureContext(ctx, scope)
+	runtime := filter.NewRuntime(signalCtx)
+	shutdown := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), filter.ShutdownTimeout)
+		defer cancel()
+		return runtime.Shutdown(ctx)
+	}
+	// Start draining on SIGTERM instead of waiting for the controller to stop.
+	context.AfterFunc(signalCtx, func() { _ = shutdown() })
 
-	sharedmain.MainWithContext(ctx, component, filter.NewController)
+	sharedmain.MainWithContext(configureContext(signalCtx, runtime, scope), component, runtime.NewController)
+	if err := shutdown(); err != nil {
+		log.Printf("filter shutdown did not complete cleanly: %v", err)
+	}
 }
 
-func configureContext(ctx context.Context, scope filter.BrokerScope) context.Context {
+func configureContext(ctx context.Context, runtime *filter.Runtime, scope filter.BrokerScope) context.Context {
 	ctx = injection.WithNamespaceScope(ctx, scope.Namespace)
 	// Pull consumers share work between replicas without a controller leader.
-	return sharedmain.WithHADisabled(ctx)
+	ctx = sharedmain.WithHADisabled(ctx)
+	ctx = injection.AddReadiness(ctx, runtime.ReadinessHandler())
+	return injection.AddLiveness(ctx, runtime.LivenessHandler())
 }
