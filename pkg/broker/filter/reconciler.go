@@ -49,6 +49,7 @@ type FilterReconciler struct {
 	brokerLister  eventinglisters.BrokerLister
 
 	consumerManager *ConsumerManager
+	brokerScope     *BrokerScope
 
 	// triggerUIDs maps "namespace/name" keys to trigger UIDs so that
 	// delete events (where the object is gone from the lister) can
@@ -84,24 +85,24 @@ func (r *FilterReconciler) Reconcile(ctx context.Context, key string) error {
 	trigger, err := r.triggerLister.Triggers(namespace).Get(name)
 	if err != nil {
 		if apierrs.IsNotFound(err) {
-			// Trigger has been deleted — clean up subscription
-			r.mu.RLock()
-			uid, ok := r.triggerUIDs[key]
-			r.mu.RUnlock()
-			if ok {
-				if delErr := r.DeleteTrigger(uid); delErr != nil {
-					return delErr
-				}
-				r.mu.Lock()
-				delete(r.triggerUIDs, key)
-				r.mu.Unlock()
-			}
-			return nil
+			return r.deleteTrackedTrigger(key)
 		}
 		return fmt.Errorf("failed to get trigger: %w", err)
 	}
 
-	// Track key→UID mapping for delete handling
+	if r.brokerScope != nil && !r.brokerScope.owns(trigger) {
+		return r.deleteTrackedTrigger(key)
+	}
+	// A same-name replacement must not leave the old UID subscribed.
+	r.mu.RLock()
+	previousUID := r.triggerUIDs[key]
+	r.mu.RUnlock()
+	if previousUID != "" && previousUID != string(trigger.UID) {
+		if err := r.deleteTrackedTrigger(key); err != nil {
+			return err
+		}
+	}
+	// Track key→UID mapping for delete and ownership-change handling.
 	r.mu.Lock()
 	r.triggerUIDs[key] = string(trigger.UID)
 	r.mu.Unlock()
@@ -109,8 +110,29 @@ func (r *FilterReconciler) Reconcile(ctx context.Context, key string) error {
 	return r.ReconcileTrigger(ctx, trigger)
 }
 
+func (r *FilterReconciler) deleteTrackedTrigger(key string) error {
+	r.mu.RLock()
+	uid, ok := r.triggerUIDs[key]
+	r.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	if err := r.DeleteTrigger(uid); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	if r.triggerUIDs[key] == uid {
+		delete(r.triggerUIDs, key)
+	}
+	r.mu.Unlock()
+	return nil
+}
+
 // ReconcileTrigger reconciles a trigger to ensure the filter has a subscription
 func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventingv1.Trigger) error {
+	if r.brokerScope != nil && !r.brokerScope.owns(trigger) {
+		return r.DeleteTrigger(string(trigger.UID))
+	}
 	logger := r.logger.With(
 		zap.String("trigger", trigger.Name),
 		zap.String("namespace", trigger.Namespace),

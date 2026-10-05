@@ -18,30 +18,19 @@ package main
 
 import (
 	"context"
-	"log"
-
-	"knative.dev/pkg/injection"
-	"knative.dev/pkg/injection/sharedmain"
-	"knative.dev/pkg/signals"
+	"testing"
 
 	"knative.dev/eventing-natss/pkg/broker/filter"
+	"knative.dev/pkg/injection"
+	"knative.dev/pkg/injection/sharedmain"
 )
 
-func main() {
-	component := "natsjs-broker-filter"
-
-	ctx := signals.NewContext()
-	scope, err := filter.BrokerScopeFromEnv()
-	if err != nil {
-		log.Fatal(err)
+func TestConfigureContext(t *testing.T) {
+	ctx := configureContext(context.Background(), filter.BrokerScope{Namespace: "namespace-a", Name: "broker-a"})
+	if got := injection.GetNamespaceScope(ctx); got != "namespace-a" {
+		t.Fatalf("namespace = %q", got)
 	}
-	ctx = configureContext(ctx, scope)
-
-	sharedmain.MainWithContext(ctx, component, filter.NewController)
-}
-
-func configureContext(ctx context.Context, scope filter.BrokerScope) context.Context {
-	ctx = injection.WithNamespaceScope(ctx, scope.Namespace)
-	// Pull consumers share work between replicas without a controller leader.
-	return sharedmain.WithHADisabled(ctx)
+	if !sharedmain.IsHADisabled(ctx) {
+		t.Fatal("each filter replica must run its local consumers")
+	}
 }
