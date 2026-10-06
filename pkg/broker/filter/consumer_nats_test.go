@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -113,81 +112,12 @@ func makeTriggerWithUID(namespace, name, brokerName, uid string) *eventingv1.Tri
 	}
 }
 
-// newConsumerManagerForTest creates a ConsumerManager with a real NATS connection.
-// Mirrors NewConsumerManager's observability bootstrap (tracer, dispatch-duration
-// histogram, in-flight observable gauge) so tests exercise the same code path.
-func newConsumerManagerForTest(t *testing.T, ctx context.Context, conn *nats.Conn, js nats.JetStreamContext, cfg *ConsumerManagerConfig) *ConsumerManager {
+// newConsumerManagerForTest creates a ConsumerManager with a real NATS
+// connection through NewConsumerManager, supplying the fake Kubernetes client
+// its OIDC token provider needs.
+func newConsumerManagerForTest(t *testing.T, conn *nats.Conn, js nats.JetStreamContext, cfg *ConsumerManagerConfig) *ConsumerManager {
 	t.Helper()
-	dispatcher := kncloudevents.NewDispatcher(eventingtls.ClientConfig{}, nil)
-
-	fetchBatchSize := DefaultFetchBatchSize
-	fetchTimeout := DefaultFetchTimeout
-	maxConcurrency := DefaultMaxConcurrency
-
-	if cfg != nil {
-		if cfg.FetchBatchSize > 0 {
-			fetchBatchSize = cfg.FetchBatchSize
-		}
-		if cfg.FetchTimeout > 0 {
-			fetchTimeout = cfg.FetchTimeout
-		}
-		if cfg.MaxConcurrency > 0 {
-			maxConcurrency = cfg.MaxConcurrency
-		}
-	}
-
-	tracer := otel.GetTracerProvider().Tracer("knative.dev/eventing-natss/pkg/broker/filter")
-	meter := otel.GetMeterProvider().Meter("knative.dev/eventing-natss/pkg/broker/filter")
-	dispatchDuration, err := meter.Float64Histogram(
-		"kn.eventing.dispatch.duration",
-		otelmetric.WithUnit("s"),
-		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
-	)
-	if err != nil {
-		t.Fatalf("create dispatch duration histogram: %v", err)
-	}
-	processDuration, err := meter.Float64Histogram(
-		"kn.eventing.broker.filter.process.duration",
-		otelmetric.WithUnit("s"),
-		otelmetric.WithExplicitBucketBoundaries(latencyBounds...),
-	)
-	if err != nil {
-		t.Fatalf("create process duration histogram: %v", err)
-	}
-
-	cm := &ConsumerManager{
-		logger:                logging.FromContext(ctx),
-		ctx:                   ctx,
-		js:                    js,
-		conn:                  conn,
-		fetchBatchSize:        fetchBatchSize,
-		fetchTimeout:          fetchTimeout,
-		defaultMaxConcurrency: maxConcurrency,
-		dispatcher:            dispatcher,
-		tracer:                tracer,
-		dispatchDuration:      dispatchDuration,
-		processDuration:       processDuration,
-		subscriptions:         make(map[string]*TriggerSubscription),
-	}
-
-	if _, err := meter.Int64ObservableGauge(
-		"kn.eventing.broker.filter.dispatches.inflight",
-		otelmetric.WithInt64Callback(func(_ context.Context, obs otelmetric.Int64Observer) error {
-			cm.mu.RLock()
-			defer cm.mu.RUnlock()
-			for _, sub := range cm.subscriptions {
-				obs.Observe(int64(len(sub.sem)), otelmetric.WithAttributes(
-					attribute.String("kn.trigger.name", sub.trigger.Name),
-					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
-				))
-			}
-			return nil
-		}),
-	); err != nil {
-		t.Fatalf("register inflight observable gauge: %v", err)
-	}
-
-	return cm
+	return NewConsumerManager(contextWithFakeKube(t), conn, js, cfg)
 }
 
 // publishStructuredCE publishes a structured CloudEvent to the given subject.
@@ -276,15 +206,13 @@ func TestSubscribeTrigger_And_Unsubscribe(t *testing.T) {
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
 
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-
 	namespace := "default"
 	brokerName := "test-broker"
 	triggerUID := "subscribe-trigger-uid-001"
 
 	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
 
-	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{
 		FetchBatchSize: 2,
 		FetchTimeout:   100 * time.Millisecond,
 		MaxConcurrency: 5,
@@ -326,8 +254,6 @@ func TestFetchLoop_DispatchesMessages(t *testing.T) {
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
 
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-
 	namespace := "default"
 	brokerName := "dispatch-broker"
 	triggerUID := "dispatch-trigger-uid-001"
@@ -344,7 +270,7 @@ func TestFetchLoop_DispatchesMessages(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{
 		FetchBatchSize: 5,
 		FetchTimeout:   200 * time.Millisecond,
 		MaxConcurrency: 10,
@@ -389,15 +315,13 @@ func TestFetchLoop_ContextCancellation(t *testing.T) {
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
 
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-
 	namespace := "default"
 	brokerName := "cancel-broker"
 	triggerUID := "cancel-trigger-uid-001"
 
 	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
 
-	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{
 		FetchBatchSize: 2,
 		FetchTimeout:   100 * time.Millisecond,
 		MaxConcurrency: 5,
@@ -452,8 +376,6 @@ func TestClose_WithActiveSubscriptions(t *testing.T) {
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
 
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-
 	namespace := "default"
 	brokerName := "close-broker"
 
@@ -463,7 +385,7 @@ func TestClose_WithActiveSubscriptions(t *testing.T) {
 	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID1)
 	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID2)
 
-	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{
 		FetchBatchSize: 2,
 		FetchTimeout:   100 * time.Millisecond,
 		MaxConcurrency: 5,
@@ -509,8 +431,6 @@ func TestFetchLoop_DynamicBatchSize(t *testing.T) {
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
 
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-
 	namespace := "default"
 	brokerName := "dynamic-broker"
 	triggerUID := "dynamic-trigger-uid-001"
@@ -528,7 +448,7 @@ func TestFetchLoop_DynamicBatchSize(t *testing.T) {
 	defer srv.Close()
 
 	// maxConcurrency=2 forces fetch loop to cap batch to 2 at a time.
-	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{
 		FetchBatchSize: 5,
 		FetchTimeout:   200 * time.Millisecond,
 		MaxConcurrency: 2,
@@ -577,15 +497,13 @@ func TestSubscribeTrigger_RestartOnAnnotationChange(t *testing.T) {
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
 
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-
 	namespace := "default"
 	brokerName := "restart-broker"
 	triggerUID := "restart-trigger-uid-001"
 
 	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
 
-	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{
 		FetchBatchSize: 5,
 		FetchTimeout:   100 * time.Millisecond,
 		MaxConcurrency: 4,
@@ -678,15 +596,13 @@ func TestSubscribeTrigger_NoRestartWhenAnnotationsUnchanged(t *testing.T) {
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
 
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-
 	namespace := "default"
 	brokerName := "no-restart-broker"
 	triggerUID := "no-restart-trigger-uid-001"
 
 	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
 
-	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{
 		FetchBatchSize: 3,
 		FetchTimeout:   100 * time.Millisecond,
 		MaxConcurrency: 6,
@@ -745,8 +661,6 @@ func TestSubscribeTrigger_RestartTriggers(t *testing.T) {
 	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, s)
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
-
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
 
 	// Manager defaults: batch=5, timeout=100ms, maxConc=6.
 	cfg := &ConsumerManagerConfig{
@@ -838,7 +752,7 @@ func TestSubscribeTrigger_RestartTriggers(t *testing.T) {
 
 			setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
 
-			cm := newConsumerManagerForTest(t, ctx, conn, js, cfg)
+			cm := newConsumerManagerForTest(t, conn, js, cfg)
 			defer cm.Close() //nolint:errcheck
 
 			broker := makeTestBrokerForNats(namespace, brokerName)
@@ -1096,8 +1010,6 @@ func TestUnsubscribeTrigger_WaitsForInflightDispatches(t *testing.T) {
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
 
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-
 	namespace := "default"
 	brokerName := "drain-broker"
 	triggerUID := "drain-trigger-uid-001"
@@ -1123,7 +1035,7 @@ func TestUnsubscribeTrigger_WaitsForInflightDispatches(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{
 		FetchBatchSize: 2,
 		FetchTimeout:   100 * time.Millisecond,
 		MaxConcurrency: 5,
@@ -1183,15 +1095,13 @@ func TestSubscribeTrigger_UpdateInPlace(t *testing.T) {
 	conn, js := natsTesting.JsClient(t, s)
 	defer conn.Close()
 
-	ctx := logging.WithLogger(context.Background(), zap.NewNop().Sugar())
-
 	namespace := "default"
 	brokerName := "update-broker"
 	triggerUID := "update-trigger-uid-001"
 
 	setupStreamAndConsumer(t, js, namespace, brokerName, triggerUID)
 
-	cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{
 		FetchBatchSize: 2,
 		FetchTimeout:   100 * time.Millisecond,
 		MaxConcurrency: 5,
