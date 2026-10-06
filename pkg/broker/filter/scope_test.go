@@ -110,8 +110,7 @@ func TestScopedReconcileSubscriptions(t *testing.T) {
 		if cm.GetSubscriptionCount() != 1 || !cm.HasSubscription("owned-uid") {
 			t.Fatalf("replica %d subscribed outside its Broker: %d", replica, cm.GetSubscriptionCount())
 		}
-		// spec.broker is immutable, but a same-name replacement with a new UID
-		// can target another Broker before the old deletion is reconciled.
+		// Recreate the Trigger for another Broker before reconciling its deletion.
 		recreatedForOtherBroker := owned.DeepCopy()
 		recreatedForOtherBroker.UID = types.UID("foreign-replacement-uid")
 		recreatedForOtherBroker.Spec.Broker = "broker-b"
