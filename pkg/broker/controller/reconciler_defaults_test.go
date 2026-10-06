@@ -63,7 +63,9 @@ func serverDefaultedDeployment(d *appsv1.Deployment) *appsv1.Deployment {
 	pod := &spec.Template.Spec
 	pod.DNSPolicy = corev1.DNSClusterFirst
 	pod.RestartPolicy = corev1.RestartPolicyAlways
-	pod.TerminationGracePeriodSeconds = ptr.To[int64](30)
+	if pod.TerminationGracePeriodSeconds == nil {
+		pod.TerminationGracePeriodSeconds = ptr.To[int64](30)
+	}
 	pod.SchedulerName = corev1.DefaultSchedulerName
 	pod.SecurityContext = &corev1.PodSecurityContext{}
 	for i := range pod.Containers {

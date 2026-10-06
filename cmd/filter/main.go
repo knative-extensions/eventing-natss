@@ -29,16 +29,24 @@ import (
 
 func main() {
 	component := "natsjs-broker-filter"
-
-	ctx := signals.NewContext()
+	signalCtx := signals.NewContext()
 	scope, err := filter.BrokerScopeFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
-	runtime := filter.NewRuntime(ctx)
-	ctx = configureContext(ctx, runtime, scope)
+	runtime := filter.NewRuntime(signalCtx)
+	shutdown := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), filter.ShutdownTimeout)
+		defer cancel()
+		return runtime.Shutdown(ctx)
+	}
+	// Start draining on SIGTERM instead of waiting for the controller to stop.
+	context.AfterFunc(signalCtx, func() { _ = shutdown() })
 
-	sharedmain.MainWithContext(ctx, component, runtime.NewController)
+	sharedmain.MainWithContext(configureContext(signalCtx, runtime, scope), component, runtime.NewController)
+	if err := shutdown(); err != nil {
+		log.Printf("filter shutdown did not complete cleanly: %v", err)
+	}
 }
 
 func configureContext(ctx context.Context, runtime *filter.Runtime, scope filter.BrokerScope) context.Context {

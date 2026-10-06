@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -83,7 +85,11 @@ const (
 	// or invalid values fall back to DefaultFetchTimeout (or
 	// CONSUMER_FETCH_TIMEOUT on the filter deployment).
 	TriggerFetchTimeoutAnnotation = "natsjetstream.eventing.knative.dev/fetch-timeout"
+
+	forcedDispatchGracePeriod = 2 * time.Second
 )
+
+var ErrConsumerManagerClosed = errors.New("consumer manager is shutting down")
 
 // ConsumerManagerConfig holds configuration for the ConsumerManager
 type ConsumerManagerConfig struct {
@@ -106,6 +112,7 @@ type ConsumerManagerConfig struct {
 type ConsumerManager struct {
 	logger *zap.SugaredLogger
 	ctx    context.Context
+	cancel context.CancelFunc
 
 	js   nats.JetStreamContext
 	conn *nats.Conn
@@ -127,7 +134,17 @@ type ConsumerManager struct {
 
 	// Map of trigger UID to subscription
 	subscriptions map[string]*TriggerSubscription
-	mu            sync.RWMutex
+	// Operations serialize calls for the same trigger and keep cleanup from
+	// overtaking an admitted update, deletion, or subscription construction.
+	// Shutdown waits for them, so a deletion that already removed its
+	// subscription from the map still finishes its own teardown.
+	operations map[string]chan struct{}
+	mu         sync.RWMutex
+	// shutdownStarted is closed under mu when Shutdown or Close begins.
+	shutdownStarted chan struct{}
+	shutdownDone    chan struct{}
+	// shutdownErr is written before shutdownDone is closed and only read after it.
+	shutdownErr error
 }
 
 type pullSubscription interface {
@@ -167,23 +184,32 @@ type TriggerSubscription struct {
 	// in-progress dispatches.
 	dispatchCtx    context.Context
 	dispatchCancel context.CancelFunc
-	// cancel stops the fetch loop and interrupts an in-progress Fetch. A new
-	// loop with new parameters can be started after done closes.
+	// stop keeps the current fetch loop from sending another pull request but
+	// lets an in-progress Fetch run to its deadline. Graceful shutdown uses it:
+	// an interrupted pull request stays open on the server, which keeps
+	// filling it until Unsubscribe, and nothing would read those messages.
+	stop context.CancelFunc
+	// cancel stops the current fetch loop only, interrupting an in-progress
+	// Fetch. A new fetch loop with new parameters can be started after done
+	// closes.
 	cancel context.CancelFunc
 	// done is closed by the current fetch loop as soon as it returns.
 	// Restart waits on this before starting a new fetch loop on the same
 	// pull subscription.
 	done chan struct{}
 	// inflight tracks every dispatch goroutine spawned by any fetch loop
-	// for this subscription. unsubscribeLocked waits on it so the NATS
+	// for this subscription. UnsubscribeTrigger waits on it so the NATS
 	// subscription and trigger handler are not torn down while a dispatch
 	// goroutine is still using them (msg.Ack, the handler's configuration).
 	inflight sync.WaitGroup
 }
 
-// NewConsumerManager creates a new consumer manager
+// NewConsumerManager creates a new consumer manager. ctx only supplies values;
+// Shutdown or Close, not ctx cancellation, ends the manager's lifetime.
 func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamContext, config *ConsumerManagerConfig) *ConsumerManager {
+	ctx = context.WithoutCancel(ctx)
 	logger := logging.FromContext(ctx)
+	runCtx, runCancel := context.WithCancel(ctx)
 
 	// Create OIDC token provider and dispatcher
 	oidcTokenProvider := auth.NewOIDCTokenProvider(ctx)
@@ -235,7 +261,8 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 
 	cm := &ConsumerManager{
 		logger:                logger,
-		ctx:                   ctx,
+		ctx:                   runCtx,
+		cancel:                runCancel,
 		js:                    js,
 		conn:                  conn,
 		fetchBatchSize:        fetchBatchSize,
@@ -246,6 +273,9 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 		dispatchDuration:      dispatchDuration,
 		processDuration:       processDuration,
 		subscriptions:         make(map[string]*TriggerSubscription),
+		operations:            make(map[string]chan struct{}),
+		shutdownStarted:       make(chan struct{}),
+		shutdownDone:          make(chan struct{}),
 	}
 
 	// Observable gauge: in-flight dispatches per trigger. len(sem) is the
@@ -318,10 +348,13 @@ func (m *ConsumerManager) SubscribeTrigger(
 	retryConfig *kncloudevents.RetryConfig,
 	noRetryConfig *kncloudevents.RetryConfig,
 ) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	triggerUID := string(trigger.UID)
+	finishOperation, err := m.beginTriggerOperation(triggerUID)
+	if err != nil {
+		return err
+	}
+	defer finishOperation()
+
 	logger := m.logger.With(
 		zap.String("trigger", trigger.Name),
 		zap.String("namespace", trigger.Namespace),
@@ -334,7 +367,10 @@ func (m *ConsumerManager) SubscribeTrigger(
 	// the immutable (broker, trigger UID) and never change. The fetch loop,
 	// however, captures its parameters at start, so a change to any of the
 	// three fetch-related annotations requires restarting it.
-	if existing, ok := m.subscriptions[triggerUID]; ok {
+	m.mu.RLock()
+	existing := m.subscriptions[triggerUID]
+	m.mu.RUnlock()
+	if existing != nil {
 		existing.handler.Update(trigger, subscriber, brokerIngressURL, deadLetterSink, retryConfig, noRetryConfig)
 
 		newBatch := parseTriggerAnnotationInt(trigger.Annotations, TriggerFetchBatchSizeAnnotation, m.fetchBatchSize, logger)
@@ -367,6 +403,11 @@ func (m *ConsumerManager) SubscribeTrigger(
 		existing.cancel()
 		<-existing.done
 
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		if m.closingLocked() {
+			return ErrConsumerManagerClosed
+		}
 		existing.fetchBatchSize = newBatch
 		existing.fetchTimeout = newTimeout
 		existing.maxConcurrency = newMaxConc
@@ -451,6 +492,16 @@ func (m *ConsumerManager) SubscribeTrigger(
 		dispatchCtx:    dispatchCtx,
 		dispatchCancel: dispatchCancel,
 	}
+	m.mu.Lock()
+	if m.closingLocked() {
+		m.mu.Unlock()
+		dispatchCancel()
+		if err := ts.finalize(); err != nil {
+			logger.Warnw("failed to unsubscribe after shutdown started", zap.Error(err))
+		}
+		return ErrConsumerManagerClosed
+	}
+	defer m.mu.Unlock()
 	m.subscriptions[triggerUID] = ts
 
 	logger.Infow("starting fetch loop",
@@ -467,14 +518,17 @@ func (m *ConsumerManager) SubscribeTrigger(
 }
 
 // startFetchLoopLocked starts a fetch loop with ts's current fetch parameters
-// (must be called with m.mu held).
+// (must be called with m.mu held, so shutdown snapshots see its stop, cancel,
+// and done).
 func (m *ConsumerManager) startFetchLoopLocked(ts *TriggerSubscription, logger *zap.SugaredLogger) {
 	fetchCtx, fetchCancel := context.WithCancel(ts.dispatchCtx)
+	stopCtx, stopFetch := context.WithCancel(fetchCtx)
 	ts.sem = make(chan struct{}, ts.maxConcurrency)
+	ts.stop = stopFetch
 	ts.cancel = fetchCancel
 	ts.done = make(chan struct{})
 
-	go m.fetchLoop(fetchCtx, ts, logger)
+	go m.fetchLoop(stopCtx, fetchCtx, ts, logger)
 }
 
 // fetchLoop continuously fetches messages from the pull consumer and dispatches
@@ -487,10 +541,14 @@ func (m *ConsumerManager) startFetchLoopLocked(ts *TriggerSubscription, logger *
 // deadline equal to the consumer's AckWait so that the outbound HTTP call is
 // cancelled before JetStream redelivers the message.
 //
-// Two contexts govern lifetime:
-//   - fetchCtx interrupts the current Fetch and stops its loop.
-//   - ts.dispatchCtx parents dispatches and fetchCtx, and survives a fetch
-//     restart so a parameter change does not abort in-progress dispatches.
+// Three contexts govern lifetime:
+//   - stopCtx stops the loop before its next pull request. An in-progress
+//     Fetch runs to its deadline (used by graceful shutdown).
+//   - fetchCtx, an ancestor of stopCtx, also interrupts an in-progress Fetch
+//     (used by unsubscribe and restart-on-annotation-change).
+//   - ts.dispatchCtx parents each in-flight msgCtx and fetchCtx. It survives a
+//     fetch-loop restart so a parameter change does not abort in-progress
+//     dispatches.
 //
 // Messages that Fetch returns are already delivered and their AckWait is
 // running, so the loop dispatches all of them even when it was stopped during
@@ -503,7 +561,7 @@ func (m *ConsumerManager) startFetchLoopLocked(ts *TriggerSubscription, logger *
 // WaitGroup, not a local one. The fetch loop itself does not wait on
 // dispatches — it closes done and returns as soon as it stops calling Fetch,
 // so a restart can start a new fetch loop without delay.
-func (m *ConsumerManager) fetchLoop(fetchCtx context.Context, ts *TriggerSubscription, logger *zap.SugaredLogger) {
+func (m *ConsumerManager) fetchLoop(stopCtx, fetchCtx context.Context, ts *TriggerSubscription, logger *zap.SugaredLogger) {
 	// A restart rewrites these fields only after done closes, so this
 	// generation's values are fixed for the loop's lifetime.
 	done, sem := ts.done, ts.sem
@@ -512,7 +570,7 @@ func (m *ConsumerManager) fetchLoop(fetchCtx context.Context, ts *TriggerSubscri
 
 	for {
 		select {
-		case <-fetchCtx.Done():
+		case <-stopCtx.Done():
 			logger.Debugw("fetch loop stopped")
 			return
 		default:
@@ -531,7 +589,7 @@ func (m *ConsumerManager) fetchLoop(fetchCtx context.Context, ts *TriggerSubscri
 			// remain in the stream, then re-check.
 			select {
 			case <-time.After(fetchTimeout):
-			case <-fetchCtx.Done():
+			case <-stopCtx.Done():
 				return
 			}
 			continue
@@ -543,8 +601,10 @@ func (m *ConsumerManager) fetchLoop(fetchCtx context.Context, ts *TriggerSubscri
 		msgs, err := ts.subscription.Fetch(requestCtx, batchSize)
 		cancelFetch()
 		if err != nil {
-			// A canceled fetch context stops the loop instead of retrying.
-			if fetchCtx.Err() != nil {
+			// requestCtx is canceled only through fetchCtx, an ancestor of stopCtx,
+			// so stopCtx covers context.Canceled. It also ends the loop when a
+			// stopped Fetch reaches its deadline without messages.
+			if stopCtx.Err() != nil {
 				return
 			}
 			if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
@@ -557,7 +617,7 @@ func (m *ConsumerManager) fetchLoop(fetchCtx context.Context, ts *TriggerSubscri
 			logger.Errorw("error fetching messages", zap.Error(err))
 			select {
 			case <-time.After(200 * time.Millisecond):
-			case <-fetchCtx.Done():
+			case <-stopCtx.Done():
 				return
 			}
 			continue
@@ -610,18 +670,24 @@ func nakUndispatched(msgs []*nats.Msg, delay time.Duration, logger *zap.SugaredL
 
 // UnsubscribeTrigger removes a subscription for a trigger
 func (m *ConsumerManager) UnsubscribeTrigger(triggerUID string) error {
+	finishOperation, err := m.beginTriggerOperation(triggerUID)
+	if err != nil {
+		return err
+	}
+	defer finishOperation()
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	return m.unsubscribeLocked(triggerUID)
-}
-
-// unsubscribeLocked removes a subscription (must be called with lock held)
-func (m *ConsumerManager) unsubscribeLocked(triggerUID string) error {
+	if m.closingLocked() {
+		m.mu.Unlock()
+		return ErrConsumerManagerClosed
+	}
 	sub, ok := m.subscriptions[triggerUID]
 	if !ok {
+		m.mu.Unlock()
 		return nil
 	}
+	delete(m.subscriptions, triggerUID)
+	m.mu.Unlock()
 
 	logger := m.logger.With(
 		zap.String("trigger", sub.trigger.Name),
@@ -630,10 +696,12 @@ func (m *ConsumerManager) unsubscribeLocked(triggerUID string) error {
 
 	logger.Infow("unsubscribing from trigger consumer")
 
-	// Stop the fetch producer first. done guarantees no future inflight.Add
-	// can race the Wait below, even if an interrupted Fetch returns messages.
+	// Stop the fetch producer first.
 	sub.cancel()
+	// done is the happens-before barrier that guarantees no future inflight.Add
+	// can race the Wait below.
 	<-sub.done
+	// Only after the producer is stopped, cancel the fixed set of dispatches.
 	sub.dispatchCancel()
 
 	// Wait for every dispatch goroutine — across any fetch-loop generation —
@@ -644,38 +712,163 @@ func (m *ConsumerManager) unsubscribeLocked(triggerUID string) error {
 	// resolves in milliseconds when the HTTP client respects ctx cancellation.
 	sub.inflight.Wait()
 
-	// Unsubscribe from the pull consumer
-	if err := sub.subscription.Unsubscribe(); err != nil {
+	if err := sub.finalize(); err != nil {
 		logger.Warnw("failed to unsubscribe", zap.Error(err))
 	}
-
-	// Cleanup the handler
-	sub.handler.Cleanup()
-
-	// Remove from map
-	delete(m.subscriptions, triggerUID)
 
 	return nil
 }
 
-// Close closes all subscriptions
+// beginTriggerOperation serializes lifecycle changes for one trigger without
+// holding the manager lock across NATS calls, filter updates, or dispatch joins.
+func (m *ConsumerManager) beginTriggerOperation(triggerUID string) (func(), error) {
+	for {
+		m.mu.Lock()
+		if m.closingLocked() {
+			m.mu.Unlock()
+			return nil, ErrConsumerManagerClosed
+		}
+		if pending := m.operations[triggerUID]; pending != nil {
+			m.mu.Unlock()
+			select {
+			case <-pending:
+				continue
+			case <-m.shutdownStarted:
+				return nil, ErrConsumerManagerClosed
+			}
+		}
+		done := make(chan struct{})
+		m.operations[triggerUID] = done
+		m.mu.Unlock()
+		return func() {
+			m.mu.Lock()
+			delete(m.operations, triggerUID)
+			close(done)
+			m.mu.Unlock()
+		}, nil
+	}
+}
+
+// closingLocked reports whether shutdown has begun. Callers hold m.mu so the
+// answer stays valid while they change the subscription map.
+func (m *ConsumerManager) closingLocked() bool {
+	select {
+	case <-m.shutdownStarted:
+		return true
+	default:
+		return false
+	}
+}
+
+// finalize runs once per subscription: by whichever of SubscribeTrigger,
+// UnsubscribeTrigger, or shutdown owns it after removal from the map.
+func (sub *TriggerSubscription) finalize() error {
+	err := sub.subscription.Unsubscribe()
+	sub.handler.Cleanup()
+	return err
+}
+
+// Close cancels the run context, interrupting every fetch loop and dispatch
+// immediately, then waits for them before tearing resources down.
 func (m *ConsumerManager) Close() error {
+	m.cancel()
+	return m.Shutdown(context.Background())
+}
+
+// Shutdown stops fetching new messages, lets each in-progress pull request
+// run to its deadline and dispatches what it returns, gives in-flight
+// dispatches the supplied deadline to finish, and only cancels dispatches and
+// pull requests during the final forcedDispatchGracePeriod. It is safe to call
+// concurrently or repeatedly.
+func (m *ConsumerManager) Shutdown(ctx context.Context) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	if m.closingLocked() {
+		m.mu.Unlock()
+		select {
+		case <-m.shutdownDone:
+			return m.shutdownErr
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	close(m.shutdownStarted)
+	subscriptions := slices.Collect(maps.Values(m.subscriptions))
+	operations := slices.Collect(maps.Values(m.operations))
+	m.mu.Unlock()
 
-	m.logger.Infow("closing consumer manager", zap.Int("subscription_count", len(m.subscriptions)))
+	m.shutdownErr = m.shutdown(ctx, subscriptions, operations)
+	close(m.shutdownDone)
+	return m.shutdownErr
+}
 
+func (m *ConsumerManager) shutdown(ctx context.Context, subscriptions []*TriggerSubscription, operations []chan struct{}) error {
+	m.logger.Infow("closing consumer manager", zap.Int("subscription_count", len(subscriptions)))
+	defer m.cancel()
+
+	for _, sub := range subscriptions {
+		sub.stop()
+	}
+	// A single waiter observes every producer stop before any inflight
+	// WaitGroup: closing done is the barrier after which no goroutine can call
+	// inflight.Add. It then waits for dispatches and captured operations, and
+	// only then tears the subscriptions down.
+	finalized := make(chan error, 1)
+	go func() {
+		for _, sub := range subscriptions {
+			<-sub.done
+		}
+		for _, sub := range subscriptions {
+			sub.inflight.Wait()
+		}
+		for _, done := range operations {
+			<-done
+		}
+		finalized <- m.finalizeSubscriptions(subscriptions)
+	}()
+
+	// Reserve a short interval at the end of the deadline for cancel-aware HTTP
+	// handlers to exit. Shutdown without a deadline waits for a completely
+	// natural drain and never aborts a dispatch.
+	forceCtx, cancelForce := reserveDeadline(ctx, forcedDispatchGracePeriod)
+	defer cancelForce()
+	select {
+	case err := <-finalized:
+		return err
+	case <-forceCtx.Done():
+	}
+
+	// The run context parents every dispatch context, so canceling it cancels
+	// dispatches and interrupts any Fetch still running; its fetch loop then
+	// NAKs the messages it returns.
+	m.cancel()
+	select {
+	case err := <-finalized:
+		return err
+	case <-ctx.Done():
+	}
+
+	// Return the caller's deadline error while the waiter keeps ownership of
+	// the remaining work.
+	go func() {
+		if err := <-finalized; err != nil {
+			m.logger.Warnw("failed to finish asynchronous consumer cleanup", zap.Error(err))
+		}
+	}()
+	return ctx.Err()
+}
+
+func (m *ConsumerManager) finalizeSubscriptions(subscriptions []*TriggerSubscription) error {
 	var errs []error
-	for uid := range m.subscriptions {
-		if err := m.unsubscribeLocked(uid); err != nil {
+	for _, sub := range subscriptions {
+		if err := sub.finalize(); err != nil {
 			errs = append(errs, err)
 		}
 	}
 
-	if len(errs) > 0 {
-		return fmt.Errorf("errors closing subscriptions: %v", errs)
-	}
-	return nil
+	m.mu.Lock()
+	clear(m.subscriptions)
+	m.mu.Unlock()
+	return errors.Join(errs...)
 }
 
 // GetSubscriptionCount returns the number of active subscriptions

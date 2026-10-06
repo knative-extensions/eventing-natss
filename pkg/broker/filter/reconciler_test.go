@@ -265,10 +265,7 @@ func (e *errorBrokerNamespaceLister) Get(name string) (*eventingv1.Broker, error
 func TestDeleteTrigger(t *testing.T) {
 	ctx := logging.WithLogger(context.Background(), logging.FromContext(context.TODO()))
 
-	cm := &ConsumerManager{
-		logger:        logging.FromContext(ctx),
-		subscriptions: make(map[string]*TriggerSubscription),
-	}
+	cm := withLifecycleState(&ConsumerManager{logger: logging.FromContext(ctx)})
 
 	r := &FilterReconciler{
 		logger:          logging.FromContext(ctx),
@@ -442,12 +439,11 @@ func TestReconcileTrigger_FullPath(t *testing.T) {
 			brokerLister := newFakeBrokerLister()
 			brokerLister.addBroker(broker)
 
-			cm := &ConsumerManager{
-				logger:        logging.FromContext(ctx),
-				ctx:           ctx,
-				js:            &fakeJetStream{consumerInfoErr: tc.jsErr},
-				subscriptions: make(map[string]*TriggerSubscription),
-			}
+			cm := withLifecycleState(&ConsumerManager{
+				logger: logging.FromContext(ctx),
+				ctx:    ctx,
+				js:     &fakeJetStream{consumerInfoErr: tc.jsErr},
+			})
 
 			r := &FilterReconciler{
 				logger:          logging.FromContext(ctx),
@@ -492,7 +488,7 @@ func TestReconcileTrigger_ExistingSubscription(t *testing.T) {
 	// Pre-populate subscription with old values.
 	existingHandler := newTestHandler(t, ctx, oldSubscriberURL, "")
 
-	cm := &ConsumerManager{
+	cm := withLifecycleState(&ConsumerManager{
 		logger: logging.FromContext(ctx),
 		ctx:    ctx,
 		js:     &fakeJetStream{consumerInfoErr: fmt.Errorf("should not be called")},
@@ -502,7 +498,7 @@ func TestReconcileTrigger_ExistingSubscription(t *testing.T) {
 				handler: existingHandler,
 			},
 		},
-	}
+	})
 
 	r := &FilterReconciler{
 		logger:          logging.FromContext(ctx),
@@ -645,10 +641,7 @@ func TestReconcile(t *testing.T) {
 				brokerLister.addBroker(tc.broker)
 			}
 
-			cm := &ConsumerManager{
-				logger:        logging.FromContext(ctx),
-				subscriptions: make(map[string]*TriggerSubscription),
-			}
+			cm := withLifecycleState(&ConsumerManager{logger: logging.FromContext(ctx)})
 
 			r := &FilterReconciler{
 				logger:          logging.FromContext(ctx),
