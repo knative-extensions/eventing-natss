@@ -35,13 +35,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ctx = configureContext(ctx, scope)
+	runtime := filter.NewRuntime(ctx)
+	ctx = configureContext(ctx, runtime, scope)
 
-	sharedmain.MainWithContext(ctx, component, filter.NewController)
+	sharedmain.MainWithContext(ctx, component, runtime.NewController)
 }
 
-func configureContext(ctx context.Context, scope filter.BrokerScope) context.Context {
+func configureContext(ctx context.Context, runtime *filter.Runtime, scope filter.BrokerScope) context.Context {
 	ctx = injection.WithNamespaceScope(ctx, scope.Namespace)
 	// Pull consumers share work between replicas without a controller leader.
-	return sharedmain.WithHADisabled(ctx)
+	ctx = sharedmain.WithHADisabled(ctx)
+	ctx = injection.AddReadiness(ctx, runtime.ReadinessHandler())
+	return injection.AddLiveness(ctx, runtime.LivenessHandler())
 }
