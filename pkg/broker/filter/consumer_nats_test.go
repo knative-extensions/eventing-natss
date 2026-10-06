@@ -27,7 +27,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -176,10 +175,7 @@ func newConsumerManagerForTest(t *testing.T, ctx context.Context, conn *nats.Con
 			cm.mu.RLock()
 			defer cm.mu.RUnlock()
 			for _, sub := range cm.subscriptions {
-				obs.Observe(int64(len(sub.sem)), otelmetric.WithAttributes(
-					attribute.String("kn.trigger.name", sub.trigger.Name),
-					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
-				))
+				obs.Observe(int64(len(sub.sem)), sub.handler.metricAttrs)
 			}
 			return nil
 		}),
@@ -973,10 +969,7 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 			cm.mu.RLock()
 			defer cm.mu.RUnlock()
 			for _, sub := range cm.subscriptions {
-				obs.Observe(int64(len(sub.sem)), otelmetric.WithAttributes(
-					attribute.String("kn.trigger.name", sub.trigger.Name),
-					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
-				))
+				obs.Observe(int64(len(sub.sem)), sub.handler.metricAttrs)
 			}
 			return nil
 		}),
