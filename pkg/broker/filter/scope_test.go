@@ -110,15 +110,17 @@ func TestScopedReconcileSubscriptions(t *testing.T) {
 		if cm.GetSubscriptionCount() != 1 || !cm.HasSubscription("owned-uid") {
 			t.Fatalf("replica %d subscribed outside its Broker: %d", replica, cm.GetSubscriptionCount())
 		}
-		// Moving a Trigger to another Broker retires its previous pull subscription.
-		moved := owned.DeepCopy()
-		moved.Spec.Broker = "broker-b"
-		triggers.addTrigger(moved)
+		// spec.broker is immutable, but a same-name replacement with a new UID
+		// can target another Broker before the old deletion is reconciled.
+		recreatedForOtherBroker := owned.DeepCopy()
+		recreatedForOtherBroker.UID = types.UID("foreign-replacement-uid")
+		recreatedForOtherBroker.Spec.Broker = "broker-b"
+		triggers.addTrigger(recreatedForOtherBroker)
 		if err := r.Reconcile(ctx, "namespace-a/trigger-a"); err != nil {
 			t.Fatal(err)
 		}
 		if cm.GetSubscriptionCount() != 0 {
-			t.Fatal("moved Trigger retained a subscription")
+			t.Fatal("Trigger recreated for another Broker retained a subscription")
 		}
 		triggers.addTrigger(owned)
 		if err := r.Reconcile(ctx, "namespace-a/trigger-a"); err != nil {

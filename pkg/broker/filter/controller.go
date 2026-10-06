@@ -99,8 +99,8 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	// Events are enqueued into the work queue and reconciled via
 	// FilterReconciler.Reconcile, giving us rate limiting, dedup,
 	// per-key serialization, and backoff on errors.
-	// Enqueue ownership changes too, so a Trigger moving to another Broker
-	// retires its old local subscription instead of being filtered out.
+	// Enqueue all Triggers so a same-name replacement for another Broker
+	// can retire the old local subscription. spec.broker itself is immutable.
 	triggerInformer.Informer().AddEventHandler(controller.HandleAll(impl.Enqueue))
 
 	logger.Info("Filter controller initialized")

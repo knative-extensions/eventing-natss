@@ -102,7 +102,7 @@ func (r *FilterReconciler) Reconcile(ctx context.Context, key string) error {
 			return err
 		}
 	}
-	// Track key→UID mapping for delete and ownership-change handling.
+	// Track key→UID mapping for deletion and same-name replacement handling.
 	r.mu.Lock()
 	r.triggerUIDs[key] = string(trigger.UID)
 	r.mu.Unlock()
