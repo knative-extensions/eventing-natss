@@ -47,6 +47,7 @@ import (
 type cleanupTrackingFilter struct {
 	filtered chan string
 	release  <-chan struct{}
+	recorder *lifecycleRecorder
 	cleaned  chan struct{}
 }
 
@@ -61,6 +62,9 @@ func (f *cleanupTrackingFilter) Filter(_ context.Context, event cloudevents.Even
 }
 
 func (f *cleanupTrackingFilter) Cleanup() {
+	if f.recorder != nil {
+		f.recorder.record("cleanup")
+	}
 	close(f.cleaned)
 }
 
