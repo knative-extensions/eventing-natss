@@ -64,6 +64,7 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 	// Pod spec customization
 	var nodeSelector map[string]string
 	var affinity *corev1.Affinity
+	var topologySpreadConstraints []corev1.TopologySpreadConstraint
 	var resources corev1.ResourceRequirements
 
 	// Apply template if provided
@@ -89,6 +90,9 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 		if args.Template.Affinity != nil {
 			affinity = args.Template.Affinity
 		}
+		if args.Template.TopologySpreadConstraints != nil {
+			topologySpreadConstraints = args.Template.TopologySpreadConstraints
+		}
 		resources = args.Template.Resources
 	}
 
@@ -111,9 +115,10 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: args.ServiceAccountName,
-					NodeSelector:       nodeSelector,
-					Affinity:           affinity,
+					ServiceAccountName:        args.ServiceAccountName,
+					NodeSelector:              nodeSelector,
+					Affinity:                  affinity,
+					TopologySpreadConstraints: topologySpreadConstraints,
 					Containers: []corev1.Container{
 						{
 							Name:      FilterContainerName,

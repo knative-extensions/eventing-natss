@@ -19,6 +19,7 @@ package resources
 import (
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -248,6 +249,47 @@ func TestMakeFilterDeploymentWithNodeSelector(t *testing.T) {
 
 	if deployment.Spec.Template.Spec.NodeSelector["disktype"] != "ssd" {
 		t.Errorf("NodeSelector disktype = %v, want ssd", deployment.Spec.Template.Spec.NodeSelector["disktype"])
+	}
+}
+
+func TestMakeFilterDeploymentWithTopologySpreadConstraints(t *testing.T) {
+	broker := &eventingv1.Broker{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "example-broker",
+			Namespace: "example-namespace",
+			UID:       "example-uid",
+		},
+	}
+
+	want := []corev1.TopologySpreadConstraint{
+		{
+			MaxSkew:           1,
+			MinDomains:        ptr.Int32(2),
+			TopologyKey:       corev1.LabelHostname,
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					BrokerLabelKey: "example-broker",
+					RoleLabelKey:   FilterRoleLabelValue,
+				},
+			},
+			MatchLabelKeys: []string{"pod-template-hash"},
+		},
+	}
+
+	deployment := MakeFilterDeployment(&FilterArgs{
+		Broker:             broker,
+		Image:              "registry.example.com/filter:latest",
+		ServiceAccountName: "example-service-account",
+		StreamName:         "EXAMPLE_STREAM",
+		NatsURL:            "nats://nats.example-namespace.svc.cluster.local:4222",
+		Template: &brokerconfig.DeploymentTemplate{
+			TopologySpreadConstraints: want,
+		},
+	})
+
+	if diff := cmp.Diff(want, deployment.Spec.Template.Spec.TopologySpreadConstraints); diff != "" {
+		t.Errorf("TopologySpreadConstraints mismatch (-want +got):\n%s", diff)
 	}
 }
 
