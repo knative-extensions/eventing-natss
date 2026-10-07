@@ -77,6 +77,10 @@ type DeploymentTemplate struct {
 	// +optional
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
 
+	// TopologySpreadConstraints controls how pods are spread across topology domains.
+	// +optional
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+
 	// Env defines additional environment variables for the container.
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
@@ -179,6 +183,13 @@ func (in *DeploymentTemplate) DeepCopyInto(out *DeploymentTemplate) {
 		in, out := &in.Affinity, &out.Affinity
 		*out = new(corev1.Affinity)
 		(*in).DeepCopyInto(*out)
+	}
+	if in.TopologySpreadConstraints != nil {
+		in, out := &in.TopologySpreadConstraints, &out.TopologySpreadConstraints
+		*out = make([]corev1.TopologySpreadConstraint, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 	if in.Env != nil {
 		in, out := &in.Env, &out.Env

@@ -24,6 +24,7 @@ import (
 	"github.com/nats-io/nats.go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 )
@@ -227,6 +228,31 @@ func TestGetConfigFromAnnotation(t *testing.T) {
 			want: &NatsJetStreamBrokerConfig{
 				Stream: &v1alpha1.StreamConfig{
 					Replicas: 3,
+				},
+			},
+		},
+		{
+			name: "filter topology spread constraints",
+			annotations: map[string]string{
+				BrokerConfigAnnotation: `{"filter":{"topologySpreadConstraints":[{"maxSkew":1,"minDomains":2,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"DoNotSchedule","labelSelector":{"matchLabels":{"eventing.knative.dev/broker":"example-broker","eventing.knative.dev/role":"filter"}},"matchLabelKeys":["pod-template-hash"]}]}}`,
+			},
+			want: &NatsJetStreamBrokerConfig{
+				Filter: &DeploymentTemplate{
+					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+						{
+							MaxSkew:           1,
+							MinDomains:        ptr.To[int32](2),
+							TopologyKey:       corev1.LabelHostname,
+							WhenUnsatisfiable: corev1.DoNotSchedule,
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"eventing.knative.dev/broker": "example-broker",
+									"eventing.knative.dev/role":   "filter",
+								},
+							},
+							MatchLabelKeys: []string{"pod-template-hash"},
+						},
+					},
 				},
 			},
 		},
@@ -463,5 +489,38 @@ func TestBrokerConfigAnnotationRoundTrip(t *testing.T) {
 
 	if diff := cmp.Diff(original, got); diff != "" {
 		t.Errorf("Round-trip mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestDeploymentTemplateDeepCopyTopologySpreadConstraints(t *testing.T) {
+	original := &DeploymentTemplate{
+		TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
+			{
+				MaxSkew:           1,
+				MinDomains:        ptr.To[int32](2),
+				TopologyKey:       corev1.LabelHostname,
+				WhenUnsatisfiable: corev1.DoNotSchedule,
+				LabelSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "example-filter"},
+				},
+				MatchLabelKeys: []string{"pod-template-hash"},
+			},
+		},
+	}
+
+	got := original.DeepCopy()
+	got.TopologySpreadConstraints[0].LabelSelector.MatchLabels["app"] = "changed"
+	got.TopologySpreadConstraints[0].MatchLabelKeys[0] = "changed"
+	*got.TopologySpreadConstraints[0].MinDomains = 3
+
+	constraint := original.TopologySpreadConstraints[0]
+	if constraint.LabelSelector.MatchLabels["app"] != "example-filter" {
+		t.Error("DeepCopy mutated the original label selector")
+	}
+	if constraint.MatchLabelKeys[0] != "pod-template-hash" {
+		t.Error("DeepCopy mutated the original matchLabelKeys")
+	}
+	if *constraint.MinDomains != 2 {
+		t.Error("DeepCopy mutated the original minDomains")
 	}
 }
