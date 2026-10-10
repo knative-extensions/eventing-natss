@@ -210,6 +210,29 @@ metadata:
       }
 ```
 
+### Custom Stream Name
+
+By default the JetStream stream for a broker is named `KN_BROKER_<NAMESPACE>__<NAME>`
+(upper-cased, hyphens replaced with `_`). Override it with the
+`natsjetstream.eventing.knative.dev/stream-name` annotation on the Broker:
+
+```yaml
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: action-flow
+  namespace: viax
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    natsjetstream.eventing.knative.dev/stream-name: MY_CUSTOM_STREAM
+```
+
+Notes:
+
+- The value must be a valid JetStream stream name — no spaces, `.`, `*`, `>`, `/` or `\`. An invalid value fails broker reconciliation.
+- The name is stored on the Broker (not the config ConfigMap) so it is resolved consistently everywhere, including when the stream is deleted on broker finalization.
+- Like other stream settings this applies at stream **creation** (create-once); changing it on an existing broker points the broker at a new stream and orphans the old one.
+
 ### Per-Trigger Configuration
 
 Each trigger can override the broker-wide defaults via annotations. This lets individual triggers with different throughput or latency requirements coexist in the same broker without affecting each other.

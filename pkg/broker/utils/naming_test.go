@@ -69,6 +69,28 @@ func TestBrokerStreamName(t *testing.T) {
 			},
 			wantName: "KN_BROKER_MY_TEST_NAMESPACE__MY_TEST_BROKER",
 		},
+		{
+			name: "annotation overrides the generated name",
+			broker: &eventingv1.Broker{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace:   "default",
+					Name:        "mybroker",
+					Annotations: map[string]string{BrokerStreamNameAnnotation: "MY_CUSTOM_STREAM"},
+				},
+			},
+			wantName: "MY_CUSTOM_STREAM",
+		},
+		{
+			name: "empty annotation falls back to the generated name",
+			broker: &eventingv1.Broker{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace:   "default",
+					Name:        "mybroker",
+					Annotations: map[string]string{BrokerStreamNameAnnotation: ""},
+				},
+			},
+			wantName: "KN_BROKER_DEFAULT__MYBROKER",
+		},
 	}
 
 	for _, tt := range tests {
@@ -76,6 +98,29 @@ func TestBrokerStreamName(t *testing.T) {
 			got := BrokerStreamName(tt.broker)
 			if got != tt.wantName {
 				t.Errorf("BrokerStreamName() = %v, want %v", got, tt.wantName)
+			}
+		})
+	}
+}
+
+func TestValidateStreamName(t *testing.T) {
+	tests := []struct {
+		name    string
+		stream  string
+		wantErr bool
+	}{
+		{name: "valid", stream: "MY_CUSTOM_STREAM", wantErr: false},
+		{name: "empty", stream: "", wantErr: true},
+		{name: "contains dot", stream: "my.stream", wantErr: true},
+		{name: "contains wildcard star", stream: "my*stream", wantErr: true},
+		{name: "contains wildcard gt", stream: "my>stream", wantErr: true},
+		{name: "contains space", stream: "my stream", wantErr: true},
+		{name: "contains slash", stream: "my/stream", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateStreamName(tt.stream); (err != nil) != tt.wantErr {
+				t.Errorf("ValidateStreamName(%q) error = %v, wantErr %v", tt.stream, err, tt.wantErr)
 			}
 		})
 	}
