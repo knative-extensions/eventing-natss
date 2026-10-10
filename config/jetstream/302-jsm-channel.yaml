@@ -106,6 +106,9 @@ spec:
                     backoffDelay:
                       description: 'BackoffDelay is the delay before retrying. More information on Duration format: - https://www.iso.org/iso-8601-date-and-time-format.html - https://en.wikipedia.org/wiki/ISO_8601  For linear policy, backoff delay is backoffDelay*<numberOfRetries>. For exponential policy, backoff delay is backoffDelay*2^<numberOfRetries>.'
                       type: string
+                    backoffMax:
+                      description: 'BackoffMax is the maximum delay between normal delivery attempts. It caps the delay calculated from BackoffDelay and BackoffPolicy, but does not cap delays requested by a Retry-After response header. The value must be greater than zero. Cluster operators must enable the delivery-backoff-max feature before users can set this experimental field. More information on Duration format: - https://www.iso.org/iso-8601-date-and-time-format.html - https://en.wikipedia.org/wiki/ISO_8601'
+                      type: string
                     backoffPolicy:
                       description: BackoffPolicy is the retry backoff policy (linear, exponential).
                       type: string
@@ -739,6 +742,9 @@ spec:
                         properties:
                           backoffDelay:
                             description: 'BackoffDelay is the delay before retrying. More information on Duration format: - https://www.iso.org/iso-8601-date-and-time-format.html - https://en.wikipedia.org/wiki/ISO_8601  For linear policy, backoff delay is backoffDelay*<numberOfRetries>. For exponential policy, backoff delay is backoffDelay*2^<numberOfRetries>.'
+                            type: string
+                          backoffMax:
+                            description: 'BackoffMax is the maximum delay between normal delivery attempts. It caps the delay calculated from BackoffDelay and BackoffPolicy, but does not cap delays requested by a Retry-After response header. The value must be greater than zero. Cluster operators must enable the delivery-backoff-max feature before users can set this experimental field. More information on Duration format: - https://www.iso.org/iso-8601-date-and-time-format.html - https://en.wikipedia.org/wiki/ISO_8601'
                             type: string
                           backoffPolicy:
                             description: BackoffPolicy is the retry backoff policy (linear, exponential).

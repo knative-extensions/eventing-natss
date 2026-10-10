@@ -149,6 +149,48 @@ Consumers will be created with the default configuration:
 
 Other configuration elements use the JetStream defaults, and can be overridden in the CRD.
 
+## Configuring delivery retries
+
+A channel operator can set default retry behavior on a
+`NatsJetStreamChannel`. Every `Subscription` without its own delivery settings
+then uses that default. In this example, events for `orders` are retried four
+times and the normal exponential delay stops growing at two seconds:
+
+```yaml
+apiVersion: messaging.knative.dev/v1alpha1
+kind: NatsJetStreamChannel
+metadata:
+  name: orders
+  namespace: default
+spec:
+  delivery:
+    retry: 4
+    backoffPolicy: exponential
+    backoffDelay: PT1S
+    backoffMax: PT2S
+---
+apiVersion: messaging.knative.dev/v1
+kind: Subscription
+metadata:
+  name: orders-to-processor
+  namespace: default
+spec:
+  channel:
+    apiVersion: messaging.knative.dev/v1alpha1
+    kind: NatsJetStreamChannel
+    name: orders
+  subscriber:
+    ref:
+      apiVersion: v1
+      kind: Service
+      name: order-processor
+```
+
+Cluster operators must enable `delivery-backoff-max` in the Knative Eventing
+`config-features` ConfigMap before applying this channel. See
+[Delivery retry limits](./broker.md#delivery-retry-limits) for the difference
+between `backoffMax` and `retryAfterMax` and for the required feature flags.
+
 ## `NatsJetStreamChannel` CRD
 
 ```yaml

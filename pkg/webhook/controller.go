@@ -21,8 +21,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
+	"knative.dev/eventing/pkg/apis/feature"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
+	"knative.dev/pkg/logging"
 	"knative.dev/pkg/webhook/resourcesemantics"
 	"knative.dev/pkg/webhook/resourcesemantics/defaulting"
 	"knative.dev/pkg/webhook/resourcesemantics/validation"
@@ -62,9 +64,12 @@ func NewDefaultingAdmissionController(ctx context.Context, _ configmap.Watcher) 
 }
 
 func NewValidationAdmissionController(ctx context.Context, cmw configmap.Watcher) *controller.Impl {
+	featureStore := feature.NewStore(logging.FromContext(ctx).Named("feature-config-store"))
+	featureStore.WatchConfigs(cmw)
+
 	// A function that infuses the context passed to ConvertTo/ConvertFrom/SetDefaults with custom metadata.
 	ctxFunc := func(ctx context.Context) context.Context {
-		return ctx
+		return featureStore.ToContext(ctx)
 	}
 	return validation.NewAdmissionController(ctx,
 

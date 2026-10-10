@@ -1,0 +1,39 @@
+//go:build e2e
+// +build e2e
+
+/*
+Copyright 2026 The Knative Authors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package experimental
+
+import (
+	"os"
+	"testing"
+
+	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
+
+	// Link this first so the system namespace is defaulted before logstream
+	// initialization.
+	_ "knative.dev/eventing-natss/test/defaultsystem"
+	"knative.dev/reconciler-test/pkg/environment"
+)
+
+var global environment.GlobalEnvironment
+
+func TestMain(m *testing.M) {
+	global = environment.NewStandardGlobalEnvironment()
+	os.Exit(m.Run())
+}

@@ -17,17 +17,21 @@ limitations under the License.
 package utils
 
 import (
-	"math"
+	"net/http"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/nats-io/nats.go"
-	"github.com/rickb777/date/period"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
-	v1 "knative.dev/eventing/pkg/apis/duck/v1"
 	"knative.dev/eventing/pkg/kncloudevents"
+
+	_ "unsafe"
 )
+
+//go:linkname generateBackoffFn knative.dev/eventing/pkg/kncloudevents.generateBackoffFn
+func generateBackoffFn(config *kncloudevents.RetryConfig) retryablehttp.Backoff
 
 func ConvertJsDeliverPolicy(in v1alpha1.DeliverPolicy, def jetstream.DeliverPolicy) jetstream.DeliverPolicy {
 	switch in {
@@ -110,32 +114,16 @@ func CalcRequestTimeout(numDelivered int, ackWait time.Duration) time.Duration {
 	return deadline
 }
 
-func CalculateNakDelayForRetryNumber(attemptNum int, config *kncloudevents.RetryConfig) time.Duration {
-	backoff, backoffDelay := parseBackoffFuncAndDelay(config)
-	return backoff(attemptNum, backoffDelay)
-}
-
-type backoffFunc func(attemptNum int, delayDuration time.Duration) time.Duration
-
-func LinearBackoff(attemptNum int, delayDuration time.Duration) time.Duration {
-	return delayDuration * time.Duration(attemptNum)
-}
-
-func ExpBackoff(attemptNum int, delayDuration time.Duration) time.Duration {
-	return delayDuration * time.Duration(math.Exp2(float64(attemptNum)))
-}
-
-func parseBackoffFuncAndDelay(config *kncloudevents.RetryConfig) (backoffFunc, time.Duration) {
-	var backoff backoffFunc
-	switch *config.BackoffPolicy {
-	case v1.BackoffPolicyExponential:
-		backoff = ExpBackoff
-	case v1.BackoffPolicyLinear:
-		backoff = LinearBackoff
+// CalculateNakDelayForRetryNumber calculates the NAK delay for a JetStream
+// delivery. JetStream's NumDelivered is one-based, while Knative's retry
+// backoff callback receives a zero-based retry attempt.
+func CalculateNakDelayForRetryNumber(numDelivered int, config *kncloudevents.RetryConfig, response *http.Response) time.Duration {
+	if config == nil || config.Backoff == nil {
+		return 0
 	}
-	// it should be validated at this point
-	delay, _ := period.Parse(*config.BackoffDelay)
-	backoffDelay, _ := delay.Duration()
-
-	return backoff, backoffDelay
+	attemptNum := numDelivered - 1
+	if attemptNum < 0 {
+		attemptNum = 0
+	}
+	return generateBackoffFn(config)(0, 0, attemptNum, response)
 }
