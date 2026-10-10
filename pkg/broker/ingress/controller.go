@@ -53,6 +53,14 @@ const (
 
 type envConfig struct {
 	Port int `envconfig:"PORT" default:"8080"`
+
+	// PublishTimeout bounds how long a request waits for a JetStream ack before
+	// returning 503 so the producer retries.
+	PublishTimeout time.Duration `envconfig:"PUBLISH_TIMEOUT" default:"10s"`
+
+	// PublishMaxInflight caps the number of outstanding (unacked) async publishes
+	// across the ingress. Reaching it applies backpressure to new requests.
+	PublishMaxInflight int `envconfig:"PUBLISH_MAX_INFLIGHT" default:"256"`
 }
 
 // NewController creates a new shared ingress controller
@@ -71,8 +79,9 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 		logger.Fatalw("Failed to initialize NATS connection", zap.Error(err))
 	}
 
-	// Create JetStream context
-	js, err := natsConn.JetStream()
+	// Create JetStream context with a bounded async-publish window so the ingress
+	// can pipeline publishes while applying backpressure under load.
+	js, err := natsConn.JetStream(nats.PublishAsyncMaxPending(env.PublishMaxInflight))
 	if err != nil {
 		logger.Fatalw("Failed to create JetStream context", zap.Error(err))
 	}
@@ -81,8 +90,9 @@ func NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 
 	// Create the shared ingress handler
 	handler := NewHandler(HandlerConfig{
-		Logger:    logger,
-		JetStream: js,
+		Logger:         logger,
+		JetStream:      js,
+		PublishTimeout: env.PublishTimeout,
 	})
 
 	// Get ConfigMap informer for watching contract changes
