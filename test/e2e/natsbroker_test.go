@@ -30,12 +30,10 @@ import (
 	// logstream initialization.
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	_ "knative.dev/eventing-natss/test/defaultsystem"
-	"knative.dev/pkg/system"
 	_ "knative.dev/pkg/system/testing"
 	"knative.dev/reconciler-test/pkg/eventshub"
 	"knative.dev/reconciler-test/pkg/feature"
 	"knative.dev/reconciler-test/pkg/k8s"
-	"knative.dev/reconciler-test/pkg/knative"
 
 	"knative.dev/eventing-natss/test/e2e/config/deadletter"
 	"knative.dev/eventing-natss/test/e2e/config/filtering"
@@ -67,15 +65,9 @@ func namedRecorderFeature(name string) *feature.Feature {
 // TestNatsBrokerDirect tests that a NatsJetStream broker delivers events to a consumer.
 func TestNatsBrokerDirect(t *testing.T) {
 	t.Parallel()
-	ctx, env := global.Environment(
-		knative.WithKnativeNamespace(system.Namespace()),
-		knative.WithLoggingConfig,
-		knative.WithObservabilityConfig,
-		k8s.WithEventListener,
-	)
+	ctx, env := testEnvironment(t)
 	env.Test(ctx, t, RecorderFeature())
 	env.Test(ctx, t, NatsBrokerDirectFeature())
-	env.Finish()
 }
 
 // NatsBrokerDirectFeature tests direct event delivery through NatsJetStream broker.
@@ -104,15 +96,9 @@ func NatsBrokerDirectFeature() *feature.Feature {
 // TestNatsBrokerDeadLetter tests that a NatsJetStream broker sends failed events to a dead letter sink.
 func TestNatsBrokerDeadLetter(t *testing.T) {
 	t.Parallel()
-	ctx, env := global.Environment(
-		knative.WithKnativeNamespace(system.Namespace()),
-		knative.WithLoggingConfig,
-		knative.WithObservabilityConfig,
-		k8s.WithEventListener,
-	)
+	ctx, env := testEnvironment(t)
 	env.Test(ctx, t, namedRecorderFeature("dls-recorder"))
 	env.Test(ctx, t, NatsBrokerDeadLetterFeature())
-	env.Finish()
 }
 
 // NatsBrokerDeadLetterFeature tests that failed events reach the dead letter sink.
@@ -138,16 +124,10 @@ func NatsBrokerDeadLetterFeature() *feature.Feature {
 // TestNatsBrokerFiltering tests that a NatsJetStream broker routes events by type to the correct subscriber.
 func TestNatsBrokerFiltering(t *testing.T) {
 	t.Parallel()
-	ctx, env := global.Environment(
-		knative.WithKnativeNamespace(system.Namespace()),
-		knative.WithLoggingConfig,
-		knative.WithObservabilityConfig,
-		k8s.WithEventListener,
-	)
+	ctx, env := testEnvironment(t)
 	env.Test(ctx, t, namedRecorderFeature("recorder-type-a"))
 	env.Test(ctx, t, namedRecorderFeature("recorder-type-b"))
 	env.Test(ctx, t, NatsBrokerFilteringFeature())
-	env.Finish()
 }
 
 // NatsBrokerFilteringFeature tests type-based event routing through NatsJetStream broker.

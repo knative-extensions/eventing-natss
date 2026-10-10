@@ -20,6 +20,7 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -43,16 +44,24 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// TestBrokerDirect makes sure a Broker can delivery events to a consumer.
-func TestBrokerDirect(t *testing.T) {
-	t.Parallel()
-	ctx, env := global.Environment(
+// testEnvironment keeps the environment lifecycle consistent across the E2E
+// suite. Managed environments clean up after successful tests and retain a
+// failed test's namespace for diagnostics.
+func testEnvironment(t *testing.T) (context.Context, environment.Environment) {
+	t.Helper()
+	return global.Environment(
+		environment.Managed(t),
 		knative.WithKnativeNamespace(system.Namespace()),
 		knative.WithLoggingConfig,
 		knative.WithObservabilityConfig,
 		k8s.WithEventListener,
 	)
+}
+
+// TestBrokerDirect makes sure a Broker can delivery events to a consumer.
+func TestBrokerDirect(t *testing.T) {
+	t.Parallel()
+	ctx, env := testEnvironment(t)
 	env.Test(ctx, t, RecorderFeature())
 	env.Test(ctx, t, DirectTestBroker())
-	env.Finish()
 }

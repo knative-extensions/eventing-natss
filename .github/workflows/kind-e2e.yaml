@@ -141,40 +141,32 @@ jobs:
 
     - name: Run e2e Tests
       run: |
+        set -o pipefail
         set -x
 
         # Run the tests tagged as e2e on the KinD cluster.
-        go test -v -race -count=1 -timeout=15m -tags=e2e ./test/e2e/...
+        diagnostics_dir="${RUNNER_TEMP}/kind-e2e-diagnostics"
+        mkdir -p "${diagnostics_dir}"
+        go test -v -race -count=1 -timeout=15m -tags=e2e ./test/e2e/... 2>&1 | tee "${diagnostics_dir}/e2e-test.log"
 
     - name: Gather Failure Data
       if: ${{ failure() }}
+      continue-on-error: true
+      timeout-minutes: 5
+      env:
+        OUT_DIR: ${{ runner.temp }}/kind-e2e-diagnostics
       run: |
         set -x
+        bash ./hack/gather-e2e-failure-data.sh
 
-        echo "===================== Brokers =============================="
-        kubectl get broker --all-namespaces=true -oyaml
-
-        echo "===================== Channels ============================="
-        kubectl get channel --all-namespaces=true -oyaml
-
-        echo "===================== Triggers ============================="
-        kubectl get trigger --all-namespaces=true -oyaml
-
-        echo "===================== K8s Events ==========================="
-        kubectl get events --all-namespaces=true -oyaml
-
-        echo "===================== Pod Logs ============================="
-        namespace=knative-eventing
-        for pod in $(kubectl get pod -n $namespace | awk '{print $1}'); do
-          for container in $(kubectl get pod "${pod}" -n $namespace -ojsonpath='{.spec.containers[*].name}'); do
-            echo "Namespace, Pod, Container: ${namespace}, ${pod}, ${container}"
-            kubectl logs -n $namespace "${pod}" -c "${container}" || true
-            echo "----------------------------------------------------------"
-            echo "Namespace, Pod, Container (Previous instance): ${namespace}, ${pod}, ${container}"
-            kubectl logs -p -n $namespace "${pod}" -c "${container}" || true
-            echo "============================================================"
-          done
-        done
+    - name: Upload Failure Data
+      if: ${{ always() && failure() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: kind-e2e-${{ matrix.k8s-version }}-${{ matrix.eventing-version }}
+        path: ${{ runner.temp }}/kind-e2e-diagnostics
+        if-no-files-found: warn
+        retention-days: 7
 
     - name: Post failure notice to Slack
       # Note: using env.SLACK_WEBHOOK here because secrets are not allowed in the if block.
@@ -189,4 +181,3 @@ jobs:
         SLACK_TITLE: Periodic e2e for Nats on kind on (${{ matrix.k8s-version }}, ${{ matrix.eventing-version }}) failed.
         SLACK_MESSAGE: |
           For detailed logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
