@@ -98,7 +98,7 @@ func TestScopedReconcileSubscriptions(t *testing.T) {
 	}
 	// Each generated filter replica independently subscribes to the same durable consumer.
 	for replica := 0; replica < 2; replica++ {
-		cm := newConsumerManagerForTest(t, ctx, conn, js, &ConsumerManagerConfig{FetchTimeout: 10 * time.Millisecond})
+		cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{FetchTimeout: 10 * time.Millisecond})
 		defer cm.Close()
 		r := NewFilterReconciler(ctx, triggers, brokers, cm)
 		r.brokerScope = &BrokerScope{Namespace: "namespace-a", Name: "broker-a"}
