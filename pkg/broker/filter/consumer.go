@@ -131,10 +131,23 @@ type ConsumerManager struct {
 	mu            sync.RWMutex
 }
 
+type pullSubscription interface {
+	Fetch(ctx context.Context, batch int) ([]*nats.Msg, error)
+	Unsubscribe() error
+}
+
+type natsPullSubscription struct {
+	*nats.Subscription
+}
+
+func (s natsPullSubscription) Fetch(ctx context.Context, batch int) ([]*nats.Msg, error) {
+	return s.Subscription.Fetch(batch, nats.Context(ctx))
+}
+
 // TriggerSubscription holds the subscription and handler for a trigger
 type TriggerSubscription struct {
 	trigger        *eventingv1.Trigger
-	subscription   *nats.Subscription
+	subscription   pullSubscription
 	handler        *TriggerHandler
 	streamName     string
 	consumerName   string
@@ -155,8 +168,8 @@ type TriggerSubscription struct {
 	// in-progress dispatches.
 	dispatchCtx    context.Context
 	dispatchCancel context.CancelFunc
-	// cancel stops the current fetch loop only. A new fetch loop with new
-	// parameters can be started after done closes.
+	// cancel stops the fetch loop and interrupts an in-progress Fetch. A new
+	// loop with new parameters can be started after done closes.
 	cancel context.CancelFunc
 	// done is closed by the current fetch loop as soon as it returns.
 	// Restart waits on this before starting a new fetch loop on the same
@@ -165,7 +178,7 @@ type TriggerSubscription struct {
 	// inflight tracks every dispatch goroutine spawned by any fetch loop
 	// for this subscription. unsubscribeLocked waits on it so the NATS
 	// subscription and trigger handler are not torn down while a dispatch
-	// goroutine is still using them (msg.Ack, h.filter.Filter, etc.).
+	// goroutine is still using them (msg.Ack, the handler's configuration).
 	inflight sync.WaitGroup
 }
 
@@ -356,24 +369,18 @@ func (m *ConsumerManager) SubscribeTrigger(
 
 		// Stop the current fetch loop and wait until it has stopped calling
 		// Fetch. Two goroutines must not overlap on the same pull subscription.
-		// Worst-case wait is one fetchTimeout (the in-progress Fetch call
-		// returning). In-flight dispatches use existing.dispatchCtx and keep
-		// running uninterrupted.
+		// Canceling the fetch context also interrupts an in-progress Fetch. The
+		// loop still dispatches what that Fetch returned, and messages the
+		// server delivers into the interrupted pull request stay buffered on
+		// the shared subscription for the next loop's first Fetch. In-flight
+		// dispatches use existing.dispatchCtx and keep running uninterrupted.
 		existing.cancel()
 		<-existing.done
-
-		newSem := make(chan struct{}, newMaxConc)
-		fetchCtx, fetchCancel := context.WithCancel(m.ctx)
-		newDone := make(chan struct{})
 
 		existing.fetchBatchSize = newBatch
 		existing.fetchTimeout = newTimeout
 		existing.maxConcurrency = newMaxConc
-		existing.sem = newSem
-		existing.cancel = fetchCancel
-		existing.done = newDone
-
-		go m.fetchLoop(fetchCtx, existing.dispatchCtx, newDone, &existing.inflight, existing.subscription, existing.handler, existing.ackWait, newBatch, newTimeout, newSem, logger)
+		m.startFetchLoopLocked(existing, logger)
 		return nil
 	}
 
@@ -417,8 +424,6 @@ func (m *ConsumerManager) SubscribeTrigger(
 	fetchTimeout := parseTriggerAnnotationDuration(trigger.Annotations, TriggerFetchTimeoutAnnotation, m.fetchTimeout, logger)
 	maxConcurrency := parseTriggerAnnotationInt(trigger.Annotations, TriggerMaxConcurrencyAnnotation, m.defaultMaxConcurrency, logger)
 
-	sem := make(chan struct{}, maxConcurrency)
-
 	// Get the filter subject from the consumer's configuration
 	filterSubject := brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
 
@@ -442,16 +447,13 @@ func (m *ConsumerManager) SubscribeTrigger(
 	// Set subscription and consumer info on handler
 	handler.subscription = sub
 
-	// Two cancellable contexts: dispatchCtx survives fetch-loop restart and
-	// parents per-message msgCtx; fetchCtx controls the current fetch loop only.
+	// dispatchCtx survives fetch-loop restart and parents per-message msgCtx.
 	dispatchCtx, dispatchCancel := context.WithCancel(m.ctx)
-	fetchCtx, fetchCancel := context.WithCancel(m.ctx)
-	done := make(chan struct{})
 
 	// Store the subscription
 	ts := &TriggerSubscription{
 		trigger:        trigger,
-		subscription:   sub,
+		subscription:   natsPullSubscription{Subscription: sub},
 		handler:        handler,
 		streamName:     streamName,
 		consumerName:   consumerName,
@@ -459,11 +461,8 @@ func (m *ConsumerManager) SubscribeTrigger(
 		fetchBatchSize: fetchBatchSize,
 		fetchTimeout:   fetchTimeout,
 		maxConcurrency: maxConcurrency,
-		sem:            sem,
 		dispatchCtx:    dispatchCtx,
 		dispatchCancel: dispatchCancel,
-		cancel:         fetchCancel,
-		done:           done,
 	}
 	m.subscriptions[triggerUID] = ts
 
@@ -474,10 +473,21 @@ func (m *ConsumerManager) SubscribeTrigger(
 	)
 
 	// Start the message fetch loop
-	go m.fetchLoop(fetchCtx, dispatchCtx, done, &ts.inflight, sub, handler, ackWait, fetchBatchSize, fetchTimeout, sem, logger)
+	m.startFetchLoopLocked(ts, logger)
 
 	logger.Infow("successfully started pull subscription for trigger consumer")
 	return nil
+}
+
+// startFetchLoopLocked starts a fetch loop with ts's current fetch parameters
+// (must be called with m.mu held).
+func (m *ConsumerManager) startFetchLoopLocked(ts *TriggerSubscription, logger *zap.SugaredLogger) {
+	fetchCtx, fetchCancel := context.WithCancel(ts.dispatchCtx)
+	ts.sem = make(chan struct{}, ts.maxConcurrency)
+	ts.cancel = fetchCancel
+	ts.done = make(chan struct{})
+
+	go m.fetchLoop(fetchCtx, ts, logger)
 }
 
 // fetchLoop continuously fetches messages from the pull consumer and dispatches
@@ -491,117 +501,122 @@ func (m *ConsumerManager) SubscribeTrigger(
 // cancelled before JetStream redelivers the message.
 //
 // Two contexts govern lifetime:
-//   - ctx controls the fetch loop itself. Cancel it to stop fetching (used by
-//     unsubscribe and restart-on-annotation-change).
-//   - dispatchCtx parents each in-flight msgCtx. It survives a fetch-loop
+//   - fetchCtx interrupts the current Fetch and stops its loop.
+//   - ts.dispatchCtx parents dispatches and fetchCtx, and survives a fetch
 //     restart so a parameter change does not abort in-progress dispatches.
 //
+// Messages that Fetch returns are already delivered and their AckWait is
+// running, so the loop dispatches all of them even when it was stopped during
+// the Fetch. Dropping them would hold them until AckWait expires and spend one
+// of their delivery attempts. Only when ts.dispatchCtx is already canceled, so
+// no dispatch could finish, does the loop NAK them for redelivery once its
+// pull request has expired.
+//
 // Spawned dispatches are tracked on the subscription-scoped inflight
-// WaitGroup, not a local one. unsubscribeLocked waits on it to drain in-flight
-// dispatches (across any fetch-loop generation) before tearing down the NATS
-// subscription and trigger handler. The fetch loop itself does not wait on
+// WaitGroup, not a local one. The fetch loop itself does not wait on
 // dispatches — it closes done and returns as soon as it stops calling Fetch,
 // so a restart can start a new fetch loop without delay.
-func (m *ConsumerManager) fetchLoop(
-	ctx context.Context,
-	dispatchCtx context.Context,
-	done chan struct{},
-	inflight *sync.WaitGroup,
-	sub *nats.Subscription,
-	handler *TriggerHandler,
-	ackWait time.Duration,
-	fetchBatchSize int,
-	fetchTimeout time.Duration,
-	sem chan struct{},
-	logger *zap.SugaredLogger,
-) {
+func (m *ConsumerManager) fetchLoop(fetchCtx context.Context, ts *TriggerSubscription, logger *zap.SugaredLogger) {
+	// A restart rewrites these fields only after done closes, so this
+	// generation's values are fixed for the loop's lifetime.
+	done, sem := ts.done, ts.sem
+	fetchBatchSize, fetchTimeout := ts.fetchBatchSize, ts.fetchTimeout
 	defer close(done)
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-fetchCtx.Done():
 			logger.Debugw("fetch loop stopped")
 			return
 		default:
 		}
 
 		// Determine how many messages to request this round.
-		// When a semaphore is configured, cap the request to the number of
-		// free slots so every returned message can acquire its slot
-		// immediately — keeping our AckWait context aligned with JetStream's
-		// delivery clock. fetchLoop is the only goroutine that acquires slots,
-		// so cap(sem)-len(sem) is a stable lower bound: in-flight goroutines
-		// can only release slots between here and the acquire, never consume
-		// new ones.
-		batchSize := fetchBatchSize
-		if sem != nil {
-			available := cap(sem) - len(sem)
-			if available == 0 {
-				// All slots occupied. Wait one fetch interval so messages
-				// remain in the stream, then re-check.
-				select {
-				case <-time.After(fetchTimeout):
-				case <-ctx.Done():
-					return
-				}
-				continue
+		// Cap the request to the number of free semaphore slots so every
+		// returned message can acquire its slot immediately — keeping our
+		// AckWait context aligned with JetStream's delivery clock. fetchLoop
+		// is the only goroutine that acquires slots, so cap(sem)-len(sem) is a
+		// stable lower bound: in-flight goroutines can only release slots
+		// between here and the acquire, never consume new ones.
+		available := cap(sem) - len(sem)
+		if available == 0 {
+			// All slots occupied. Wait one fetch interval so messages
+			// remain in the stream, then re-check.
+			select {
+			case <-time.After(fetchTimeout):
+			case <-fetchCtx.Done():
+				return
 			}
-			if available < batchSize {
-				batchSize = available
-			}
+			continue
 		}
+		batchSize := min(fetchBatchSize, available)
 
-		msgs, err := sub.Fetch(batchSize, nats.MaxWait(fetchTimeout))
+		requestCtx, cancelFetch := context.WithTimeout(fetchCtx, fetchTimeout)
+		requestDeadline, _ := requestCtx.Deadline()
+		msgs, err := ts.subscription.Fetch(requestCtx, batchSize)
+		cancelFetch()
 		if err != nil {
-			if errors.Is(err, nats.ErrTimeout) {
+			// A canceled fetch context stops the loop instead of retrying.
+			if fetchCtx.Err() != nil {
+				return
+			}
+			if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
 				continue
 			}
 			if errors.Is(err, nats.ErrConnectionClosed) || errors.Is(err, nats.ErrConsumerDeleted) || errors.Is(err, nats.ErrBadSubscription) {
 				logger.Warnw("subscription closed, stopping fetch loop", zap.Error(err))
 				return
 			}
-			if errors.Is(err, context.Canceled) {
+			logger.Errorw("error fetching messages", zap.Error(err))
+			select {
+			case <-time.After(200 * time.Millisecond):
+			case <-fetchCtx.Done():
 				return
 			}
-			logger.Errorw("error fetching messages", zap.Error(err))
-			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
+		if ts.dispatchCtx.Err() != nil {
+			nakUndispatched(msgs, time.Until(requestDeadline), logger)
+			return
+		}
 		for _, msg := range msgs {
-			msg := msg
+			// Acquire a semaphore slot. This send never blocks: batchSize was
+			// capped to the free slots above, and only this loop acquires them.
+			sem <- struct{}{}
 
-			// Acquire a semaphore slot. Because batchSize was capped to the
-			// number of free slots above, this send is non-blocking in the
-			// steady state. The ctx.Done case handles clean shutdown.
-			if sem != nil {
-				select {
-				case sem <- struct{}{}:
-				case <-ctx.Done():
-					return
-				}
-			}
-
-			inflight.Add(1)
+			ts.inflight.Add(1)
 			go func() {
 				defer func() {
-					if sem != nil {
-						<-sem
-					}
-					inflight.Done()
+					<-sem
+					ts.inflight.Done()
 				}()
 
 				var msgCtx context.Context
 				var cancel context.CancelFunc
-				if ackWait > 0 {
-					msgCtx, cancel = context.WithTimeout(dispatchCtx, ackWait)
+				if ts.ackWait > 0 {
+					msgCtx, cancel = context.WithTimeout(ts.dispatchCtx, ts.ackWait)
 				} else {
-					msgCtx, cancel = context.WithCancel(dispatchCtx)
+					msgCtx, cancel = context.WithCancel(ts.dispatchCtx)
 				}
 				defer cancel()
 
-				handler.HandleMessage(msgCtx, msg)
+				ts.handler.HandleMessage(msgCtx, msg)
 			}()
+		}
+	}
+}
+
+// nakUndispatched returns fetched messages that will not be dispatched so
+// JetStream can redeliver them without waiting for AckWait. An interrupted
+// pull request stays open on the server until it expires, and the server
+// would hand an immediate redelivery straight back to it, where nothing reads
+// it. delay covers the request's remaining lifetime so the redelivery goes to
+// another pull request.
+func nakUndispatched(msgs []*nats.Msg, delay time.Duration, logger *zap.SugaredLogger) {
+	for _, msg := range msgs {
+		if err := msg.NakWithDelay(delay); err != nil {
+			logger.Warnw("failed to nak undispatched message", zap.Error(err))
 		}
 	}
 }
@@ -628,21 +643,17 @@ func (m *ConsumerManager) unsubscribeLocked(triggerUID string) error {
 
 	logger.Infow("unsubscribing from trigger consumer")
 
-	// Cancel the fetch loop and any in-flight dispatches. The two contexts
-	// are separate so restart-on-annotation-change can stop the fetch loop
-	// without aborting in-progress HTTP calls; on unsubscribe we cancel both.
-	if sub.cancel != nil {
-		sub.cancel()
-	}
-	if sub.dispatchCancel != nil {
-		sub.dispatchCancel()
-	}
+	// Stop the fetch producer first. done guarantees no future inflight.Add
+	// can race the Wait below, even if an interrupted Fetch returns messages.
+	sub.cancel()
+	<-sub.done
+	sub.dispatchCancel()
 
 	// Wait for every dispatch goroutine — across any fetch-loop generation —
 	// to exit before tearing down the NATS subscription and trigger handler.
 	// Without this wait, in-flight goroutines could race with Unsubscribe
 	// (msg.Ack on a closed subscription) and with handler.Cleanup (concurrent
-	// h.filter.Filter vs h.filter.Cleanup). Bounded by ackWait via msgCtx;
+	// filter evaluation and cleanup). Bounded by ackWait via msgCtx;
 	// resolves in milliseconds when the HTTP client respects ctx cancellation.
 	sub.inflight.Wait()
 

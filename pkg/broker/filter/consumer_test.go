@@ -19,12 +19,107 @@ package filter
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	"knative.dev/pkg/logging"
 )
+
+type lifecycleRecorder struct {
+	mu      sync.Mutex
+	actions []string
+}
+
+func (r *lifecycleRecorder) record(action string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.actions = append(r.actions, action)
+}
+
+func (r *lifecycleRecorder) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.actions)
+}
+
+func (r *lifecycleRecorder) assertActions(t *testing.T, want ...string) {
+	t.Helper()
+	if got := r.snapshot(); !slices.Equal(got, want) {
+		t.Errorf("lifecycle actions = %v, want %v", got, want)
+	}
+}
+
+type blockingPullSubscription struct {
+	*shutdownPullSubscription
+	fetchStarted  chan struct{}
+	fetchCanceled chan error
+	releaseFetch  chan struct{}
+}
+
+func (s *blockingPullSubscription) Fetch(ctx context.Context, _ int) ([]*nats.Msg, error) {
+	s.recorder.record("fetch-start")
+	close(s.fetchStarted)
+	<-ctx.Done()
+	s.recorder.record("fetch-context-canceled")
+	s.fetchCanceled <- ctx.Err()
+	<-s.releaseFetch
+	s.recorder.record("fetch-return")
+	return nil, ctx.Err()
+}
+
+type shutdownPullSubscription struct {
+	recorder     *lifecycleRecorder
+	unsubscribed chan struct{}
+	once         sync.Once
+}
+
+func (*shutdownPullSubscription) Fetch(context.Context, int) ([]*nats.Msg, error) {
+	return nil, nats.ErrTimeout
+}
+
+func (s *shutdownPullSubscription) Unsubscribe() error {
+	s.recorder.record("unsubscribe")
+	s.once.Do(func() { close(s.unsubscribed) })
+	return nil
+}
+
+// partialBatchPullSubscription models nats.go returning the messages a Fetch
+// received before its context ended, with a nil error. Only the first Fetch
+// returns messages; it waits for its context to end or for release.
+type partialBatchPullSubscription struct {
+	msgs         []*nats.Msg
+	fetchStarted chan struct{}
+	fetchEnded   chan error
+	release      chan struct{}
+	calls        atomic.Int32
+	// fetchCtx is the first Fetch's context, set before fetchStarted closes.
+	fetchCtx context.Context
+}
+
+func (s *partialBatchPullSubscription) Fetch(ctx context.Context, _ int) ([]*nats.Msg, error) {
+	if s.calls.Add(1) > 1 {
+		return nil, nats.ErrTimeout
+	}
+	s.fetchCtx = ctx
+	close(s.fetchStarted)
+	select {
+	case <-ctx.Done():
+		s.fetchEnded <- ctx.Err()
+	case <-s.release:
+	}
+	return s.msgs, nil
+}
+
+func (*partialBatchPullSubscription) Unsubscribe() error {
+	return nil
+}
 
 func TestConsumerManagerConfigDefaults(t *testing.T) {
 	// Verify default values
@@ -193,6 +288,244 @@ func TestUnsubscribeTrigger_NotFound(t *testing.T) {
 	if err != nil {
 		t.Errorf("UnsubscribeTrigger() unexpected error for non-existent UID: %v", err)
 	}
+}
+
+// TestUnsubscribeTriggerWaitsForFetchLoopBeforeTeardown covers the lifecycle
+// race where unsubscribe begins while Fetch is blocked and inflight is still
+// zero. The fetch loop must be fully stopped before dispatch cancellation and
+// Wait, otherwise a late inflight.Add can race with teardown.
+func TestUnsubscribeTriggerWaitsForFetchLoopBeforeTeardown(t *testing.T) {
+	ctx := logCtx()
+	recorder := &lifecycleRecorder{}
+	releaseFetch := make(chan struct{})
+	releaseInflight := make(chan struct{})
+	closeFetch := sync.OnceFunc(func() { close(releaseFetch) })
+	closeInflight := sync.OnceFunc(func() { close(releaseInflight) })
+	defer closeFetch()
+	defer closeInflight()
+
+	pullSub := &blockingPullSubscription{
+		shutdownPullSubscription: &shutdownPullSubscription{recorder: recorder, unsubscribed: make(chan struct{})},
+		fetchStarted:             make(chan struct{}),
+		fetchCanceled:            make(chan error, 1),
+		releaseFetch:             releaseFetch,
+	}
+	filter := &cleanupTrackingFilter{
+		recorder: recorder,
+		cleaned:  make(chan struct{}),
+	}
+	handler := &TriggerHandler{filter: filter}
+
+	dispatchCtx, cancelDispatch := context.WithCancel(ctx)
+	defer cancelDispatch()
+	dispatchCanceled := make(chan struct{})
+	triggerUID := "lifecycle-trigger-uid"
+	sub := &TriggerSubscription{
+		trigger:        makeTriggerWithUID("default", "lifecycle-trigger", "", triggerUID),
+		subscription:   pullSub,
+		handler:        handler,
+		fetchBatchSize: 1,
+		fetchTimeout:   time.Hour,
+		maxConcurrency: 1,
+		dispatchCtx:    dispatchCtx,
+		dispatchCancel: func() {
+			recorder.record("dispatch-cancel")
+			cancelDispatch()
+			close(dispatchCanceled)
+		},
+	}
+	manager := &ConsumerManager{
+		logger: logging.FromContext(ctx),
+		ctx:    ctx,
+		subscriptions: map[string]*TriggerSubscription{
+			triggerUID: sub,
+		},
+	}
+
+	startFetchLoop(manager, sub)
+	done := sub.done
+	receiveWithin(t, pullSub.fetchStarted, "fetch loop did not enter Fetch")
+
+	unsubscribeResult := make(chan error, 1)
+	go func() {
+		unsubscribeResult <- manager.UnsubscribeTrigger(triggerUID)
+	}()
+
+	if err := receiveWithin(t, pullSub.fetchCanceled, "Fetch context was not canceled by unsubscribe"); err != context.Canceled {
+		t.Fatalf("Fetch context error = %v, want context.Canceled", err)
+	}
+
+	// Fetch has observed cancellation but deliberately has not returned, so the
+	// fetch-loop done gate is still open. No teardown action may cross it.
+	select {
+	case <-done:
+		t.Fatal("fetch loop reported done before blocked Fetch returned")
+	default:
+	}
+	select {
+	case <-dispatchCanceled:
+		t.Fatal("dispatch context was canceled before fetch loop stopped")
+	case <-pullSub.unsubscribed:
+		t.Fatal("pull subscription was unsubscribed before fetch loop stopped")
+	case <-filter.cleaned:
+		t.Fatal("handler was cleaned before fetch loop stopped")
+	case err := <-unsubscribeResult:
+		t.Fatalf("UnsubscribeTrigger returned before fetch loop stopped: %v", err)
+	default:
+	}
+
+	// Model a dispatch admitted by the fetch generation that is only now
+	// finishing. The counter was zero when unsubscribe began; Add is safe here
+	// because unsubscribe cannot start Wait until the fetch-loop done gate closes.
+	sub.inflight.Add(1)
+	recorder.record("inflight-add")
+	dispatchObservedCancel := make(chan struct{})
+	go func() {
+		<-dispatchCtx.Done()
+		recorder.record("dispatch-observed-cancel")
+		close(dispatchObservedCancel)
+		<-releaseInflight
+		recorder.record("inflight-done")
+		sub.inflight.Done()
+	}()
+
+	closeFetch()
+	receiveWithin(t, done, "fetch loop did not stop after Fetch returned")
+	receiveWithin(t, dispatchObservedCancel, "dispatch context was not canceled after fetch loop stopped")
+
+	// Once fetch is done, unsubscribe cancels dispatches and waits for inflight
+	// work. The pull subscription and handler must remain live during that wait.
+	select {
+	case <-pullSub.unsubscribed:
+		t.Fatal("pull subscription was unsubscribed before inflight completed")
+	case <-filter.cleaned:
+		t.Fatal("handler was cleaned before inflight completed")
+	case err := <-unsubscribeResult:
+		t.Fatalf("UnsubscribeTrigger returned before inflight completed: %v", err)
+	default:
+	}
+
+	closeInflight()
+	if err := receiveWithin(t, unsubscribeResult, "UnsubscribeTrigger did not return after inflight completed"); err != nil {
+		t.Fatalf("UnsubscribeTrigger() error = %v", err)
+	}
+
+	recorder.assertActions(t,
+		"fetch-start",
+		"fetch-context-canceled",
+		"inflight-add",
+		"fetch-return",
+		"dispatch-cancel",
+		"dispatch-observed-cancel",
+		"inflight-done",
+		"unsubscribe",
+		"cleanup",
+	)
+}
+
+func TestFetchLoopHandsOffMessagesFetchedBeforeStopping(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		// end runs while the loop's only Fetch is in progress.
+		end func(stop, interrupt, cancelDispatches context.CancelFunc)
+		// interruptsFetch reports whether end cancels the in-progress Fetch.
+		interruptsFetch bool
+		wantDispatched  bool
+	}{{
+		name:            "interrupt",
+		end:             func(_, interrupt, _ context.CancelFunc) { interrupt() },
+		interruptsFetch: true,
+		wantDispatched:  true,
+	}, {
+		name:            "dispatch cancellation",
+		end:             func(_, _, cancelDispatches context.CancelFunc) { cancelDispatches() },
+		interruptsFetch: true,
+	}} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := logCtx()
+			subscriber := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusAccepted)
+			}))
+			defer subscriber.Close()
+			handler := newTestHandler(t, ctx, subscriber.URL, "")
+			ids := []string{"event-1", "event-2", "event-3"}
+			filter := &cleanupTrackingFilter{filtered: make(chan string, len(ids)), cleaned: make(chan struct{})}
+			setTestFilter(handler, filter)
+			pullSub := &partialBatchPullSubscription{
+				fetchStarted: make(chan struct{}),
+				fetchEnded:   make(chan error, 1),
+				release:      make(chan struct{}),
+			}
+			for _, id := range ids {
+				pullSub.msgs = append(pullSub.msgs, makeStructuredCEMsg("test.type", "test/source", id))
+			}
+
+			dispatchCtx, cancelDispatches := context.WithCancel(ctx)
+			defer cancelDispatches()
+			ts := &TriggerSubscription{
+				subscription:   pullSub,
+				handler:        handler,
+				fetchBatchSize: len(ids),
+				fetchTimeout:   time.Hour,
+				maxConcurrency: len(ids),
+				dispatchCtx:    dispatchCtx,
+				dispatchCancel: cancelDispatches,
+			}
+			startFetchLoop(&ConsumerManager{logger: logging.FromContext(ctx)}, ts)
+			receiveWithin(t, pullSub.fetchStarted, "fetch loop did not enter Fetch")
+
+			test.end(nil, ts.cancel, ts.dispatchCancel)
+			if test.interruptsFetch {
+				receiveWithin(t, pullSub.fetchEnded, "Fetch was not interrupted")
+			} else {
+				// Cancellation reaches every descendant context before the
+				// CancelFunc returns, so this check needs no wait.
+				if err := pullSub.fetchCtx.Err(); err != nil {
+					t.Fatalf("stop interrupted the in-progress Fetch: %v", err)
+				}
+				close(pullSub.release)
+			}
+			receiveWithin(t, ts.done, "fetch loop did not stop after Fetch returned")
+			ts.inflight.Wait()
+			close(filter.filtered)
+
+			var dispatched []string
+			for id := range filter.filtered {
+				dispatched = append(dispatched, id)
+			}
+			slices.Sort(dispatched)
+			var want []string
+			if test.wantDispatched {
+				want = ids
+			}
+			if !slices.Equal(dispatched, want) {
+				t.Errorf("dispatched events = %v, want %v", dispatched, want)
+			}
+			if calls := pullSub.calls.Load(); calls != 1 {
+				t.Errorf("Fetch calls = %d, want 1", calls)
+			}
+		})
+	}
+}
+
+// startFetchLoop starts ts's fetch loop the way SubscribeTrigger does.
+func startFetchLoop(m *ConsumerManager, ts *TriggerSubscription) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.startFetchLoopLocked(ts, m.logger)
+}
+
+// receiveWithin returns the next value from ch, failing the test with failure
+// if none arrives within five seconds.
+func receiveWithin[T any](t *testing.T, ch <-chan T, failure string) T {
+	t.Helper()
+	var v T
+	select {
+	case v = <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal(failure)
+	}
+	return v
 }
 
 func TestDefaultMaxConcurrency(t *testing.T) {
