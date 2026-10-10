@@ -36,7 +36,9 @@ const (
 	ConfigKey = "config"
 )
 
-// BrokerConfigAnnotation is the annotation key for broker-specific configuration
+// BrokerConfigAnnotation is the annotation key whose value is the NAME of a
+// ConfigMap (in the broker's own namespace) that holds this broker's
+// NatsJetStreamBrokerConfig under the ConfigKey ("config") key.
 const BrokerConfigAnnotation = "natsjetstream.eventing.knative.dev/config"
 
 // DefaultBrokerConfig returns the default configuration for a broker
@@ -80,21 +82,28 @@ func LoadDefaultsFromConfigMap(cm *corev1.ConfigMap) (*NatsJetStreamBrokerDefaul
 	return defaults, nil
 }
 
-// GetConfigFromAnnotation extracts broker config from annotations.
-// Returns nil, nil if no annotation is present.
-func GetConfigFromAnnotation(annotations map[string]string) (*NatsJetStreamBrokerConfig, error) {
-	if annotations == nil {
-		return nil, nil
+// ParseBrokerConfig parses a per-broker NatsJetStreamBrokerConfig from a
+// ConfigMap. The config is expected under the ConfigKey ("config") key as YAML
+// or JSON. Unlike the cluster/namespace defaults ConfigMap, this is a bare
+// NatsJetStreamBrokerConfig (no clusterDefault/namespaceDefaults wrapper).
+func ParseBrokerConfig(cm *corev1.ConfigMap) (*NatsJetStreamBrokerConfig, error) {
+	if cm == nil {
+		return nil, fmt.Errorf("nil config map")
 	}
 
-	configJSON, ok := annotations[BrokerConfigAnnotation]
-	if !ok || configJSON == "" {
-		return nil, nil
+	data, ok := cm.Data[ConfigKey]
+	if !ok || data == "" {
+		return nil, fmt.Errorf("config map %q has no %q key", cm.Name, ConfigKey)
+	}
+
+	jsonData, err := yaml.YAMLToJSON([]byte(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert config YAML to JSON: %w", err)
 	}
 
 	brokerConfig := &NatsJetStreamBrokerConfig{}
-	if err := json.Unmarshal([]byte(configJSON), brokerConfig); err != nil {
-		return nil, fmt.Errorf("failed to parse broker config annotation: %w", err)
+	if err := json.Unmarshal(jsonData, brokerConfig); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal broker config: %w", err)
 	}
 	return brokerConfig, nil
 }

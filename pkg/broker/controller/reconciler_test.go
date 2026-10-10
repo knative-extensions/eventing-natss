@@ -213,16 +213,29 @@ func TestReconcileDataplaneRBAC(t *testing.T) {
 func TestGetBrokerConfig(t *testing.T) {
 	ctx := testContext()
 
-	t.Run("from broker annotation", func(t *testing.T) {
-		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset()}
+	t.Run("from ConfigMap named by broker annotation", func(t *testing.T) {
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-broker-cfg", Namespace: testNamespace},
+			Data:       map[string]string{brokerconfig.ConfigKey: `{"stream":{"replicas":3}}`},
+		}
+		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset(cm)}
 		b := testBroker(testNamespace, testBrokerName)
-		b.Annotations = map[string]string{brokerconfig.BrokerConfigAnnotation: `{"stream":{"replicas":3}}`}
+		b.Annotations = map[string]string{brokerconfig.BrokerConfigAnnotation: "my-broker-cfg"}
 		cfg, err := r.getBrokerConfig(ctx, b)
 		if err != nil {
 			t.Fatalf("getBrokerConfig() error: %v", err)
 		}
 		if cfg.Stream == nil || cfg.Stream.Replicas != 3 {
 			t.Errorf("Stream.Replicas = %+v, want 3", cfg.Stream)
+		}
+	})
+
+	t.Run("annotation names a missing ConfigMap is an error", func(t *testing.T) {
+		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset()}
+		b := testBroker(testNamespace, testBrokerName)
+		b.Annotations = map[string]string{brokerconfig.BrokerConfigAnnotation: "does-not-exist"}
+		if _, err := r.getBrokerConfig(ctx, b); err == nil {
+			t.Error("getBrokerConfig() expected an error for a missing ConfigMap, got nil")
 		}
 	})
 

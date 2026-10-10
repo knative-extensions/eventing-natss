@@ -186,29 +186,47 @@ These variables set the **broker-wide defaults** for the filter deployment. All 
 | `CONSUMER_FETCH_TIMEOUT` | How long a fetch waits for messages before returning empty | `200ms` |
 | `CONSUMER_MAX_CONCURRENCY` | Maximum concurrent in-flight HTTP dispatches per trigger | `20` |
 
-### Configuring Consumer Fetch via Broker Annotation
+### Configuring a Broker via a Config ConfigMap
 
-Set broker-wide defaults for all triggers using the `natsjetstream.eventing.knative.dev/config` annotation. These are injected as environment variables into the filter deployment.
+Per-broker configuration lives in a **ConfigMap in the broker's namespace**, referenced **by name** through the `natsjetstream.eventing.knative.dev/config` annotation (the annotation value is the ConfigMap name, *not* inline config). The ConfigMap holds a `NatsJetStreamBrokerConfig` — as YAML or JSON — under the `config` key. It covers the JetStream `stream` settings and the `filter` deployment, whose `env` entries become environment variables on the filter (e.g. the consumer-fetch defaults above).
 
 ```yaml
+# 1) The config ConfigMap — must be in the same namespace as the Broker.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-broker-config
+  namespace: default
+data:
+  config: |
+    filter:
+      replicas: 2
+      env:
+        - name: CONSUMER_FETCH_BATCH_SIZE
+          value: "50"
+        - name: CONSUMER_FETCH_TIMEOUT
+          value: "1s"
+        - name: CONSUMER_MAX_CONCURRENCY
+          value: "40"
+    stream:
+      replicas: 3
+---
+# 2) The Broker references the ConfigMap by name.
 apiVersion: eventing.knative.dev/v1
 kind: Broker
 metadata:
   name: my-broker
+  namespace: default
   annotations:
     eventing.knative.dev/broker.class: NatsJetStreamBroker
-    natsjetstream.eventing.knative.dev/config: |
-      {
-        "filter": {
-          "replicas": 2,
-          "env": [
-            {"name": "CONSUMER_FETCH_BATCH_SIZE", "value": "50"},
-            {"name": "CONSUMER_FETCH_TIMEOUT", "value": "1s"},
-            {"name": "CONSUMER_MAX_CONCURRENCY", "value": "40"}
-          ]
-        }
-      }
+    natsjetstream.eventing.knative.dev/config: my-broker-config
 ```
+
+Notes:
+
+- The annotation value is the ConfigMap **name**; the ConfigMap must exist in the **broker's namespace**. If it is missing or its `config` key can't be parsed, the broker reports a reconciliation error.
+- This per-broker ConfigMap takes precedence over the cluster/namespace default ConfigMap (`natsjetstream-broker-config`) and is used **as a whole** — the two are not merged.
+- Config is read at reconcile time. `stream` settings are applied when the stream is **created** (create-once), so changing them on an existing broker requires recreating the stream; `filter` changes roll out to the filter deployment on the next reconcile.
 
 ### Per-Trigger Configuration
 
