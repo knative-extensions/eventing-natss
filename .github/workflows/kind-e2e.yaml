@@ -181,42 +181,10 @@ jobs:
 
     - name: Collect system diagnostics
       if: ${{ failure() }}
-      run: |
-        echo '::group:: brokers'
-        kubectl get broker --all-namespaces=true -oyaml
-        echo '::endgroup::'
-
-        echo '::group:: channels'
-        kubectl get channel --all-namespaces=true -oyaml
-        echo '::endgroup::'
-
-        echo '::group:: triggers'
-        kubectl get trigger --all-namespaces=true -oyaml
-        echo '::endgroup::'
-
-        echo '::group:: all pods'
-        kubectl get pods --all-namespaces=true
-        echo '::endgroup::'
-
-        for namespace in ${SYSTEM_NAMESPACE} nats-io; do
-          echo "::group:: describe ${namespace} pods"
-          kubectl -n "${namespace}" describe pods || true
-          echo '::endgroup::'
-
-          for pod in $(kubectl -n "${namespace}" get pods -oname); do
-            echo "::group:: ${namespace} ${pod} logs"
-            kubectl -n "${namespace}" logs "${pod}" --all-containers || true
-            echo '::endgroup::'
-
-            echo "::group:: ${namespace} ${pod} previous logs"
-            kubectl -n "${namespace}" logs "${pod}" --all-containers --previous || true
-            echo '::endgroup::'
-          done
-        done
-
-        echo '::group:: all events'
-        kubectl get events --all-namespaces=true -oyaml
-        echo '::endgroup::'
+      uses: chainguard-dev/actions/kind-diag@v1.6.41
+      with:
+        namespace-resources: pods,brokers,channels,triggers,events
+        artifact-name: kind-e2e-${{ matrix.k8s-version }}-${{ matrix.eventing-version }}-${{ strategy.job-index }}
 
     - name: Post failure notice to Slack
       # Note: using env.SLACK_WEBHOOK here because secrets are not allowed in the if block.
