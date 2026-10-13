@@ -121,9 +121,6 @@ func CalculateNakDelayForRetryNumber(numDelivered int, config *kncloudevents.Ret
 	if config == nil || config.Backoff == nil {
 		return 0
 	}
-	attemptNum := numDelivered - 1
-	if attemptNum < 0 {
-		attemptNum = 0
-	}
+	attemptNum := max(numDelivered, 1) - 1
 	return generateBackoffFn(config)(0, 0, attemptNum, response)
 }
