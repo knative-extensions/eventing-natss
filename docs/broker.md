@@ -166,9 +166,42 @@ spec:
         apiVersion: v1
         kind: Service
         name: dead-letter-service
-    retry: 3
+    retry: 6
     backoffPolicy: exponential
     backoffDelay: PT1S
+    backoffMax: PT4S
+    retryAfterMax: PT6S
+```
+
+### Delivery retry limits
+
+The Trigger owner uses these fields to keep retry delays bounded when
+`my-service` is unavailable. With the example above, the normal exponential
+delays calculated by the Broker filter are `1s`, `2s`, `4s`, `4s`, `4s`, and
+`4s`.
+
+| Field | Delay it limits | When it applies | Example result |
+|-------|-----------------|-----------------|----------------|
+| `backoffMax` | The delay calculated from `backoffDelay` and `backoffPolicy` | Every normal retry | `PT4S` stops the exponential sequence at 4 seconds |
+| `retryAfterMax` | A delay requested by a subscriber's `Retry-After` response header | HTTP 429 and 503 responses | `PT6S` reduces `Retry-After: 10` to 6 seconds |
+
+For a 429 or 503 response, the Broker uses the larger of the normal backoff and
+the capped `Retry-After` value. These fields limit the delay requested from
+JetStream; scheduling and processing load can cause the next delivery to occur
+later.
+
+Cluster operators must enable both experimental fields in the Knative Eventing
+`config-features` ConfigMap before Trigger or Broker owners use this example:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-features
+  namespace: knative-eventing
+data:
+  delivery-backoff-max: enabled
+  delivery-retryafter: enabled
 ```
 
 ## Configuration

@@ -394,7 +394,11 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 		} else {
 			span.SetAttributes(attribute.String("nats.result", "nak"))
 			// Nack for retry
-			nakDelay := jsutils.CalculateNakDelayForRetryNumber(retryNumber, h.retryConfig)
+			response := &http.Response{
+				StatusCode: dispatchInfo.ResponseCode,
+				Header:     dispatchInfo.ResponseHeader,
+			}
+			nakDelay := jsutils.CalculateNakDelayForRetryNumber(retryNumber, h.retryConfig, response)
 			if err := msg.NakWithDelay(nakDelay, nats.Context(ctx)); err != nil {
 				logger.Errorw("failed to nack message", zap.Error(err))
 			}

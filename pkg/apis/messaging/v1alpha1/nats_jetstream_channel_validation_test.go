@@ -20,7 +20,9 @@ import (
 	"context"
 	"testing"
 
+	"k8s.io/utils/ptr"
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
+	"knative.dev/eventing/pkg/apis/feature"
 
 	"github.com/google/go-cmp/cmp"
 	"knative.dev/pkg/webhook/resourcesemantics"
@@ -30,8 +32,11 @@ import (
 
 func TestNatssChannelValidation(t *testing.T) {
 	aURL, _ := apis.ParseURL("http://example.com")
+	invalidPolicy := eventingduckv1.BackoffPolicyType("invalid")
+	invalidFormat := eventingduckv1.FormatType("invalid")
 
 	testCases := map[string]struct {
+		ctx  context.Context
 		cr   resourcesemantics.GenericCRD
 		want *apis.FieldError
 	}{
@@ -96,11 +101,130 @@ func TestNatssChannelValidation(t *testing.T) {
 				return errs
 			}(),
 		},
+		"negative default retry": {
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{Retry: ptr.To(int32(-1))},
+				}},
+			},
+			want: apis.ErrInvalidValue(int32(-1), "retry").ViaField("delivery").ViaField("spec"),
+		},
+		"invalid default backoff policy": {
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffPolicy: &invalidPolicy},
+				}},
+			},
+			want: apis.ErrInvalidValue(invalidPolicy, "backoffPolicy").ViaField("delivery").ViaField("spec"),
+		},
+		"malformed default backoff delay": {
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffDelay: ptr.To("not-a-duration")},
+				}},
+			},
+			want: apis.ErrInvalidValue("not-a-duration", "backoffDelay").ViaField("delivery").ViaField("spec"),
+		},
+		"invalid default format": {
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{Format: &invalidFormat},
+				}},
+			},
+			want: apis.ErrInvalidValue(invalidFormat, "format").ViaField("delivery").ViaField("spec"),
+		},
+		"retry after max rejected when feature disabled": {
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{RetryAfterMax: ptr.To("PT2S")},
+				}},
+			},
+			want: apis.ErrDisallowedFields("retryAfterMax").ViaField("delivery").ViaField("spec"),
+		},
+		"retry after max accepted when feature enabled": {
+			ctx: feature.ToContext(context.Background(), feature.Flags{
+				feature.DeliveryRetryAfter: feature.Enabled,
+			}),
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{RetryAfterMax: ptr.To("PT2S")},
+				}},
+			},
+		},
+		"negative subscriber retry": {
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					SubscribableSpec: eventingduckv1.SubscribableSpec{Subscribers: []eventingduckv1.SubscriberSpec{{
+						SubscriberURI: aURL,
+						Delivery:      &eventingduckv1.DeliverySpec{Retry: ptr.To(int32(-1))},
+					}}},
+				}},
+			},
+			want: apis.ErrInvalidValue(int32(-1), "retry").ViaField("delivery").ViaIndex(0).ViaField("subscribers").ViaField("spec"),
+		},
+		"backoff max accepted when feature enabled": {
+			ctx: feature.ToContext(context.Background(), feature.Flags{
+				feature.DeliveryBackoffMax: feature.Enabled,
+			}),
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("PT2S")},
+				}},
+			},
+		},
+		"backoff max rejected when feature disabled": {
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("PT2S")},
+				}},
+			},
+			want: apis.ErrDisallowedFields("backoffMax").ViaField("delivery").ViaField("spec"),
+		},
+		"invalid default backoff max": {
+			ctx: feature.ToContext(context.Background(), feature.Flags{
+				feature.DeliveryBackoffMax: feature.Enabled,
+			}),
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("PT0S")},
+				}},
+			},
+			want: apis.ErrInvalidValue("PT0S", "backoffMax").ViaField("delivery").ViaField("spec"),
+		},
+		"negative default backoff max": {
+			ctx: feature.ToContext(context.Background(), feature.Flags{
+				feature.DeliveryBackoffMax: feature.Enabled,
+			}),
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					Delivery: &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("-PT1S")},
+				}},
+			},
+			want: apis.ErrInvalidValue("-PT1S", "backoffMax").ViaField("delivery").ViaField("spec"),
+		},
+		"invalid subscriber backoff max": {
+			ctx: feature.ToContext(context.Background(), feature.Flags{
+				feature.DeliveryBackoffMax: feature.Enabled,
+			}),
+			cr: &NatsJetStreamChannel{
+				Spec: NatsJetStreamChannelSpec{ChannelableSpec: eventingduckv1.ChannelableSpec{
+					SubscribableSpec: eventingduckv1.SubscribableSpec{Subscribers: []eventingduckv1.SubscriberSpec{{
+						SubscriberURI: aURL,
+						Delivery:      &eventingduckv1.DeliverySpec{BackoffMax: ptr.To("not-a-duration")},
+					}}},
+				}},
+			},
+			want: apis.ErrInvalidValue("not-a-duration", "backoffMax").ViaField("delivery").ViaIndex(0).ViaField("subscribers").ViaField("spec"),
+		},
 	}
 
 	for n, test := range testCases {
 		t.Run(n, func(t *testing.T) {
-			got := test.cr.Validate(context.Background())
+			ctx := test.ctx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			got := test.cr.Validate(ctx)
 			if diff := cmp.Diff(test.want.Error(), got.Error()); diff != "" {
 				t.Errorf("%s: validate (-want, +got) = %v", n, diff)
 			}
