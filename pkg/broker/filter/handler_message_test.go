@@ -25,6 +25,7 @@ import (
 	"time"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,9 +35,36 @@ import (
 	"knative.dev/pkg/logging"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
+	"knative.dev/eventing/pkg/eventfilter"
 	"knative.dev/eventing/pkg/eventingtls"
 	"knative.dev/eventing/pkg/kncloudevents"
 )
+
+// cleanupTrackingFilter passes every event. Optional fields report filtered
+// event IDs, block evaluation until release, and record cleanup.
+type cleanupTrackingFilter struct {
+	filtered chan string
+	release  <-chan struct{}
+	recorder *lifecycleRecorder
+	cleaned  chan struct{}
+}
+
+func (f *cleanupTrackingFilter) Filter(_ context.Context, event cloudevents.Event) eventfilter.FilterResult {
+	if f.filtered != nil {
+		f.filtered <- event.ID()
+	}
+	if f.release != nil {
+		<-f.release
+	}
+	return eventfilter.PassFilter
+}
+
+func (f *cleanupTrackingFilter) Cleanup() {
+	if f.recorder != nil {
+		f.recorder.record("cleanup")
+	}
+	close(f.cleaned)
+}
 
 // makeStructuredCEMsg constructs a nats.Msg carrying a structured CloudEvent.
 // The message header contains "Content-Type: application/cloudevents+json"
@@ -92,6 +120,11 @@ func newTestHandler(t *testing.T, ctx context.Context, subscriberURL string, fil
 		t.Fatalf("NewTriggerHandler: %v", err)
 	}
 	return h
+}
+
+// setTestFilter installs filter before the test starts dispatching.
+func setTestFilter(h *TriggerHandler, filter eventfilter.Filter) {
+	h.filter = filter
 }
 
 // logCtx returns a context carrying a no-op zap logger.
