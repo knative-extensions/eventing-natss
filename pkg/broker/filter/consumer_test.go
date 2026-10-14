@@ -195,6 +195,19 @@ func TestUnsubscribeTrigger_NotFound(t *testing.T) {
 	}
 }
 
+// receiveWithin returns the next value from ch, failing the test with failure
+// if none arrives within five seconds.
+func receiveWithin[T any](t *testing.T, ch <-chan T, failure string) T {
+	t.Helper()
+	var v T
+	select {
+	case v = <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal(failure)
+	}
+	return v
+}
+
 func TestDefaultMaxConcurrency(t *testing.T) {
 	if DefaultMaxConcurrency != 20 {
 		t.Errorf("DefaultMaxConcurrency = %v, want 20", DefaultMaxConcurrency)
