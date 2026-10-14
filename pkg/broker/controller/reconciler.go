@@ -279,15 +279,22 @@ func (r *Reconciler) resolveDeadLetterSink(ctx context.Context, b *eventingv1.Br
 func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*brokerconfig.NatsJetStreamBrokerConfig, error) {
 	logger := logging.FromContext(ctx)
 
-	// Check for broker-specific annotation first (highest priority)
-	if cfg, err := brokerconfig.GetConfigFromAnnotation(b.Annotations); err != nil {
-		return nil, err
-	} else if cfg != nil {
-		logger.Debugw("Using broker-specific config from annotation")
+	// Broker-specific config (highest priority): the annotation names a ConfigMap
+	// in the broker's namespace holding this broker's config.
+	if cmName := b.Annotations[brokerconfig.BrokerConfigAnnotation]; cmName != "" {
+		cm, err := r.kubeClientSet.CoreV1().ConfigMaps(b.Namespace).Get(ctx, cmName, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get broker config ConfigMap %q in namespace %q: %w", cmName, b.Namespace, err)
+		}
+		cfg, err := brokerconfig.ParseBrokerConfig(cm)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse broker config from ConfigMap %q: %w", cmName, err)
+		}
+		logger.Debugw("Using broker-specific config from ConfigMap", zap.String("configmap", cmName))
 		return cfg, nil
 	}
 
-	// No annotation config, try to load from ConfigMap
+	// No annotation config, try to load namespace/cluster defaults from ConfigMap
 	cm, err := r.kubeClientSet.CoreV1().ConfigMaps(b.Namespace).Get(ctx, brokerconfig.ConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		if !apierrs.IsNotFound(err) {
