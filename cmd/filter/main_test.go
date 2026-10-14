@@ -26,7 +26,8 @@ import (
 )
 
 func TestConfigureContext(t *testing.T) {
-	ctx := configureContext(context.Background(), filter.BrokerScope{Namespace: "namespace-a", Name: "broker-a"})
+	runtime := filter.NewRuntime(context.Background())
+	ctx := configureContext(context.Background(), runtime, filter.BrokerScope{Namespace: "namespace-a", Name: "broker-a"})
 	if got := injection.GetNamespaceScope(ctx); got != "namespace-a" {
 		t.Fatalf("namespace = %q", got)
 	}
