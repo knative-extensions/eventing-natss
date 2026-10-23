@@ -61,10 +61,10 @@ func WithJetStreamReady(nc *v1alpha1.NatsJetStreamChannel) {
 	cs.Manage(&nc.Status).MarkTrue(v1alpha1.NatsJetStreamChannelConditionReady)
 }
 
-func WithJetStreamNotReady(reason, messageFormat string) NatsJetStreamChannelOption {
+func WithJetStreamNotReady(reason, message string) NatsJetStreamChannelOption {
 	return func(nc *v1alpha1.NatsJetStreamChannel) {
 		cs := apis.NewLivingConditionSet()
-		cs.Manage(&nc.Status).MarkFalse(v1alpha1.NatsJetStreamChannelConditionReady, reason, messageFormat)
+		cs.Manage(&nc.Status).MarkFalse(v1alpha1.NatsJetStreamChannelConditionReady, reason, "%s", message)
 	}
 }
 
@@ -100,7 +100,7 @@ func WithNatsJetStreamChannelDispatcherReady() NatsJetStreamChannelOption {
 
 func WithNatsJetStreamChannelDeploymentNotReady(reason, message string) NatsJetStreamChannelOption {
 	return func(nc *v1alpha1.NatsJetStreamChannel) {
-		nc.Status.MarkDispatcherFailed(reason, message)
+		nc.Status.MarkDispatcherFailed(reason, "%s", message)
 	}
 }
 
@@ -112,7 +112,7 @@ func WithNatsJetStreamChannelDeploymentReady() NatsJetStreamChannelOption {
 
 func WithNatsJetStreamChannelServiceNotReady(reason, message string) NatsJetStreamChannelOption {
 	return func(nc *v1alpha1.NatsJetStreamChannel) {
-		nc.Status.MarkServiceFailed(reason, message)
+		nc.Status.MarkServiceFailed(reason, "%s", message)
 	}
 }
 
@@ -124,7 +124,7 @@ func WithNatsJetStreamChannelServiceReady() NatsJetStreamChannelOption {
 
 func WithNatsJetStreamChannelChannelServicetNotReady(reason, message string) NatsJetStreamChannelOption {
 	return func(nc *v1alpha1.NatsJetStreamChannel) {
-		nc.Status.MarkChannelServiceFailed(reason, message)
+		nc.Status.MarkChannelServiceFailed(reason, "%s", message)
 	}
 }
 
@@ -136,7 +136,7 @@ func WithNatsJetStreamChannelChannelServiceReady() NatsJetStreamChannelOption {
 
 func WithNatsJetStreamChannelEndpointsNotReady(reason, message string) NatsJetStreamChannelOption {
 	return func(nc *v1alpha1.NatsJetStreamChannel) {
-		nc.Status.MarkEndpointsFailed(reason, message)
+		nc.Status.MarkEndpointsFailed(reason, "%s", message)
 	}
 }
 
@@ -148,7 +148,7 @@ func WithNatsJetStreamChannelEndpointsReady() NatsJetStreamChannelOption {
 
 func WithNatsJetStreamChannelStreamNotReady(reason, message string) NatsJetStreamChannelOption {
 	return func(nc *v1alpha1.NatsJetStreamChannel) {
-		nc.Status.MarkStreamFailed(reason, message)
+		nc.Status.MarkStreamFailed(reason, "%s", message)
 	}
 }
 
