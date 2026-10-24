@@ -105,8 +105,13 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 	logger := logging.FromContext(ctx)
 	logger.Infow("Reconciling broker", zap.String("broker", b.Name), zap.String("namespace", b.Namespace))
 
-	// Get stream name for this broker
+	// Get stream name for this broker (may be overridden via annotation).
 	streamName := brokerutils.BrokerStreamName(b)
+	if err := brokerutils.ValidateStreamName(streamName); err != nil {
+		logger.Errorw("Invalid stream name", zap.Error(err), zap.String("stream", streamName))
+		b.Status.MarkIngressFailed("InvalidStreamName", "%v", err)
+		return fmt.Errorf("invalid stream name: %w", err)
+	}
 	publishSubject := brokerutils.BrokerPublishSubjectName(b.Namespace, b.Name)
 
 	// Load broker configuration (once for the entire reconciliation)
