@@ -189,53 +189,40 @@ namespaceDefaults:
 	}
 }
 
-func TestGetConfigFromAnnotation(t *testing.T) {
+func TestParseBrokerConfig(t *testing.T) {
 	tests := []struct {
-		name        string
-		annotations map[string]string
-		want        *NatsJetStreamBrokerConfig
-		wantErr     bool
+		name    string
+		data    map[string]string
+		want    *NatsJetStreamBrokerConfig
+		wantErr bool
 	}{
 		{
-			name:        "nil annotations",
-			annotations: nil,
-			want:        nil,
+			name:    "missing config key",
+			data:    map[string]string{"other": "value"},
+			wantErr: true,
 		},
 		{
-			name:        "empty annotations",
-			annotations: map[string]string{},
-			want:        nil,
+			name:    "empty config value",
+			data:    map[string]string{ConfigKey: ""},
+			wantErr: true,
 		},
 		{
-			name: "no broker config annotation",
-			annotations: map[string]string{
-				"some-other-annotation": "value",
-			},
-			want: nil,
-		},
-		{
-			name: "empty broker config annotation",
-			annotations: map[string]string{
-				BrokerConfigAnnotation: "",
-			},
-			want: nil,
-		},
-		{
-			name: "valid broker config annotation",
-			annotations: map[string]string{
-				BrokerConfigAnnotation: `{"stream":{"replicas":3}}`,
-			},
+			name: "valid JSON",
+			data: map[string]string{ConfigKey: `{"stream":{"replicas":3}}`},
 			want: &NatsJetStreamBrokerConfig{
-				Stream: &v1alpha1.StreamConfig{
-					Replicas: 3,
-				},
+				Stream: &v1alpha1.StreamConfig{Replicas: 3},
+			},
+		},
+		{
+			name: "valid YAML",
+			data: map[string]string{ConfigKey: "stream:\n  replicas: 5\n  storage: Memory\n"},
+			want: &NatsJetStreamBrokerConfig{
+				Stream: &v1alpha1.StreamConfig{Replicas: 5, Storage: v1alpha1.MemoryStorage},
 			},
 		},
 		{
 			name: "filter topology spread constraints",
-			annotations: map[string]string{
-				BrokerConfigAnnotation: `{"filter":{"topologySpreadConstraints":[{"maxSkew":1,"minDomains":2,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"DoNotSchedule","labelSelector":{"matchLabels":{"eventing.knative.dev/broker":"example-broker","eventing.knative.dev/role":"filter"}},"matchLabelKeys":["pod-template-hash"]}]}}`,
-			},
+			data: map[string]string{ConfigKey: `{"filter":{"topologySpreadConstraints":[{"maxSkew":1,"minDomains":2,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"DoNotSchedule","labelSelector":{"matchLabels":{"eventing.knative.dev/broker":"example-broker","eventing.knative.dev/role":"filter"}},"matchLabelKeys":["pod-template-hash"]}]}}`},
 			want: &NatsJetStreamBrokerConfig{
 				Filter: &DeploymentTemplate{
 					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
@@ -257,23 +244,28 @@ func TestGetConfigFromAnnotation(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid JSON in annotation",
-			annotations: map[string]string{
-				BrokerConfigAnnotation: `{invalid json}`,
-			},
+			name:    "type mismatch",
+			data:    map[string]string{ConfigKey: `{"stream":"not-an-object"}`},
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := GetConfigFromAnnotation(tt.annotations)
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "broker-cfg", Namespace: "ns"},
+				Data:       tt.data,
+			}
+			got, err := ParseBrokerConfig(cm)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("GetConfigFromAnnotation() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ParseBrokerConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
 				return
 			}
 			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Errorf("GetConfigFromAnnotation() mismatch (-want +got):\n%s", diff)
+				t.Errorf("ParseBrokerConfig() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
@@ -458,8 +450,8 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 	}
 }
 
-func TestBrokerConfigAnnotationRoundTrip(t *testing.T) {
-	// Test that we can serialize and deserialize broker config through annotation
+func TestBrokerConfigConfigMapRoundTrip(t *testing.T) {
+	// Test that we can serialize a config into a ConfigMap and parse it back.
 	original := &NatsJetStreamBrokerConfig{
 		Stream: &v1alpha1.StreamConfig{
 			Replicas: 3,
@@ -470,21 +462,19 @@ func TestBrokerConfigAnnotationRoundTrip(t *testing.T) {
 		},
 	}
 
-	// Serialize to JSON
 	data, err := json.Marshal(original)
 	if err != nil {
 		t.Fatalf("Failed to marshal config: %v", err)
 	}
 
-	// Create annotation map
-	annotations := map[string]string{
-		BrokerConfigAnnotation: string(data),
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "broker-cfg", Namespace: "ns"},
+		Data:       map[string]string{ConfigKey: string(data)},
 	}
 
-	// Deserialize through GetConfigFromAnnotation
-	got, err := GetConfigFromAnnotation(annotations)
+	got, err := ParseBrokerConfig(cm)
 	if err != nil {
-		t.Fatalf("GetConfigFromAnnotation() error = %v", err)
+		t.Fatalf("ParseBrokerConfig() error = %v", err)
 	}
 
 	if diff := cmp.Diff(original, got); diff != "" {
