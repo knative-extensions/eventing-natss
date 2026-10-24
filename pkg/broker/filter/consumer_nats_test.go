@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
@@ -1089,7 +1090,7 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 // UnsubscribeTrigger does not return until every dispatch goroutine spawned
 // by the fetch loop has exited. Without this guarantee, in-flight goroutines
 // could race with sub.Unsubscribe (msg.Ack on a closed subscription) and with
-// handler.Cleanup (concurrent h.filter.Filter vs h.filter.Cleanup).
+// handler.Cleanup (concurrent filter evaluation and cleanup).
 func TestUnsubscribeTrigger_WaitsForInflightDispatches(t *testing.T) {
 	s := natsTesting.RunBasicJetstreamServer()
 	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, s)
@@ -1220,4 +1221,112 @@ func TestSubscribeTrigger_UpdateInPlace(t *testing.T) {
 	}
 
 	cm.Close() //nolint:errcheck
+}
+
+// interruptedPullSubscription reproduces a Fetch interrupted mid-batch: it
+// returns the messages its first real Fetch received only after the caller's
+// context ends, leaving another pull request open on the server meanwhile.
+type interruptedPullSubscription struct {
+	natsPullSubscription
+	fetched chan struct{}
+}
+
+func (s *interruptedPullSubscription) Fetch(ctx context.Context, batch int) ([]*nats.Msg, error) {
+	msgs, err := s.natsPullSubscription.Fetch(ctx, batch)
+	if err != nil {
+		return nil, err
+	}
+	close(s.fetched)
+	_, _ = s.natsPullSubscription.Fetch(ctx, batch)
+	return msgs, nil
+}
+
+// TestFetchLoopNaksInterruptedFetch verifies that messages an interrupted
+// Fetch returns after dispatch cancellation are NAKed rather than held until
+// AckWait, and that the NAK waits for the interrupted pull request to expire.
+// An immediate NAK would let the server redeliver straight into that request,
+// whose subscription nobody reads any more.
+func TestFetchLoopNaksInterruptedFetch(t *testing.T) {
+	server := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, server)
+	conn, js := natsTesting.JsClient(t, server)
+	defer conn.Close()
+	ctx := logCtx()
+	// setupStreamAndConsumer uses a 30s AckWait, far beyond the waits below.
+	stream, consumer := setupStreamAndConsumer(t, js, "namespace-a", "broker-a", "nak-trigger-uid")
+	filterSubject := brokerutils.BrokerPublishSubjectName("namespace-a", "broker-a") + ".>"
+	publishStructuredCE(t, js, brokerutils.BrokerPublishSubjectName("namespace-a", "broker-a"), "interrupted-event")
+
+	var dispatched atomic.Int32
+	subscriber := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		dispatched.Add(1)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer subscriber.Close()
+	handler := newTestHandler(t, ctx, subscriber.URL, "")
+	sub, err := js.PullSubscribe(filterSubject, consumer, nats.Bind(stream, consumer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Unsubscribe() //nolint:errcheck
+	pullSub := &interruptedPullSubscription{natsPullSubscription: natsPullSubscription{sub}, fetched: make(chan struct{})}
+
+	dispatchCtx, cancelDispatches := context.WithCancel(ctx)
+	defer cancelDispatches()
+	ts := &TriggerSubscription{
+		subscription:   pullSub,
+		handler:        handler,
+		fetchBatchSize: 1,
+		// The replacement Fetch below waits out the NAK delay, which is the
+		// rest of this fetch timeout.
+		fetchTimeout:   time.Second,
+		maxConcurrency: 1,
+		dispatchCtx:    dispatchCtx,
+		dispatchCancel: cancelDispatches,
+	}
+	startFetchLoop(&ConsumerManager{logger: logging.FromContext(ctx)}, ts)
+	receiveWithin(t, pullSub.fetched, "fetch loop did not receive the event")
+	require.Eventually(t, func() bool {
+		info, err := js.ConsumerInfo(stream, consumer)
+		return err == nil && info.NumWaiting == 1
+	}, 500*time.Millisecond, 5*time.Millisecond, "interrupted Fetch did not leave a pull request open")
+
+	cancelDispatches()
+	receiveWithin(t, ts.done, "fetch loop did not stop after dispatch cancellation")
+	ts.inflight.Wait()
+	if err := conn.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if n := dispatched.Load(); n != 0 {
+		t.Fatalf("subscriber received %d dispatches after dispatch cancellation", n)
+	}
+
+	// sub keeps its interest, so only a delayed NAK reaches this replacement
+	// replica before AckWait.
+	if delivered := ackRedelivery(t, js, filterSubject, stream, consumer, 5*time.Second); delivered != 2 {
+		t.Fatalf("NumDelivered = %d, want 2", delivered)
+	}
+}
+
+// ackRedelivery fetches the next event through a replacement pull
+// subscription, acks it, and returns its delivery count.
+func ackRedelivery(t *testing.T, js nats.JetStreamContext, subject, stream, consumer string, wait time.Duration) uint64 {
+	t.Helper()
+	replacement, err := js.PullSubscribe(subject, consumer, nats.Bind(stream, consumer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Unsubscribe() //nolint:errcheck
+	messages, err := replacement.Fetch(1, nats.MaxWait(wait))
+	if err != nil {
+		t.Fatalf("event was not redelivered to a replacement pull subscription: %v", err)
+	}
+	metadata, err := messages[0].Metadata()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages[0].AckSync(); err != nil {
+		t.Fatal(err)
+	}
+	return metadata.NumDelivered
 }
