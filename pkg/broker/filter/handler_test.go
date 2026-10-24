@@ -21,11 +21,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"testing"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/cloudevents/sdk-go/v2/binding"
 	"github.com/cloudevents/sdk-go/v2/protocol"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -558,23 +560,32 @@ func TestNewTriggerHandler(t *testing.T) {
 	if handler == nil {
 		t.Fatal("NewTriggerHandler() returned nil handler")
 	}
-	if handler.trigger != trigger {
-		t.Error("handler.trigger not set correctly")
+	wantSpanAttrs := []attribute.KeyValue{
+		attribute.String("kn.trigger.name", trigger.Name),
+		attribute.String("kn.trigger.namespace", trigger.Namespace),
+		attribute.String("kn.trigger.uid", string(trigger.UID)),
 	}
-	if handler.subscriber.URL.String() != subscriber.URL.String() {
-		t.Errorf("handler.subscriber URL = %v, want %v", handler.subscriber.URL, subscriber.URL)
+	if !slices.Equal(handler.spanAttrs, wantSpanAttrs) {
+		t.Errorf("handler span attributes = %v, want %v", handler.spanAttrs, wantSpanAttrs)
 	}
-	if handler.filter != nil {
-		t.Error("handler.filter should be nil for trigger without filter")
+	config := snapshotHandlerConfig(t, handler)
+	if config.subscriber.URL.String() != subscriber.URL.String() {
+		t.Errorf("handler subscriber URL = %v, want %v", config.subscriber.URL, subscriber.URL)
 	}
-	if handler.brokerIngressURL != nil {
-		t.Error("handler.brokerIngressURL should be nil when not provided")
+	if config.subscriberURL != subscriber.URL.String() {
+		t.Errorf("handler subscriberURL = %q, want %q", config.subscriberURL, subscriber.URL.String())
 	}
-	if handler.deadLetterSink != nil {
-		t.Error("handler.deadLetterSink should be nil when not provided")
+	if config.filter != nil {
+		t.Error("handler filter should be nil for trigger without filter")
 	}
-	if handler.retryConfig != nil {
-		t.Error("handler.retryConfig should be nil when not provided")
+	if config.brokerIngressURL != nil {
+		t.Error("handler brokerIngressURL should be nil when not provided")
+	}
+	if config.deadLetterSink != nil {
+		t.Error("handler deadLetterSink should be nil when not provided")
+	}
+	if config.retryConfig != nil {
+		t.Error("handler retryConfig should be nil when not provided")
 	}
 }
 
@@ -607,21 +618,32 @@ func TestNewTriggerHandler_WithOptionalParams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTriggerHandler() unexpected error: %v", err)
 	}
-	if handler.filter == nil {
-		t.Error("handler.filter should not be nil for trigger with filter")
+	config := snapshotHandlerConfig(t, handler)
+	if config.filter == nil {
+		t.Error("handler filter should not be nil for trigger with filter")
 	}
-	if handler.brokerIngressURL != brokerIngress {
-		t.Error("handler.brokerIngressURL not set correctly")
+	if config.brokerIngressURL != brokerIngress {
+		t.Error("handler brokerIngressURL not set correctly")
 	}
-	if handler.deadLetterSink != dls {
-		t.Error("handler.deadLetterSink not set correctly")
+	if config.deadLetterSink != dls {
+		t.Error("handler deadLetterSink not set correctly")
 	}
-	if handler.retryConfig != retryConfig {
-		t.Error("handler.retryConfig not set correctly")
+	if config.retryConfig != retryConfig {
+		t.Error("handler retryConfig not set correctly")
 	}
-	if handler.noRetryConfig != noRetryConfig {
-		t.Error("handler.noRetryConfig not set correctly")
+	if config.noRetryConfig != noRetryConfig {
+		t.Error("handler noRetryConfig not set correctly")
 	}
+}
+
+func snapshotHandlerConfig(t *testing.T, handler *TriggerHandler) handlerConfig {
+	t.Helper()
+	handler.configMu.RLock()
+	defer handler.configMu.RUnlock()
+	if handler.config == nil {
+		t.Fatal("handler config is nil")
+	}
+	return *handler.config
 }
 
 func TestTriggerHandlerCleanup(t *testing.T) {
@@ -642,7 +664,7 @@ func TestTriggerHandlerCleanup(t *testing.T) {
 			},
 		}
 		f := buildTriggerFilter(logger, trigger)
-		h := &TriggerHandler{filter: f}
+		h := &TriggerHandler{config: &handlerConfig{filter: f}}
 		h.Cleanup() // should call f.Cleanup() without error
 	})
 }
