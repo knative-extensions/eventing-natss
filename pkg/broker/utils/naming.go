@@ -28,14 +28,39 @@ var (
 	uidReplacer        = strings.NewReplacer("-", "")
 )
 
-// BrokerStreamName builds a valid NATS JetStream stream name from a Broker.
-// The format is KN_BROKER_NAMESPACE__NAME, where hyphens in the namespace or name are replaced with _.
+// BrokerStreamNameAnnotation, when set on a Broker, overrides the generated
+// JetStream stream name with its value. The value must be a valid JetStream
+// stream name (see ValidateStreamName). Because it lives on the Broker object,
+// it is resolvable everywhere the stream name is needed, including finalization.
+const BrokerStreamNameAnnotation = "natsjetstream.eventing.knative.dev/stream-name"
+
+// invalidStreamNameChars are the characters JetStream disallows in a stream name.
+const invalidStreamNameChars = " \t\n\r.*>/\\"
+
+// BrokerStreamName returns the JetStream stream name for a Broker. If the
+// BrokerStreamNameAnnotation is set, its value is used verbatim; otherwise the
+// name is generated as KN_BROKER_NAMESPACE__NAME, where hyphens in the namespace
+// or name are replaced with _.
 //
 // For example:
 // - "default/my-broker" => "KN_BROKER_DEFAULT__MY_BROKER"
 // - "knative-eventing/test-broker" => "KN_BROKER_KNATIVE_EVENTING__TEST_BROKER"
 func BrokerStreamName(b *eventingv1.Broker) string {
+	if name := b.Annotations[BrokerStreamNameAnnotation]; name != "" {
+		return name
+	}
 	return BrokerStreamNameByNsAndName(b.Namespace, b.Name)
+}
+
+// ValidateStreamName reports whether name is a usable JetStream stream name.
+func ValidateStreamName(name string) error {
+	if name == "" {
+		return fmt.Errorf("stream name must not be empty")
+	}
+	if strings.ContainsAny(name, invalidStreamNameChars) {
+		return fmt.Errorf("invalid stream name %q: must not contain spaces, '.', '*', '>', '/' or '\\'", name)
+	}
+	return nil
 }
 
 func BrokerStreamNameByNsAndName(ns string, name string) string {
