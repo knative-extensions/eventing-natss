@@ -26,7 +26,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -247,10 +246,7 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 			cm.mu.RLock()
 			defer cm.mu.RUnlock()
 			for _, sub := range cm.subscriptions {
-				obs.Observe(int64(len(sub.sem)), metric.WithAttributes(
-					attribute.String("kn.trigger.name", sub.trigger.Name),
-					attribute.String("kn.trigger.namespace", sub.trigger.Namespace),
-				))
+				obs.Observe(int64(len(sub.sem)), sub.handler.metricAttrs)
 			}
 			return nil
 		}),
@@ -320,19 +316,13 @@ func (m *ConsumerManager) SubscribeTrigger(
 	)
 
 	// Check if we already have a subscription for this trigger.
-	// All handler fields are safe to update in place — the NATS pull
+	// The handler's configuration can be swapped in place — the NATS pull
 	// subscription is bound to (stream, consumer) which are derived from
 	// the immutable (broker, trigger UID) and never change. The fetch loop,
 	// however, captures its parameters at start, so a change to any of the
 	// three fetch-related annotations requires restarting it.
 	if existing, ok := m.subscriptions[triggerUID]; ok {
-		existing.handler.subscriber = subscriber
-		existing.handler.brokerIngressURL = brokerIngressURL
-		existing.handler.noRetryConfig = noRetryConfig
-		existing.handler.retryConfig = retryConfig
-		existing.handler.filter = buildTriggerFilter(logger, trigger)
-		existing.handler.deadLetterSink = deadLetterSink
-		existing.handler.trigger = trigger
+		existing.handler.Update(trigger, subscriber, brokerIngressURL, deadLetterSink, retryConfig, noRetryConfig)
 
 		newBatch := parseTriggerAnnotationInt(trigger.Annotations, TriggerFetchBatchSizeAnnotation, m.fetchBatchSize, logger)
 		newTimeout := parseTriggerAnnotationDuration(trigger.Annotations, TriggerFetchTimeoutAnnotation, m.fetchTimeout, logger)
@@ -438,9 +428,6 @@ func (m *ConsumerManager) SubscribeTrigger(
 		handler.Cleanup()
 		return fmt.Errorf("failed to create pull subscription: %w", err)
 	}
-
-	// Set subscription and consumer info on handler
-	handler.subscription = sub
 
 	// Two cancellable contexts: dispatchCtx survives fetch-loop restart and
 	// parents per-message msgCtx; fetchCtx controls the current fetch loop only.
