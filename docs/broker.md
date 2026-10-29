@@ -228,6 +228,42 @@ Notes:
 - This per-broker ConfigMap takes precedence over the cluster/namespace default ConfigMap (`natsjetstream-broker-config`) and is used **as a whole** — the two are not merged.
 - Changes to the referenced ConfigMap trigger broker reconciliation. `stream` settings are applied when the stream is **created** (create-once), so changing them on an existing broker requires recreating the stream; `filter` changes roll out to the filter deployment on the next reconcile.
 
+#### Migrating from the inline JSON annotation
+
+Earlier releases took the broker config as **inline JSON** in the same annotation. That form is no longer supported: a Broker that still carries it fails to reconcile (`ConfigLoadFailed`, with an error describing this migration) and the controller logs a warning. To migrate, move the JSON into the `config` key of a ConfigMap in the broker's namespace and point the annotation at that ConfigMap's name:
+
+```yaml
+# Before: inline JSON in the annotation (no longer supported)
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: my-broker
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    natsjetstream.eventing.knative.dev/config: '{"stream":{"replicas":3}}'
+```
+
+```yaml
+# After: the config moves into a ConfigMap, referenced by name
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-broker-config
+  namespace: default
+data:
+  config: '{"stream":{"replicas":3}}'
+---
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: my-broker
+  namespace: default
+  annotations:
+    eventing.knative.dev/broker.class: NatsJetStreamBroker
+    natsjetstream.eventing.knative.dev/config: my-broker-config
+```
+
 ### Per-Trigger Configuration
 
 Each trigger can override the broker-wide defaults via annotations. This lets individual triggers with different throughput or latency requirements coexist in the same broker without affecting each other.

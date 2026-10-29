@@ -19,6 +19,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/nats-io/nats.go"
 	corev1 "k8s.io/api/core/v1"
@@ -40,6 +41,13 @@ const (
 // ConfigMap (in the broker's own namespace) that holds this broker's
 // NatsJetStreamBrokerConfig under the ConfigKey ("config") key.
 const BrokerConfigAnnotation = "natsjetstream.eventing.knative.dev/config"
+
+// IsInlineConfig reports whether an annotation value looks like the legacy
+// inline JSON config rather than a ConfigMap name. ConfigMap names are DNS
+// subdomains and can never start with '{'.
+func IsInlineConfig(value string) bool {
+	return strings.HasPrefix(strings.TrimSpace(value), "{")
+}
 
 // DefaultBrokerConfig returns the default configuration for a broker
 func DefaultBrokerConfig() *NatsJetStreamBrokerConfig {

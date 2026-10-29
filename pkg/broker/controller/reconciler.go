@@ -286,6 +286,14 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 	// Broker-specific config (highest priority): the annotation names a ConfigMap
 	// in the broker's namespace holding this broker's config.
 	if cmName := b.Annotations[brokerconfig.BrokerConfigAnnotation]; cmName != "" {
+		if brokerconfig.IsInlineConfig(cmName) {
+			logger.Warnw("Broker config annotation contains inline JSON, which is no longer supported; "+
+				"move it into a ConfigMap and set the annotation to the ConfigMap name",
+				zap.String("annotation", brokerconfig.BrokerConfigAnnotation))
+			return nil, fmt.Errorf("annotation %q holds inline JSON, which is no longer supported: "+
+				"put the config under the %q key of a ConfigMap in namespace %q and set the annotation to that ConfigMap's name",
+				brokerconfig.BrokerConfigAnnotation, brokerconfig.ConfigKey, b.Namespace)
+		}
 		if err := r.tracker.TrackReference(tracker.Reference{
 			APIVersion: "v1",
 			Kind:       "ConfigMap",

@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nats-io/nats.go"
@@ -237,6 +238,21 @@ func TestGetBrokerConfig(t *testing.T) {
 		b.Annotations = map[string]string{brokerconfig.BrokerConfigAnnotation: "does-not-exist"}
 		if _, err := r.getBrokerConfig(ctx, b); err == nil {
 			t.Error("getBrokerConfig() expected an error for a missing ConfigMap, got nil")
+		}
+	})
+
+	t.Run("inline JSON annotation is rejected with a migration hint", func(t *testing.T) {
+		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset(), tracker: &reconcilertesting.FakeTracker{}}
+		b := testBroker(testNamespace, testBrokerName)
+		b.Annotations = map[string]string{brokerconfig.BrokerConfigAnnotation: `{"stream":{"replicas":3}}`}
+		_, err := r.getBrokerConfig(ctx, b)
+		if err == nil {
+			t.Fatal("getBrokerConfig() expected an error for inline JSON, got nil")
+		}
+		for _, want := range []string{brokerconfig.BrokerConfigAnnotation, brokerconfig.ConfigKey, "inline JSON"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("getBrokerConfig() error = %q, want it to mention %q", err, want)
+			}
 		}
 	})
 

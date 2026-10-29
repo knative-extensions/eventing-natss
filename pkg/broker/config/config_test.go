@@ -189,6 +189,27 @@ namespaceDefaults:
 	}
 }
 
+func TestIsInlineConfig(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "inline JSON", value: `{"stream":{"replicas":3}}`, want: true},
+		{name: "inline JSON with leading whitespace", value: "  \n{\"stream\":{}}", want: true},
+		{name: "ConfigMap name", value: "my-broker-cfg", want: false},
+		{name: "empty", value: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsInlineConfig(tt.value); got != tt.want {
+				t.Errorf("IsInlineConfig(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseBrokerConfig(t *testing.T) {
 	tests := []struct {
 		name    string
