@@ -1174,7 +1174,7 @@ spec:
                     description: Replicas is the number of replicas for the deployment.
                     format: int32
                     maximum: 2147483647
-                    minimum: -2147483648
+                    minimum: 0
                     type: integer
                   resources:
                     description: Resources for the container.

@@ -59,7 +59,7 @@ type NatsJetStreamBrokerConfigSpec struct {
 type DeploymentTemplate struct {
 	// Replicas is the number of replicas for the deployment.
 	// +optional
-	// +kubebuilder:validation:Minimum=-2147483648
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=2147483647
 	Replicas *int32 `json:"replicas,omitempty"`
 

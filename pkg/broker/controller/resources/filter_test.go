@@ -67,6 +67,27 @@ func TestMakeFilterDeployment(t *testing.T) {
 			},
 		},
 		{
+			name: "deployment with zero replicas",
+			args: &FilterArgs{
+				Broker:             broker,
+				Image:              "gcr.io/test/filter:latest",
+				ServiceAccountName: "test-sa",
+				StreamName:         "TEST_STREAM",
+				NatsURL:            "nats://nats:4222",
+				Template: &eventingv1alpha1.DeploymentTemplate{
+					Replicas: ptr.Int32(0),
+				},
+			},
+			wantName:      "test-broker-broker-filter",
+			wantNamespace: "test-namespace",
+			wantReplicas:  0,
+			wantImage:     "gcr.io/test/filter:latest",
+			wantLabels: map[string]string{
+				BrokerLabelKey: "test-broker",
+				RoleLabelKey:   FilterRoleLabelValue,
+			},
+		},
+		{
 			name: "deployment with template",
 			args: &FilterArgs{
 				Broker:             broker,
