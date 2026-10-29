@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/pkg/ptr"
 
@@ -175,6 +176,42 @@ func TestMakeFilterDeployment(t *testing.T) {
 				t.Error("ReadinessProbe should not be nil")
 			}
 		})
+	}
+}
+
+func TestMakeFilterDeploymentPreservesSelectorLabels(t *testing.T) {
+	broker := &eventingv1.Broker{ObjectMeta: metav1.ObjectMeta{Name: "test-broker", Namespace: "test-namespace"}}
+	template := &eventingv1alpha1.DeploymentTemplate{
+		Labels: map[string]string{
+			BrokerLabelKey: "another-broker",
+			RoleLabelKey:   "custom",
+			"deployment":   "custom",
+		},
+		PodLabels: map[string]string{
+			BrokerLabelKey: "another-broker",
+			RoleLabelKey:   "custom",
+			"pod":          "custom",
+		},
+	}
+	before := template.DeepCopy()
+	deployment := MakeFilterDeployment(&FilterArgs{Broker: broker, Template: template})
+	service := MakeFilterService(broker)
+	if !labels.SelectorFromSet(deployment.Spec.Selector.MatchLabels).Matches(labels.Set(deployment.Spec.Template.Labels)) {
+		t.Errorf("Deployment selector %v does not match Pod labels %v", deployment.Spec.Selector.MatchLabels, deployment.Spec.Template.Labels)
+	}
+	if !labels.SelectorFromSet(service.Spec.Selector).Matches(labels.Set(deployment.Spec.Template.Labels)) {
+		t.Errorf("Service selector %v does not match Pod labels %v", service.Spec.Selector, deployment.Spec.Template.Labels)
+	}
+	for key, value := range FilterLabels(broker.Name) {
+		if deployment.Labels[key] != value || deployment.Spec.Template.Labels[key] != value {
+			t.Errorf("required label %q = %q not preserved on Deployment and Pod", key, value)
+		}
+	}
+	if deployment.Labels["deployment"] != "custom" || deployment.Spec.Template.Labels["pod"] != "custom" {
+		t.Error("custom labels were not preserved")
+	}
+	if diff := cmp.Diff(before, template); diff != "" {
+		t.Errorf("input template changed (-want +got):\n%s", diff)
 	}
 }
 

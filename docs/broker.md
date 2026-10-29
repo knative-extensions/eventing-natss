@@ -277,6 +277,11 @@ reference while retaining the Broker and its JetStream stream.
 | The referenced `NatsJetStreamBrokerConfig` does not exist | `ConfigLoadFailed` |
 | The `natsjetstream.eventing.knative.dev/config` annotation is non-empty | `ConfigLoadFailed`; the annotation is no longer supported |
 
+`filter.labels` and `filter.podLabels` can add custom labels to the Deployment
+and Pods. The required `eventing.knative.dev/broker` and
+`eventing.knative.dev/role` labels take precedence over conflicting custom
+labels so that the Deployment and Service selectors continue to match the Pods.
+
 `stream` settings are used only when the JetStream stream is first created;
 changing them does not update an existing stream.
 

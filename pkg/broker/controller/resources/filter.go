@@ -76,13 +76,13 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 			deploymentAnnotations = args.Template.Annotations
 		}
 		if args.Template.Labels != nil {
-			deploymentLabels = mergeMaps(labels, args.Template.Labels)
+			deploymentLabels = mergeMaps(args.Template.Labels, labels)
 		}
 		if args.Template.PodAnnotations != nil {
 			podAnnotations = args.Template.PodAnnotations
 		}
 		if args.Template.PodLabels != nil {
-			podLabels = mergeMaps(labels, args.Template.PodLabels)
+			podLabels = mergeMaps(args.Template.PodLabels, labels)
 		}
 		if args.Template.NodeSelector != nil {
 			nodeSelector = args.Template.NodeSelector
