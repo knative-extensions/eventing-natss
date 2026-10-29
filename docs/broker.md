@@ -265,17 +265,26 @@ spec:
 prevents changing `spec.config` after the Broker is created; the referenced
 `NatsJetStreamBrokerConfig` itself can be updated.
 
-For an existing Broker using the inline JSON annotation, follow
-[Migrating Broker configuration](broker-config-migration.md) to change the
-reference while retaining the Broker and its JetStream stream.
+Existing Brokers can continue using the inline JSON annotation
+`natsjetstream.eventing.knative.dev/config`. The controller emits a
+`LegacyConfigDeprecated` warning when it is non-empty. An explicit
+`NatsJetStreamBrokerConfig` reference takes precedence over the annotation.
 
 | Broker configuration | Configuration used |
 |----------------------|--------------------|
 | `spec.config` references a `NatsJetStreamBrokerConfig` | That resource's entire `spec`; defaults are not merged into it |
-| `spec.config` is omitted or references a `v1/ConfigMap` | The Broker namespace's `natsjetstream-broker-config` ConfigMap: matching `namespaceDefaults`, then `clusterDefault`, then built-in defaults |
+| `spec.config` is omitted or references a `v1/ConfigMap`, and the legacy annotation is non-empty | The annotation's entire JSON configuration; defaults are not merged into it |
+| `spec.config` is omitted or references a `v1/ConfigMap`, and the legacy annotation is absent or empty | The Broker namespace's `natsjetstream-broker-config` ConfigMap: matching `namespaceDefaults`, then `clusterDefault`, then built-in defaults |
 | `spec.config` references another kind or API version | `ConfigLoadFailed` |
 | The referenced `NatsJetStreamBrokerConfig` does not exist | `ConfigLoadFailed` |
-| The `natsjetstream.eventing.knative.dev/config` annotation is non-empty | `ConfigLoadFailed`; the annotation is no longer supported |
+| The legacy annotation contains invalid JSON and no new CR is referenced | `ConfigLoadFailed` |
+
+Knative's webhook can supply a `v1/ConfigMap` reference even for a
+`NatsJetStreamBroker`. The controller does not read NATS settings from that
+reference. When it uses broker defaults instead, it emits a
+`ConfigMapReferenceIgnored` warning naming the ignored reference and the
+`natsjetstream-broker-config` ConfigMap it uses for defaults. This applies to
+explicit ConfigMap references as well as webhook defaults.
 
 `filter.labels` and `filter.podLabels` can add custom labels to the Deployment
 and Pods. The required `eventing.knative.dev/broker` and

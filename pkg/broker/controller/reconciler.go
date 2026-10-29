@@ -59,15 +59,17 @@ import (
 
 const (
 	// Event reasons
-	ReasonContractUpdated         = "ContractUpdated"
-	ReasonContractFailed          = "ContractFailed"
-	ReasonFilterDeploymentCreated = "FilterDeploymentCreated"
-	ReasonFilterDeploymentUpdated = "FilterDeploymentUpdated"
-	ReasonFilterDeploymentFailed  = "FilterDeploymentFailed"
-	ReasonFilterServiceCreated    = "FilterServiceCreated"
-	ReasonFilterServiceFailed     = "FilterServiceFailed"
-	ReasonStreamCreated           = "JetStreamStreamCreated"
-	ReasonStreamFailed            = "JetStreamStreamFailed"
+	ReasonContractUpdated           = "ContractUpdated"
+	ReasonContractFailed            = "ContractFailed"
+	ReasonFilterDeploymentCreated   = "FilterDeploymentCreated"
+	ReasonFilterDeploymentUpdated   = "FilterDeploymentUpdated"
+	ReasonFilterDeploymentFailed    = "FilterDeploymentFailed"
+	ReasonFilterServiceCreated      = "FilterServiceCreated"
+	ReasonFilterServiceFailed       = "FilterServiceFailed"
+	ReasonStreamCreated             = "JetStreamStreamCreated"
+	ReasonStreamFailed              = "JetStreamStreamFailed"
+	ReasonLegacyConfigDeprecated    = "LegacyConfigDeprecated"
+	ReasonConfigMapReferenceIgnored = "ConfigMapReferenceIgnored"
 
 	// DataplaneClusterRoleName is the name of the ClusterRole for dataplane components
 	DataplaneClusterRoleName = "natsjetstream-broker-dataplane"
@@ -288,16 +290,16 @@ func (r *Reconciler) resolveDeadLetterSink(ctx context.Context, b *eventingv1.Br
 // getBrokerConfig loads the broker configuration with the following precedence:
 //  1. Broker-specific config from the NatsJetStreamBrokerConfig referenced by
 //     spec.config (if present, use it entirely)
-//  2. Namespace-specific config from ConfigMap (if present, use it entirely)
-//  3. Cluster default config from ConfigMap (if present, use it entirely)
-//  4. Hardcoded defaults
+//  2. Deprecated broker-specific config from the inline JSON annotation
+//  3. Namespace-specific config from ConfigMap (if present, use it entirely)
+//  4. Cluster default config from ConfigMap (if present, use it entirely)
+//  5. Hardcoded defaults
 func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
 	logger := logging.FromContext(ctx)
 
-	// The config used to be given through an annotation. Ignoring it would
-	// silently fall back to the defaults, so reject it and point at spec.config.
 	if b.Annotations[brokerconfig.LegacyConfigAnnotation] != "" {
-		return nil, fmt.Errorf("annotation %q is no longer supported: create a %s and reference it from the Broker's spec.config",
+		controller.GetEventRecorder(ctx).Eventf(b, corev1.EventTypeWarning, ReasonLegacyConfigDeprecated,
+			"Annotation %q is deprecated; use a %s referenced by spec.config",
 			brokerconfig.LegacyConfigAnnotation, brokerConfigGVK.Kind)
 	}
 
@@ -305,6 +307,23 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 	// broker class, so a ConfigMap reference is not a NATS config source.
 	if b.Spec.Config != nil && (b.Spec.Config.APIVersion != "v1" || b.Spec.Config.Kind != "ConfigMap") {
 		return r.getReferencedBrokerConfig(ctx, b)
+	}
+
+	if cfg, err := brokerconfig.GetConfigFromAnnotation(b.Annotations); err != nil {
+		return nil, err
+	} else if cfg != nil {
+		logger.Debugw("Using broker-specific config from deprecated annotation")
+		return cfg, nil
+	}
+
+	if ref := b.Spec.Config; ref != nil {
+		namespace := ref.Namespace
+		if namespace == "" {
+			namespace = b.Namespace
+		}
+		controller.GetEventRecorder(ctx).Eventf(b, corev1.EventTypeWarning, ReasonConfigMapReferenceIgnored,
+			"Ignoring spec.config ConfigMap %s/%s; using broker defaults from ConfigMap %s/%s or built-in defaults",
+			namespace, ref.Name, b.Namespace, brokerconfig.ConfigMapName)
 	}
 
 	// No broker-specific config, try to load namespace/cluster defaults from ConfigMap

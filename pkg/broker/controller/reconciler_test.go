@@ -319,11 +319,11 @@ func TestGetBrokerConfig(t *testing.T) {
 			wantErr: []string{"NatsJetStreamBrokerConfig"},
 		},
 		{
-			name: "legacy annotation is rejected with a migration hint",
+			name: "invalid legacy annotation",
 			configure: func(b *eventingv1.Broker) {
-				b.Annotations = map[string]string{brokerconfig.LegacyConfigAnnotation: `{"stream":{"replicas":3}}`}
+				b.Annotations = map[string]string{brokerconfig.LegacyConfigAnnotation: `{"stream":`}
 			},
-			wantErr: []string{brokerconfig.LegacyConfigAnnotation, "spec.config", "NatsJetStreamBrokerConfig"},
+			wantErr: []string{brokerconfig.LegacyConfigAnnotation, "failed to parse"},
 		},
 	} {
 		t.Run(tt.name+" is an error", func(t *testing.T) {
@@ -356,10 +356,79 @@ func TestGetBrokerConfig(t *testing.T) {
 	})
 }
 
+func TestGetBrokerConfigLegacyAnnotation(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		annotation   string
+		ref          *duckv1.KReference
+		wantReplicas int
+		wantErr      string
+	}{
+		{name: "empty annotation uses defaults", wantReplicas: 5},
+		{name: "annotation takes precedence over defaults", annotation: `{"stream":{"replicas":3}}`, wantReplicas: 3},
+		{
+			name: "annotation is honored with webhook ConfigMap reference", annotation: `{"stream":{"replicas":3}}`,
+			ref: &duckv1.KReference{APIVersion: "v1", Kind: "ConfigMap", Name: "config-br-default-channel"}, wantReplicas: 3,
+		},
+		{
+			name: "CR takes precedence over annotation", annotation: `{"stream":{"replicas":3}}`,
+			ref: testBrokerConfigRef(testNamespace, "my-broker-cfg"), wantReplicas: 7,
+		},
+		{
+			name: "CR takes precedence over invalid annotation", annotation: `{"stream":`,
+			ref: testBrokerConfigRef(testNamespace, "my-broker-cfg"), wantReplicas: 7,
+		},
+		{
+			name: "missing CR does not fall back to annotation", annotation: `{"stream":{"replicas":3}}`,
+			ref: testBrokerConfigRef(testNamespace, "missing"), wantErr: "missing",
+		},
+		{name: "invalid annotation does not fall back to defaults", annotation: `{"stream":`, wantErr: "failed to parse"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newBrokerConfigReconciler(testBrokerConfig(testNamespace, "my-broker-cfg", 7))
+			r.kubeClientSet = kubefake.NewSimpleClientset(&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: brokerconfig.ConfigMapName, Namespace: testNamespace},
+				Data:       map[string]string{brokerconfig.ConfigKey: `{"clusterDefault":{"stream":{"replicas":5}}}`},
+			})
+			b := testBroker(testNamespace, testBrokerName)
+			b.Annotations = map[string]string{brokerconfig.LegacyConfigAnnotation: tt.annotation}
+			b.Spec.Config = tt.ref
+			recorder := record.NewFakeRecorder(10)
+			ctx := controller.WithEventRecorder(testContext(), recorder)
+			cfg, err := r.getBrokerConfig(ctx, b)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("getBrokerConfig() error = %v, want %q", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("getBrokerConfig() error: %v", err)
+			} else if cfg.Stream == nil || cfg.Stream.Replicas != tt.wantReplicas {
+				t.Fatalf("stream = %+v, want replicas %d", cfg.Stream, tt.wantReplicas)
+			}
+			if tt.annotation != "" {
+				select {
+				case event := <-recorder.Events:
+					if !strings.Contains(event, "Warning "+ReasonLegacyConfigDeprecated) || !strings.Contains(event, "spec.config") {
+						t.Errorf("event = %q, want annotation deprecation warning", event)
+					}
+				default:
+					t.Error("missing annotation deprecation event")
+				}
+			}
+			select {
+			case event := <-recorder.Events:
+				t.Errorf("unexpected event: %s", event)
+			default:
+			}
+		})
+	}
+}
+
 func TestGetBrokerConfigAfterWebhookDefaulting(t *testing.T) {
 	for _, tt := range []struct {
 		name         string
 		defaultName  string
+		explicitRef  bool
 		defaults     string
 		wantReplicas int
 	}{
@@ -382,6 +451,13 @@ func TestGetBrokerConfigAfterWebhookDefaulting(t *testing.T) {
 			defaults:     `{"clusterDefault":{"stream":{"replicas":5}}}`,
 			wantReplicas: 5,
 		},
+		{
+			name:         "explicit ConfigMap reference is ignored with a warning",
+			defaultName:  "user-config",
+			explicitRef:  true,
+			defaults:     `{"clusterDefault":{"stream":{"replicas":5}}}`,
+			wantReplicas: 5,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := eventingconfig.ToContext(testContext(), &eventingconfig.Config{
@@ -398,6 +474,9 @@ func TestGetBrokerConfigAfterWebhookDefaulting(t *testing.T) {
 			})
 			b := testBroker(testNamespace, testBrokerName)
 			b.Annotations = map[string]string{eventingv1.BrokerClassAnnotationKey: "NatsJetStreamBroker"}
+			if tt.explicitRef {
+				b.Spec.Config = &duckv1.KReference{APIVersion: "v1", Kind: "ConfigMap", Name: tt.defaultName}
+			}
 			b.SetDefaults(ctx)
 			if b.Spec.Config == nil || b.Spec.Config.Kind != "ConfigMap" || b.Spec.Config.Name != tt.defaultName {
 				t.Fatalf("webhook did not default spec.config: %+v", b.Spec.Config)
@@ -409,12 +488,28 @@ func TestGetBrokerConfigAfterWebhookDefaulting(t *testing.T) {
 					Data:       map[string]string{brokerconfig.ConfigKey: tt.defaults},
 				})
 			}
+			recorder := record.NewFakeRecorder(10)
+			ctx = controller.WithEventRecorder(ctx, recorder)
 			cfg, err := r.getBrokerConfig(ctx, b)
 			if err != nil {
 				t.Fatalf("getBrokerConfig() error: %v", err)
 			}
 			if cfg.Stream == nil || cfg.Stream.Replicas != tt.wantReplicas {
 				t.Errorf("Stream = %+v, want replicas %d", cfg.Stream, tt.wantReplicas)
+			}
+			refNamespace := b.Spec.Config.Namespace
+			if refNamespace == "" {
+				refNamespace = b.Namespace
+			}
+			select {
+			case event := <-recorder.Events:
+				for _, want := range []string{"Warning " + ReasonConfigMapReferenceIgnored, refNamespace + "/" + tt.defaultName, testNamespace + "/" + brokerconfig.ConfigMapName} {
+					if !strings.Contains(event, want) {
+						t.Errorf("event = %q, want it to mention %q", event, want)
+					}
+				}
+			default:
+				t.Error("missing ignored ConfigMap reference event")
 			}
 		})
 	}
@@ -694,6 +789,45 @@ func TestReconcileKind(t *testing.T) {
 		}
 		if _, err := kube.AppsV1().Deployments(testNamespace).Get(context.Background(), resources.FilterName(testBrokerName), metav1.GetOptions{}); err != nil {
 			t.Errorf("filter deployment should be created: %v", err)
+		}
+	})
+
+	t.Run("legacy annotation continues reconciling the stream and filter", func(t *testing.T) {
+		r, kube := setup(t, testTrigger(testNamespace, "t1", testBrokerName))
+		b := testBroker(testNamespace, testBrokerName)
+		b.Spec.Config = &duckv1.KReference{APIVersion: "v1", Kind: "ConfigMap", Namespace: ingressNS, Name: "config-br-default-channel"}
+		b.Annotations = map[string]string{brokerconfig.LegacyConfigAnnotation: `{"stream":{"maxMsgs":123},"filter":{"replicas":2}}`}
+		if err := r.ReconcileKind(testContext(), b); err != nil {
+			t.Fatalf("ReconcileKind() error: %v", err)
+		}
+		if cond := b.Status.GetCondition(eventingv1.BrokerConditionIngress); cond == nil || !cond.IsTrue() {
+			t.Errorf("ingress condition = %+v, want ready", cond)
+		}
+		deployment, err := kube.AppsV1().Deployments(testNamespace).Get(context.Background(), resources.FilterName(testBrokerName), metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("filter deployment should be created: %v", err)
+		}
+		if *deployment.Spec.Replicas != 2 {
+			t.Errorf("filter replicas = %d, want 2", *deployment.Spec.Replicas)
+		}
+		stream, err := r.js.StreamInfo(brokerutils.BrokerStreamName(b))
+		if err != nil {
+			t.Fatalf("stream should be created: %v", err)
+		}
+		if stream.Config.MaxMsgs != 123 {
+			t.Errorf("stream maxMsgs = %d, want 123", stream.Config.MaxMsgs)
+		}
+	})
+
+	t.Run("invalid legacy annotation reports ConfigLoadFailed", func(t *testing.T) {
+		r := newBrokerConfigReconciler()
+		b := testBroker(testNamespace, testBrokerName)
+		b.Annotations = map[string]string{brokerconfig.LegacyConfigAnnotation: `{"stream":`}
+		if err := r.ReconcileKind(testContext(), b); err == nil {
+			t.Fatal("ReconcileKind() succeeded, want ConfigLoadFailed")
+		}
+		if cond := b.Status.GetCondition(eventingv1.BrokerConditionIngress); cond == nil || cond.Reason != "ConfigLoadFailed" {
+			t.Errorf("ingress condition = %+v, want ConfigLoadFailed", cond)
 		}
 	})
 }

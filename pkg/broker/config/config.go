@@ -37,8 +37,8 @@ const (
 	ConfigKey = "config"
 )
 
-// LegacyConfigAnnotation used to carry the per-broker config as inline JSON.
-// It is only recognised to reject brokers that still set it.
+// LegacyConfigAnnotation carries deprecated per-broker configuration as inline JSON.
+// Existing brokers can continue using it; new brokers should use spec.config.
 const LegacyConfigAnnotation = "natsjetstream.eventing.knative.dev/config"
 
 // DefaultBrokerConfig returns the default configuration for a broker
@@ -75,6 +75,20 @@ func LoadDefaultsFromConfigMap(cm *corev1.ConfigMap) (*NatsJetStreamBrokerDefaul
 	}
 
 	return defaults, nil
+}
+
+// GetConfigFromAnnotation reads the deprecated inline JSON configuration.
+// It returns nil if the annotation is absent or empty.
+func GetConfigFromAnnotation(annotations map[string]string) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
+	configJSON := annotations[LegacyConfigAnnotation]
+	if configJSON == "" {
+		return nil, nil
+	}
+	cfg := &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{}
+	if err := json.Unmarshal([]byte(configJSON), cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse broker config annotation %q: %w", LegacyConfigAnnotation, err)
+	}
+	return cfg, nil
 }
 
 // GetConfigFromConfigMap returns the configuration for a namespace from a ConfigMap.
