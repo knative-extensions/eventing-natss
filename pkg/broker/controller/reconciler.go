@@ -57,26 +57,21 @@ import (
 
 const (
 	// Event reasons
-	ReasonContractUpdated           = "ContractUpdated"
-	ReasonContractFailed            = "ContractFailed"
-	ReasonFilterDeploymentCreated   = "FilterDeploymentCreated"
-	ReasonFilterDeploymentUpdated   = "FilterDeploymentUpdated"
-	ReasonFilterDeploymentFailed    = "FilterDeploymentFailed"
-	ReasonFilterServiceCreated      = "FilterServiceCreated"
-	ReasonFilterServiceFailed       = "FilterServiceFailed"
-	ReasonStreamCreated             = "JetStreamStreamCreated"
-	ReasonStreamFailed              = "JetStreamStreamFailed"
-	ReasonLegacyConfigDeprecated    = "LegacyConfigDeprecated"
-	ReasonConfigMapReferenceIgnored = "ConfigMapReferenceIgnored"
+	ReasonContractUpdated                = "ContractUpdated"
+	ReasonContractFailed                 = "ContractFailed"
+	ReasonFilterDeploymentCreated        = "FilterDeploymentCreated"
+	ReasonFilterDeploymentUpdated        = "FilterDeploymentUpdated"
+	ReasonFilterDeploymentFailed         = "FilterDeploymentFailed"
+	ReasonFilterServiceCreated           = "FilterServiceCreated"
+	ReasonFilterServiceFailed            = "FilterServiceFailed"
+	ReasonStreamCreated                  = "JetStreamStreamCreated"
+	ReasonStreamFailed                   = "JetStreamStreamFailed"
+	ReasonLegacyConfigDeprecated         = "LegacyConfigDeprecated"
+	ReasonLegacyDefaultsConfigDeprecated = "LegacyDefaultsConfigDeprecated"
+	ReasonConfigMapReferenceIgnored      = "ConfigMapReferenceIgnored"
 
 	// DataplaneClusterRoleName is the name of the ClusterRole for dataplane components
 	DataplaneClusterRoleName = "natsjetstream-broker-dataplane"
-)
-
-var (
-	// brokerConfigGVK is the kind a Broker's spec.config must reference.
-	brokerConfigGVK = eventingv1alpha1.SchemeGroupVersion.WithKind("NatsJetStreamBrokerConfig")
-	brokerConfigGVR = eventingv1alpha1.SchemeGroupVersion.WithResource("natsjetstreambrokerconfigs")
 )
 
 // Reconciler implements controller.Reconciler for Broker resources.
@@ -286,96 +281,6 @@ func (r *Reconciler) resolveDeadLetterSink(ctx context.Context, b *eventingv1.Br
 		}
 	}
 	return r.uriResolver.AddressableFromDestinationV1(ctx, destination, b)
-}
-
-// getBrokerConfig loads the broker configuration with the following precedence:
-//  1. Broker-specific config from the NatsJetStreamBrokerConfig referenced by
-//     spec.config (if present, use it entirely)
-//  2. Deprecated broker-specific config from the inline JSON annotation
-//  3. Namespace-specific config from ConfigMap (if present, use it entirely)
-//  4. Cluster default config from ConfigMap (if present, use it entirely)
-//  5. Hardcoded defaults
-func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
-	logger := logging.FromContext(ctx)
-
-	if b.Annotations[brokerconfig.LegacyConfigAnnotation] != "" {
-		controller.GetEventRecorder(ctx).Eventf(b, corev1.EventTypeWarning, ReasonLegacyConfigDeprecated,
-			"Annotation %q is deprecated; use a %s referenced by spec.config",
-			brokerconfig.LegacyConfigAnnotation, brokerConfigGVK.Kind)
-	}
-
-	// Knative's defaulting webhook can supply a ConfigMap reference for any
-	// broker class, so a ConfigMap reference is not a NATS config source.
-	if b.Spec.Config != nil && (b.Spec.Config.APIVersion != "v1" || b.Spec.Config.Kind != "ConfigMap") {
-		return r.getReferencedBrokerConfig(ctx, b)
-	}
-
-	if cfg, err := brokerconfig.GetConfigFromAnnotation(b.Annotations); err != nil {
-		return nil, err
-	} else if cfg != nil {
-		logger.Debugw("Using broker-specific config from deprecated annotation")
-		return cfg, nil
-	}
-
-	if ref := b.Spec.Config; ref != nil {
-		namespace := ref.Namespace
-		if namespace == "" {
-			namespace = b.Namespace
-		}
-		controller.GetEventRecorder(ctx).Eventf(b, corev1.EventTypeWarning, ReasonConfigMapReferenceIgnored,
-			"Ignoring spec.config ConfigMap %s/%s; using broker defaults from ConfigMap %s/%s or built-in defaults",
-			namespace, ref.Name, b.Namespace, brokerconfig.ConfigMapName)
-	}
-
-	// No broker-specific config, try to load namespace/cluster defaults from ConfigMap
-	cm, err := r.kubeClientSet.CoreV1().ConfigMaps(b.Namespace).Get(ctx, brokerconfig.ConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		if !apierrs.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to get config map: %w", err)
-		}
-		// ConfigMap not found, use hardcoded defaults
-		logger.Debugw("Broker config ConfigMap not found, using hardcoded defaults",
-			zap.String("configmap", brokerconfig.ConfigMapName),
-			zap.String("namespace", b.Namespace))
-		return brokerconfig.DefaultBrokerConfig(), nil
-	}
-
-	// Load and return config from ConfigMap
-	return brokerconfig.GetConfigFromConfigMap(cm, b.Namespace)
-}
-
-// getReferencedBrokerConfig returns a copy of the spec of the
-// NatsJetStreamBrokerConfig that the broker's spec.config points at, and tracks
-// it so that the broker is reconciled again when it changes.
-func (r *Reconciler) getReferencedBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
-	ref := b.Spec.Config
-	if ref.APIVersion != brokerConfigGVK.GroupVersion().String() || ref.Kind != brokerConfigGVK.Kind {
-		return nil, fmt.Errorf("unsupported spec.config %s %q: only %s %s is supported",
-			ref.Kind, ref.APIVersion, brokerConfigGVK.Kind, brokerConfigGVK.GroupVersion())
-	}
-	namespace := ref.Namespace
-	if namespace == "" {
-		namespace = b.Namespace
-	}
-	if err := r.tracker.TrackReference(tracker.Reference{
-		APIVersion: ref.APIVersion,
-		Kind:       ref.Kind,
-		Namespace:  namespace,
-		Name:       ref.Name,
-	}, b); err != nil {
-		return nil, fmt.Errorf("failed to track %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
-	}
-	obj, err := r.brokerConfigLister.ByNamespace(namespace).Get(ref.Name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
-	}
-	cfg, err := decodeBrokerConfigSpec(obj)
-	if err != nil {
-		return nil, fmt.Errorf("invalid %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
-	}
-	logging.FromContext(ctx).Debugw("Using broker-specific config from "+ref.Kind,
-		zap.String("namespace", namespace), zap.String("name", ref.Name))
-	return cfg, nil
 }
 
 // propagateIngressAvailability checks if the shared ingress deployment is available

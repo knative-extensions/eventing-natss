@@ -265,14 +265,112 @@ spec:
 prevents changing `spec.config` after the Broker is created; the referenced
 `NatsJetStreamBrokerConfig` itself can be updated.
 
+`filter.labels` and `filter.podLabels` can add custom labels to the Deployment
+and Pods. The required `eventing.knative.dev/broker` and
+`eventing.knative.dev/role` labels take precedence over conflicting custom
+labels so that the Deployment and Service selectors continue to match the Pods.
+
+`stream` settings are used only when the JetStream stream is first created;
+changing them does not update an existing stream.
+
+### Namespace and Cluster Defaults
+
+Cluster operators can share a `NatsJetStreamBrokerConfig` across Brokers and
+select a different resource for a particular namespace. The stream and filter
+settings live in these CRs, where the same Kubernetes validation applies as for
+an explicitly referenced configuration:
+
+```yaml
+apiVersion: eventing.knative.dev/v1alpha1
+kind: NatsJetStreamBrokerConfig
+metadata:
+  name: natsjetstream-default
+  namespace: knative-eventing
+spec:
+  stream:
+    replicas: 3
+  filter:
+    replicas: 2
+---
+apiVersion: eventing.knative.dev/v1alpha1
+kind: NatsJetStreamBrokerConfig
+metadata:
+  name: natsjetstream-default
+  namespace: orders
+spec:
+  stream:
+    replicas: 1
+  filter:
+    replicas: 1
+```
+
+Knative Eventing's `knative-eventing/config-br-defaults` ConfigMap selects the
+CR references through `brokerClasses.NatsJetStreamBroker`. Its
+`default-br-config` key holds the following. `MTChannelBasedBroker` stays the
+default class here; keep your existing entries and add the NATS ones next to
+them.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-br-defaults
+  namespace: knative-eventing
+data:
+  default-br-config: |
+    clusterDefault:
+      brokerClass: MTChannelBasedBroker
+      apiVersion: v1
+      kind: ConfigMap
+      name: config-br-default-channel
+      namespace: knative-eventing
+      brokerClasses:
+        NatsJetStreamBroker:
+          apiVersion: eventing.knative.dev/v1alpha1
+          kind: NatsJetStreamBrokerConfig
+          name: natsjetstream-default
+          namespace: knative-eventing
+    namespaceDefaults:
+      orders:
+        brokerClasses:
+          NatsJetStreamBroker:
+            apiVersion: eventing.knative.dev/v1alpha1
+            kind: NatsJetStreamBrokerConfig
+            name: natsjetstream-default
+            namespace: orders
+```
+
+A Broker with `eventing.knative.dev/broker.class: NatsJetStreamBroker` can
+omit `spec.config`. Knative's webhook fills it from these defaults when the
+Broker is created:
+
+| Broker | Selected configuration |
+|--------|------------------------|
+| NATS Broker in `orders`, with no explicit `spec.config` | `orders/natsjetstream-default` |
+| NATS Broker in another namespace, with no explicit `spec.config` | `knative-eventing/natsjetstream-default` |
+| NATS Broker with an explicit `spec.config` | The explicitly referenced CR |
+| `MTChannelBasedBroker`, with no explicit `spec.config` | Its existing `config-br-default-channel` reference |
+
+Changing `config-br-defaults` selects a different reference for new Brokers.
+Existing Brokers keep their selected reference. Updating a referenced CR
+reconciles the Brokers that use it; deleting it reports `ConfigLoadFailed`
+until that CR exists again. Cross-namespace references require
+`disallowDifferentNamespaceConfig` to be unset or `false` at both the namespace
+and cluster levels.
+
+### Legacy Configuration Compatibility
+
 Existing Brokers can continue using the inline JSON annotation
-`natsjetstream.eventing.knative.dev/config`. The controller emits a
-`LegacyConfigDeprecated` warning when it is non-empty. An explicit
-`NatsJetStreamBrokerConfig` reference takes precedence over the annotation.
+`natsjetstream.eventing.knative.dev/config` and the
+`natsjetstream-broker-config` defaults ConfigMap in the Broker's namespace.
+Both formats are deprecated. The controller emits `LegacyConfigDeprecated`
+for a non-empty annotation and `LegacyDefaultsConfigDeprecated` when it
+successfully reads a non-empty legacy defaults ConfigMap. New configurations
+use the CR references described above.
 
 | Broker configuration | Configuration used |
 |----------------------|--------------------|
-| `spec.config` references a `NatsJetStreamBrokerConfig` | That resource's entire `spec`; defaults are not merged into it |
+| `spec.config` references a `NatsJetStreamBrokerConfig`, explicitly or through Knative defaults | That resource's entire `spec`; defaults and the legacy annotation are not merged into it |
 | `spec.config` is omitted or references a `v1/ConfigMap`, and the legacy annotation is non-empty | The annotation's entire JSON configuration; defaults are not merged into it |
 | `spec.config` is omitted or references a `v1/ConfigMap`, and the legacy annotation is absent or empty | The Broker namespace's `natsjetstream-broker-config` ConfigMap: matching `namespaceDefaults`, then `clusterDefault`, then built-in defaults |
 | `spec.config` references another kind or API version | `ConfigLoadFailed` |
@@ -285,14 +383,6 @@ reference. When it uses broker defaults instead, it emits a
 `ConfigMapReferenceIgnored` warning naming the ignored reference and the
 `natsjetstream-broker-config` ConfigMap it uses for defaults. This applies to
 explicit ConfigMap references as well as webhook defaults.
-
-`filter.labels` and `filter.podLabels` can add custom labels to the Deployment
-and Pods. The required `eventing.knative.dev/broker` and
-`eventing.knative.dev/role` labels take precedence over conflicting custom
-labels so that the Deployment and Service selectors continue to match the Pods.
-
-`stream` settings are used only when the JetStream stream is first created;
-changing them does not update an existing stream.
 
 ### Per-Trigger Configuration
 

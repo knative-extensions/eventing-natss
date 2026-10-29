@@ -30,7 +30,9 @@ import (
 )
 
 const (
-	// ConfigMapName is the name of the ConfigMap containing broker defaults
+	// ConfigMapName is the name of the legacy ConfigMap containing broker defaults.
+	//
+	// Deprecated: Use NatsJetStreamBrokerConfig references in config-br-defaults.
 	ConfigMapName = "natsjetstream-broker-config"
 
 	// ConfigKey is the key in the ConfigMap containing the YAML configuration
@@ -53,7 +55,9 @@ func DefaultBrokerConfig() *eventingv1alpha1.NatsJetStreamBrokerConfigSpec {
 	}
 }
 
-// LoadDefaultsFromConfigMap loads NatsJetStreamBrokerDefaults from a ConfigMap
+// LoadDefaultsFromConfigMap loads legacy NatsJetStreamBrokerDefaults from a ConfigMap.
+//
+// Deprecated: Use NatsJetStreamBrokerConfig references in config-br-defaults.
 func LoadDefaultsFromConfigMap(cm *corev1.ConfigMap) (*NatsJetStreamBrokerDefaults, error) {
 	if cm == nil {
 		return nil, nil
@@ -91,30 +95,32 @@ func GetConfigFromAnnotation(annotations map[string]string) (*eventingv1alpha1.N
 	return cfg, nil
 }
 
+// ConfigFor returns the config for namespace: its namespace default, else the
+// cluster default, else the built-in defaults. Safe on a nil receiver.
+//
+// Deprecated: Use NatsJetStreamBrokerConfig references in config-br-defaults.
+func (d *NatsJetStreamBrokerDefaults) ConfigFor(namespace string) *eventingv1alpha1.NatsJetStreamBrokerConfigSpec {
+	if d != nil {
+		if nsConfig := d.NamespaceDefaults[namespace]; nsConfig != nil {
+			return nsConfig
+		}
+		if d.ClusterDefault != nil {
+			return d.ClusterDefault
+		}
+	}
+	return DefaultBrokerConfig()
+}
+
 // GetConfigFromConfigMap returns the configuration for a namespace from a ConfigMap.
 // It checks namespace-specific config first, then cluster default, then hardcoded defaults.
+//
+// Deprecated: Use NatsJetStreamBrokerConfig references in config-br-defaults.
 func GetConfigFromConfigMap(cm *corev1.ConfigMap, namespace string) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
 	defaults, err := LoadDefaultsFromConfigMap(cm)
 	if err != nil {
 		return nil, err
 	}
-
-	if defaults == nil {
-		return DefaultBrokerConfig(), nil
-	}
-
-	// Check for namespace-specific config
-	if nsConfig, ok := defaults.NamespaceDefaults[namespace]; ok && nsConfig != nil {
-		return nsConfig, nil
-	}
-
-	// Check for cluster default config
-	if defaults.ClusterDefault != nil {
-		return defaults.ClusterDefault, nil
-	}
-
-	// Return hardcoded defaults
-	return DefaultBrokerConfig(), nil
+	return defaults.ConfigFor(namespace), nil
 }
 
 // BuildNatsStreamConfig converts a NatsJetStreamBrokerConfigSpec to a nats.StreamConfig
@@ -151,6 +157,8 @@ func BuildNatsStreamConfig(streamName, publishSubject string, config *eventingv1
 	streamConfig.MaxMsgSize = sc.MaxMsgSize
 	streamConfig.Storage = utils.ConvertStorage(sc.Storage, nats.FileStorage)
 	streamConfig.Replicas = sc.Replicas
+	// Legacy annotations and ConfigMaps can still set NoAck and Mirror.
+	// NatsJetStreamBrokerConfig validation rejects NoAck=true and any Mirror.
 	streamConfig.NoAck = sc.NoAck
 	streamConfig.Duplicates = sc.DuplicateWindow.Duration
 	streamConfig.Placement = utils.ConvertPlacement(sc.Placement)

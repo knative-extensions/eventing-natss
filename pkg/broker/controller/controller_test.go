@@ -28,6 +28,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
@@ -37,6 +38,8 @@ import (
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/clients/dynamicclient"
 	"knative.dev/pkg/tracker"
+
+	"knative.dev/eventing-natss/pkg/broker/constants"
 )
 
 func TestBrokerConfigInformerSyncsInvalidSpec(t *testing.T) {
@@ -238,5 +241,78 @@ func TestBrokerWithMissingConfigIsEnqueuedOnConfigCreation(t *testing.T) {
 	want := []types.NamespacedName{{Namespace: b.Namespace, Name: b.Name}}
 	if diff := cmp.Diff(want, enqueued); diff != "" {
 		t.Errorf("enqueued brokers mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestDefaultBrokerConfigLifecycle(t *testing.T) {
+	for _, namespace := range []string{testNamespace, "orders"} {
+		t.Run(namespace, func(t *testing.T) {
+			ctx := testBrokerDefaultsContext(t)
+			b := testBroker(namespace, testBrokerName)
+			b.Annotations = map[string]string{eventingv1.BrokerClassAnnotationKey: constants.BrokerClassName}
+			b.SetDefaults(ctx)
+
+			var enqueued []types.NamespacedName
+			tr := tracker.New(func(key types.NamespacedName) { enqueued = append(enqueued, key) }, time.Hour)
+			indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+			r := newBrokerConfigReconciler()
+			r.tracker = tr
+			r.brokerConfigLister = cache.NewGenericLister(indexer, brokerConfigGVR.GroupResource())
+			assertMissing := func(t *testing.T) {
+				t.Helper()
+				if err := r.ReconcileKind(ctx, b); err == nil {
+					t.Fatal("ReconcileKind() succeeded with a missing default CR")
+				}
+				if cond := b.Status.GetCondition(eventingv1.BrokerConditionIngress); cond == nil || cond.Reason != "ConfigLoadFailed" {
+					t.Fatalf("ingress condition = %+v, want ConfigLoadFailed", cond)
+				}
+			}
+			assertMissing(t)
+			handler := enqueueBrokersOfBrokerConfig(tr)
+			for _, step := range []struct {
+				name     string
+				replicas int
+				store    func(cache.Indexer, interface{}) error
+				deleted  bool
+			}{
+				{name: "create", replicas: 3, store: cache.Indexer.Add},
+				{name: "update", replicas: 5, store: cache.Indexer.Update},
+				{name: "delete", store: cache.Indexer.Delete, deleted: true},
+				{name: "recreate", replicas: 1, store: cache.Indexer.Add},
+			} {
+				t.Run(step.name, func(t *testing.T) {
+					enqueued = nil
+					raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(
+						testBrokerConfig(b.Spec.Config.Namespace, b.Spec.Config.Name, step.replicas))
+					if err != nil {
+						t.Fatal(err)
+					}
+					obj := &unstructured.Unstructured{Object: raw}
+					if err := step.store(indexer, obj); err != nil {
+						t.Fatal(err)
+					}
+					if step.deleted {
+						handler(cache.DeletedFinalStateUnknown{Obj: obj})
+					} else {
+						handler(obj)
+					}
+					want := []types.NamespacedName{{Namespace: b.Namespace, Name: b.Name}}
+					if diff := cmp.Diff(want, enqueued); diff != "" {
+						t.Errorf("enqueued brokers mismatch (-want +got):\n%s", diff)
+					}
+					if step.deleted {
+						assertMissing(t)
+						return
+					}
+					got, err := r.getBrokerConfig(ctx, b)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got.Stream == nil || got.Stream.Replicas != step.replicas {
+						t.Errorf("stream = %+v, want replicas %d", got.Stream, step.replicas)
+					}
+				})
+			}
+		})
 	}
 }

@@ -22,6 +22,8 @@ import (
 
 // NatsJetStreamBrokerDefaults contains the default configuration for NatsJetStreamBroker
 // at different scopes (cluster, namespace).
+//
+// Deprecated: Use NatsJetStreamBrokerConfig references in config-br-defaults.
 type NatsJetStreamBrokerDefaults struct {
 	// ClusterDefault is the default configuration for all namespaces
 	// that don't have a specific configuration.
