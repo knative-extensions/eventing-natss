@@ -226,7 +226,7 @@ Notes:
 
 - The annotation value is the ConfigMap **name**; the ConfigMap must exist in the **broker's namespace**. If it is missing or its `config` key can't be parsed, the broker reports a reconciliation error.
 - This per-broker ConfigMap takes precedence over the cluster/namespace default ConfigMap (`natsjetstream-broker-config`) and is used **as a whole** — the two are not merged.
-- Config is read at reconcile time. `stream` settings are applied when the stream is **created** (create-once), so changing them on an existing broker requires recreating the stream; `filter` changes roll out to the filter deployment on the next reconcile.
+- Changes to the referenced ConfigMap trigger broker reconciliation. `stream` settings are applied when the stream is **created** (create-once), so changing them on an existing broker requires recreating the stream; `filter` changes roll out to the filter deployment on the next reconcile.
 
 ### Per-Trigger Configuration
 

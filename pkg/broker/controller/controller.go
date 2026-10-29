@@ -21,6 +21,7 @@ import (
 
 	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -30,6 +31,7 @@ import (
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/resolver"
+	"knative.dev/pkg/tracker"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/eventing/pkg/client/injection/reconciler/eventing/v1/broker"
@@ -148,6 +150,7 @@ func NewController(
 
 	// Create controller implementation
 	impl := broker.NewImpl(ctx, r, constants.BrokerClassName)
+	r.tracker = impl.Tracker
 
 	// Create URI resolver for resolving the dead letter sink address
 	r.uriResolver = resolver.NewURIResolverFromTracker(ctx, impl.Tracker)
@@ -157,6 +160,9 @@ func NewController(
 		FilterFunc: pkgreconciler.AnnotationFilterFunc(broker.ClassAnnotationKey, constants.BrokerClassName, false /*allowUnset*/),
 		Handler:    controller.HandleAll(impl.Enqueue),
 	})
+
+	// Reconcile brokers when their referenced configuration changes.
+	configMapInformer.Informer().AddEventHandler(controller.HandleAll(enqueueBrokersOfConfigMap(impl.Tracker)))
 
 	// Watch deployments owned by brokers (for filter deployments)
 	deploymentInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
@@ -177,6 +183,14 @@ func NewController(
 	logger.Info("NATS JetStream Broker controller initialized")
 
 	return impl
+}
+
+// enqueueBrokersOfConfigMap returns a handler that enqueues the brokers
+// tracking a changed ConfigMap. Typed informers may omit TypeMeta, which the
+// tracker needs to match references, so it is supplied here. Handles delete
+// tombstones.
+func enqueueBrokersOfConfigMap(t tracker.Interface) controller.Callback {
+	return controller.EnsureTypeMeta(t.OnChanged, corev1.SchemeGroupVersion.WithKind("ConfigMap"))
 }
 
 // enqueueBrokerOfTrigger returns a handler that enqueues the broker referenced

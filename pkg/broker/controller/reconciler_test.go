@@ -40,6 +40,7 @@ import (
 	"go.uber.org/zap"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
+	reconcilertesting "knative.dev/pkg/reconciler/testing"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
@@ -218,7 +219,7 @@ func TestGetBrokerConfig(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "my-broker-cfg", Namespace: testNamespace},
 			Data:       map[string]string{brokerconfig.ConfigKey: `{"stream":{"replicas":3}}`},
 		}
-		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset(cm)}
+		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset(cm), tracker: &reconcilertesting.FakeTracker{}}
 		b := testBroker(testNamespace, testBrokerName)
 		b.Annotations = map[string]string{brokerconfig.BrokerConfigAnnotation: "my-broker-cfg"}
 		cfg, err := r.getBrokerConfig(ctx, b)
@@ -231,7 +232,7 @@ func TestGetBrokerConfig(t *testing.T) {
 	})
 
 	t.Run("annotation names a missing ConfigMap is an error", func(t *testing.T) {
-		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset()}
+		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset(), tracker: &reconcilertesting.FakeTracker{}}
 		b := testBroker(testNamespace, testBrokerName)
 		b.Annotations = map[string]string{brokerconfig.BrokerConfigAnnotation: "does-not-exist"}
 		if _, err := r.getBrokerConfig(ctx, b); err == nil {

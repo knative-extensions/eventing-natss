@@ -41,6 +41,7 @@ import (
 	"knative.dev/pkg/network"
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/resolver"
+	"knative.dev/pkg/tracker"
 
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
@@ -87,6 +88,9 @@ type Reconciler struct {
 
 	// URI resolver for resolving the dead letter sink address
 	uriResolver *resolver.URIResolver
+
+	// Tracks ConfigMaps referenced by brokers.
+	tracker tracker.Interface
 
 	// NATS URL for data plane components
 	natsURL string
@@ -282,6 +286,14 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 	// Broker-specific config (highest priority): the annotation names a ConfigMap
 	// in the broker's namespace holding this broker's config.
 	if cmName := b.Annotations[brokerconfig.BrokerConfigAnnotation]; cmName != "" {
+		if err := r.tracker.TrackReference(tracker.Reference{
+			APIVersion: "v1",
+			Kind:       "ConfigMap",
+			Namespace:  b.Namespace,
+			Name:       cmName,
+		}, b); err != nil {
+			return nil, fmt.Errorf("failed to track broker config ConfigMap %q: %w", cmName, err)
+		}
 		cm, err := r.kubeClientSet.CoreV1().ConfigMaps(b.Namespace).Get(ctx, cmName, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get broker config ConfigMap %q in namespace %q: %w", cmName, b.Namespace, err)
