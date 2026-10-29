@@ -54,7 +54,6 @@ func TestDefaultBrokerConfig(t *testing.T) {
 	if config.Stream.Discard != v1alpha1.OldDiscardPolicy {
 		t.Errorf("Stream.Discard = %v, want %v", config.Stream.Discard, v1alpha1.OldDiscardPolicy)
 	}
-
 }
 
 func TestLoadDefaultsFromConfigMap(t *testing.T) {
