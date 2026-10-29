@@ -244,7 +244,7 @@ func newBrokerConfigLister(objs ...*eventingv1alpha1.NatsJetStreamBrokerConfig) 
 		}
 		_ = idx.Add(&unstructured.Unstructured{Object: obj})
 	}
-	return cache.NewGenericLister(idx, brokerConfigGVK.GroupVersion().WithResource("natsjetstreambrokerconfigs").GroupResource())
+	return cache.NewGenericLister(idx, brokerConfigGVR.GroupResource())
 }
 
 // newBrokerConfigReconciler returns a Reconciler that resolves spec.config

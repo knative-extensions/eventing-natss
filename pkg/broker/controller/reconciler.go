@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -29,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	appsv1listers "k8s.io/client-go/listers/apps/v1"
@@ -75,8 +73,11 @@ const (
 	DataplaneClusterRoleName = "natsjetstream-broker-dataplane"
 )
 
-// brokerConfigGVK is the kind a Broker's spec.config must reference.
-var brokerConfigGVK = eventingv1alpha1.SchemeGroupVersion.WithKind("NatsJetStreamBrokerConfig")
+var (
+	// brokerConfigGVK is the kind a Broker's spec.config must reference.
+	brokerConfigGVK = eventingv1alpha1.SchemeGroupVersion.WithKind("NatsJetStreamBrokerConfig")
+	brokerConfigGVR = eventingv1alpha1.SchemeGroupVersion.WithResource("natsjetstreambrokerconfigs")
+)
 
 // Reconciler implements controller.Reconciler for Broker resources.
 type Reconciler struct {
@@ -368,21 +369,13 @@ func (r *Reconciler) getReferencedBrokerConfig(ctx context.Context, b *eventingv
 	if err != nil {
 		return nil, fmt.Errorf("failed to get %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
 	}
-	// Decode only this broker's configuration. A malformed or older CR must not
-	// prevent the shared informer from syncing configurations for other brokers.
-	// The informer preserves int64 values. JSON decoding into the typed spec
-	// preserves their precision and rejects values outside each field's range.
-	data, err := json.Marshal(obj.(*unstructured.Unstructured).Object["spec"])
+	cfg, err := decodeBrokerConfigSpec(obj)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
-	}
-	var cfg eventingv1alpha1.NatsJetStreamBrokerConfigSpec
-	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("invalid %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
 	}
 	logging.FromContext(ctx).Debugw("Using broker-specific config from "+ref.Kind,
 		zap.String("namespace", namespace), zap.String("name", ref.Name))
-	return &cfg, nil
+	return cfg, nil
 }
 
 // propagateIngressAvailability checks if the shared ingress deployment is available

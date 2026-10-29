@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -28,6 +30,9 @@ import (
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/injection/clients/dynamicclient"
+	"knative.dev/pkg/logging"
+
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
 )
 
 type brokerConfigInformerKey struct{}
@@ -39,11 +44,7 @@ func init() {
 // withBrokerConfigInformer watches raw configurations so a CR that cannot be
 // decoded into the Go API type does not block cache sync for the controller.
 func withBrokerConfigInformer(ctx context.Context) (context.Context, controller.Informer) {
-	namespace := metav1.NamespaceAll
-	if injection.HasNamespaceScope(ctx) {
-		namespace = injection.GetNamespaceScope(ctx)
-	}
-	client := dynamicclient.Get(ctx).Resource(brokerConfigGVK.GroupVersion().WithResource("natsjetstreambrokerconfigs")).Namespace(namespace)
+	client := dynamicclient.Get(ctx).Resource(brokerConfigGVR).Namespace(injection.GetNamespaceScope(ctx))
 	informer := cache.NewSharedIndexInformer(&cache.ListWatch{
 		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 			return client.List(ctx, options)
@@ -53,4 +54,32 @@ func withBrokerConfigInformer(ctx context.Context) (context.Context, controller.
 		},
 	}, &unstructured.Unstructured{}, controller.GetResyncPeriod(ctx), cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 	return context.WithValue(ctx, brokerConfigInformerKey{}, informer), informer
+}
+
+// getBrokerConfigInformer returns the informer that withBrokerConfigInformer registered.
+func getBrokerConfigInformer(ctx context.Context) cache.SharedIndexInformer {
+	untyped := ctx.Value(brokerConfigInformerKey{})
+	if untyped == nil {
+		logging.FromContext(ctx).Panic("Unable to fetch the broker config informer from context.")
+	}
+	return untyped.(cache.SharedIndexInformer)
+}
+
+// decodeBrokerConfigSpec decodes the spec of a configuration held by the
+// informer. Each broker decodes only its own, so a malformed CR fails just the
+// brokers that use it. JSON keeps int64 values exact and rejects out-of-range ones.
+func decodeBrokerConfigSpec(obj runtime.Object) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return nil, fmt.Errorf("unexpected object type %T", obj)
+	}
+	data, err := json.Marshal(u.Object["spec"])
+	if err != nil {
+		return nil, err
+	}
+	var cfg eventingv1alpha1.NatsJetStreamBrokerConfigSpec
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
 }

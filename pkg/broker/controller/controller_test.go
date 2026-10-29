@@ -91,9 +91,9 @@ func TestBrokerConfigInformerSyncsInvalidSpec(t *testing.T) {
 			if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
 				t.Fatal("config informer failed to sync with invalid configurations")
 			}
-			shared := ctx.Value(brokerConfigInformerKey{}).(cache.SharedIndexInformer)
+			shared := getBrokerConfigInformer(ctx)
 			r := newBrokerConfigReconciler()
-			r.brokerConfigLister = cache.NewGenericLister(shared.GetIndexer(), brokerConfigGVK.GroupVersion().WithResource("natsjetstreambrokerconfigs").GroupResource())
+			r.brokerConfigLister = cache.NewGenericLister(shared.GetIndexer(), brokerConfigGVR.GroupResource())
 			for _, name := range []string{"bad-env", "bad-quantity", "bad-range", "bad-time", "bad-integer", "bad-max-msgs", "bad-negative-seq", "bad-spec", "bad-duration"} {
 				b := testBroker(testNamespace, name)
 				b.Spec.Config = testBrokerConfigRef(testNamespace, name)

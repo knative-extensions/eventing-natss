@@ -119,7 +119,7 @@ func NewController(
 	deploymentInformer := deploymentinformer.Get(ctx)
 	serviceInformer := serviceinformer.Get(ctx)
 	configMapInformer := configmapinformer.Get(ctx)
-	brokerConfigInformer := ctx.Value(brokerConfigInformerKey{}).(cache.SharedIndexInformer)
+	brokerConfigInformer := getBrokerConfigInformer(ctx)
 
 	// Create contract manager for shared ingress
 	contractManager := contract.NewManager(
@@ -135,7 +135,7 @@ func NewController(
 		serviceLister:    serviceInformer.Lister(),
 		triggerLister:    triggerInformer.Lister(),
 
-		brokerConfigLister: cache.NewGenericLister(brokerConfigInformer.GetIndexer(), brokerConfigGVK.GroupVersion().WithResource("natsjetstreambrokerconfigs").GroupResource()),
+		brokerConfigLister: cache.NewGenericLister(brokerConfigInformer.GetIndexer(), brokerConfigGVR.GroupResource()),
 
 		contractManager: contractManager,
 
