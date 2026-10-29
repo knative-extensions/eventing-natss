@@ -19,8 +19,10 @@ package controller
 import (
 	"context"
 	"errors"
+	"maps"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/nats-io/nats.go"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -45,6 +47,7 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 	"knative.dev/eventing-natss/pkg/broker/contract"
 	"knative.dev/eventing-natss/pkg/broker/controller/resources"
@@ -372,6 +375,133 @@ func TestReconcileFilterDeploymentUpdate(t *testing.T) {
 	}
 	if len(got.Spec.Template.Spec.Containers) == 0 {
 		t.Error("deployment spec was not updated to the expected spec")
+	}
+}
+
+func TestReconcileFilterDeploymentMetadata(t *testing.T) {
+	for _, mode := range []string{"tracked deployment", "existing deployment without metadata tracking"} {
+		t.Run(mode, func(t *testing.T) {
+			kube := kubefake.NewSimpleClientset()
+			r := &Reconciler{
+				kubeClientSet:        kube,
+				deploymentLister:     newDeploymentLister(),
+				filterImage:          "filter:latest",
+				filterServiceAccount: "dp-sa",
+				natsURL:              "nats://localhost:4222",
+			}
+			b := testBroker(testNamespace, testBrokerName)
+			cfg := brokerconfig.DefaultBrokerConfig()
+			cfg.Filter = &eventingv1alpha1.DeploymentTemplate{
+				Labels:      map[string]string{"team": "initial", "removed": "label"},
+				Annotations: map[string]string{"note": "initial", "removed": "annotation"},
+			}
+			if err := r.reconcileFilterDeployment(testContext(), b, "TEST_STREAM", cfg); err != nil {
+				t.Fatal(err)
+			}
+			deployments := kube.AppsV1().Deployments(testNamespace)
+			name := resources.FilterName(testBrokerName)
+			existing, err := deployments.Get(context.Background(), name, metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "existing deployment without metadata tracking" {
+				delete(existing.Annotations, filterMetadataAnnotation)
+			}
+			existing.Labels["external"] = "keep"
+			existing.Annotations["external"] = "keep"
+			existing.Annotations["deployment.kubernetes.io/revision"] = "7"
+			existing, err = deployments.Update(context.Background(), existing, metav1.UpdateOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Adopt the current keys before exercising their removal, including on
+			// Deployments created by a controller that did not record those keys.
+			r.deploymentLister = newDeploymentLister(existing)
+			if err := r.reconcileFilterDeployment(testContext(), b, "TEST_STREAM", cfg); err != nil {
+				t.Fatal(err)
+			}
+
+			steps := []struct {
+				name        string
+				template    *eventingv1alpha1.DeploymentTemplate
+				wantLabels  map[string]string
+				wantNotes   map[string]string
+				wantUpdates int
+			}{
+				{
+					name: "change only deployment labels and annotations",
+					template: &eventingv1alpha1.DeploymentTemplate{
+						Labels: map[string]string{
+							"team": "updated", "added": "label", "removed": "label",
+							resources.BrokerLabelKey: "wrong", resources.RoleLabelKey: "wrong",
+						},
+						Annotations: map[string]string{"note": "updated", "added": "annotation", "removed": "annotation"},
+					},
+					wantLabels:  map[string]string{"team": "updated", "added": "label", "removed": "label"},
+					wantNotes:   map[string]string{"note": "updated", "added": "annotation", "removed": "annotation"},
+					wantUpdates: 1,
+				},
+				{
+					name: "remove configured metadata keys",
+					template: &eventingv1alpha1.DeploymentTemplate{
+						Labels:      map[string]string{"team": "updated", "added": "label"},
+						Annotations: map[string]string{"note": "updated", "added": "annotation"},
+					},
+					wantLabels:  map[string]string{"team": "updated", "added": "label"},
+					wantNotes:   map[string]string{"note": "updated", "added": "annotation"},
+					wantUpdates: 1,
+				},
+				{name: "remove filter template", wantUpdates: 1},
+				{name: "unchanged metadata does not cause an update"},
+			}
+			for _, step := range steps {
+				t.Run(step.name, func(t *testing.T) {
+					existing, err := deployments.Get(context.Background(), name, metav1.GetOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					before := existing.DeepCopy()
+					r.deploymentLister = newDeploymentLister(existing)
+					cfg.Filter = step.template
+					kube.ClearActions()
+					if err := r.reconcileFilterDeployment(testContext(), b, "TEST_STREAM", cfg); err != nil {
+						t.Fatal(err)
+					}
+					updates := 0
+					for _, action := range kube.Actions() {
+						if action.Matches("update", "deployments") {
+							updates++
+						}
+					}
+					if updates != step.wantUpdates {
+						t.Errorf("deployment updates = %d, want %d", updates, step.wantUpdates)
+					}
+					got, err := deployments.Get(context.Background(), name, metav1.GetOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantLabels := resources.FilterLabels(b.Name)
+					wantLabels["external"] = "keep"
+					maps.Copy(wantLabels, step.wantLabels)
+					if diff := cmp.Diff(wantLabels, got.Labels); diff != "" {
+						t.Errorf("labels (-want +got):\n%s", diff)
+					}
+					wantNotes := map[string]string{"external": "keep", "deployment.kubernetes.io/revision": "7"}
+					maps.Copy(wantNotes, step.wantNotes)
+					annotations := got.DeepCopy().Annotations
+					delete(annotations, filterMetadataAnnotation)
+					if diff := cmp.Diff(wantNotes, annotations); diff != "" {
+						t.Errorf("annotations (-want +got):\n%s", diff)
+					}
+					if diff := cmp.Diff(before.Spec, got.Spec); diff != "" {
+						t.Errorf("metadata-only update changed deployment spec (-before +after):\n%s", diff)
+					}
+					if diff := cmp.Diff(before, existing); diff != "" {
+						t.Errorf("modified informer cache (-before +after):\n%s", diff)
+					}
+				})
+			}
+		})
 	}
 }
 

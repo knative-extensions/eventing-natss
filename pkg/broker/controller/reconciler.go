@@ -18,11 +18,15 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -38,6 +42,7 @@ import (
 	"knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/controller"
+	"knative.dev/pkg/kmap"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/network"
 	pkgreconciler "knative.dev/pkg/reconciler"
@@ -333,17 +338,53 @@ func (r *Reconciler) propagateFilterAvailability(ctx context.Context, b *eventin
 	return nil
 }
 
-// reconcileFilterDeployment ensures the filter deployment exists
-func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) pkgreconciler.Event {
-	logger := logging.FromContext(ctx)
+// filterMetadataAnnotation holds a filterDeploymentMetadata as JSON.
+const filterMetadataAnnotation = "natsjetstream.eventing.knative.dev/filter-deployment-metadata"
 
-	// Get filter deployment template if configured
+// filterDeploymentMetadata lists the label and annotation keys the controller
+// applied to the filter Deployment, so that keys later removed from the desired
+// state can be pruned without touching metadata set by other controllers.
+type filterDeploymentMetadata struct {
+	Labels      []string `json:"labels,omitempty"`
+	Annotations []string `json:"annotations,omitempty"`
+}
+
+// trackFilterMetadata records d's current label and annotation keys in the
+// filterMetadataAnnotation annotation. It must be called on the Deployment as
+// built from the configuration, before any other controller adds metadata.
+func trackFilterMetadata(d *appsv1.Deployment) error {
+	data, err := json.Marshal(filterDeploymentMetadata{
+		Labels:      slices.Sorted(maps.Keys(d.Labels)),
+		Annotations: slices.Sorted(maps.Keys(d.Annotations)),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to encode filter deployment metadata keys: %w", err)
+	}
+	// Union copies: d.Annotations may alias the broker configuration's map.
+	d.Annotations = kmap.Union(d.Annotations, map[string]string{filterMetadataAnnotation: string(data)})
+	return nil
+}
+
+// trackedFilterMetadata returns what trackFilterMetadata recorded on d, or the
+// zero value if d was never tracked.
+func trackedFilterMetadata(d *appsv1.Deployment) (filterDeploymentMetadata, error) {
+	var tracked filterDeploymentMetadata
+	if data := d.Annotations[filterMetadataAnnotation]; data != "" {
+		if err := json.Unmarshal([]byte(data), &tracked); err != nil {
+			return filterDeploymentMetadata{}, err
+		}
+	}
+	return tracked, nil
+}
+
+// desiredFilterDeployment builds the filter Deployment the broker should have.
+func (r *Reconciler) desiredFilterDeployment(b *eventingv1.Broker, streamName string, brokerCfg *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) (*appsv1.Deployment, error) {
 	var filterTemplate *eventingv1alpha1.DeploymentTemplate
 	if brokerCfg != nil {
 		filterTemplate = brokerCfg.Filter
 	}
 
-	expected := resources.MakeFilterDeployment(&resources.FilterArgs{
+	d := resources.MakeFilterDeployment(&resources.FilterArgs{
 		Broker:             b,
 		Image:              r.filterImage,
 		ServiceAccountName: r.filterServiceAccount,
@@ -351,39 +392,70 @@ func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv
 		NatsURL:            r.natsURL,
 		Template:           filterTemplate,
 	})
+	if err := trackFilterMetadata(d); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
 
-	name := resources.FilterName(b.Name)
-	existing, err := r.deploymentLister.Deployments(b.Namespace).Get(name)
+// reconcileFilterDeployment ensures the filter deployment exists and matches
+// the broker configuration.
+func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) pkgreconciler.Event {
+	expected, err := r.desiredFilterDeployment(b, streamName, brokerCfg)
 	if err != nil {
-		if apierrs.IsNotFound(err) {
-			_, err = r.kubeClientSet.AppsV1().Deployments(b.Namespace).Create(ctx, expected, metav1.CreateOptions{})
-			if err != nil {
-				logger.Errorw("Failed to create filter deployment", zap.Error(err))
-				b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to create filter deployment: %v", err)
-				return fmt.Errorf("failed to create filter deployment: %w", err)
-			}
-			controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonFilterDeploymentCreated, "Filter deployment created")
-			return nil
-		}
-		logger.Errorw("Failed to get filter deployment", zap.Error(err))
-		b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to get filter deployment: %v", err)
-		return fmt.Errorf("failed to get filter deployment: %w", err)
+		return err
 	}
 
-	// Update if needed
-	if !equality.Semantic.DeepEqual(expected.Spec, existing.Spec) {
-		toUpdate := existing.DeepCopy()
-		toUpdate.Spec = expected.Spec
-		_, err = r.kubeClientSet.AppsV1().Deployments(b.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})
-		if err != nil {
-			logger.Errorw("Failed to update filter deployment", zap.Error(err))
-			b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to update filter deployment: %v", err)
-			return fmt.Errorf("failed to update filter deployment: %w", err)
-		}
-		controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonFilterDeploymentUpdated, "Filter deployment updated")
+	existing, err := r.deploymentLister.Deployments(b.Namespace).Get(resources.FilterName(b.Name))
+	switch {
+	case apierrs.IsNotFound(err):
+		return r.createFilterDeployment(ctx, b, expected)
+	case err != nil:
+		return r.failFilterDeployment(ctx, b, "get", err)
 	}
+	return r.updateFilterDeployment(ctx, b, existing, expected)
+}
 
+func (r *Reconciler) createFilterDeployment(ctx context.Context, b *eventingv1.Broker, expected *appsv1.Deployment) pkgreconciler.Event {
+	if _, err := r.kubeClientSet.AppsV1().Deployments(b.Namespace).Create(ctx, expected, metav1.CreateOptions{}); err != nil {
+		return r.failFilterDeployment(ctx, b, "create", err)
+	}
+	controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonFilterDeploymentCreated, "Filter deployment created")
 	return nil
+}
+
+// updateFilterDeployment brings existing in line with expected. Label and
+// annotation keys the controller applied earlier are replaced wholesale;
+// metadata added by other controllers, such as the Deployment revision
+// annotation, is preserved.
+func (r *Reconciler) updateFilterDeployment(ctx context.Context, b *eventingv1.Broker, existing, expected *appsv1.Deployment) pkgreconciler.Event {
+	tracked, err := trackedFilterMetadata(existing)
+	if err != nil {
+		b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to decode filter deployment metadata keys: %v", err)
+		return fmt.Errorf("failed to decode filter deployment metadata keys: %w", err)
+	}
+
+	toUpdate := existing.DeepCopy()
+	toUpdate.Labels = kmap.Union(kmap.ExcludeKeyList(existing.Labels, tracked.Labels), expected.Labels)
+	toUpdate.Annotations = kmap.Union(kmap.ExcludeKeyList(existing.Annotations, tracked.Annotations), expected.Annotations)
+	toUpdate.Spec = expected.Spec
+	if equality.Semantic.DeepEqual(existing, toUpdate) {
+		return nil
+	}
+
+	if _, err := r.kubeClientSet.AppsV1().Deployments(b.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{}); err != nil {
+		return r.failFilterDeployment(ctx, b, "update", err)
+	}
+	controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonFilterDeploymentUpdated, "Filter deployment updated")
+	return nil
+}
+
+// failFilterDeployment logs err and marks the filter failed. verb is "get",
+// "create" or "update".
+func (r *Reconciler) failFilterDeployment(ctx context.Context, b *eventingv1.Broker, verb string, err error) pkgreconciler.Event {
+	logging.FromContext(ctx).Errorw("Failed to "+verb+" filter deployment", zap.Error(err))
+	b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to "+verb+" filter deployment: %v", err)
+	return fmt.Errorf("failed to %s filter deployment: %w", verb, err)
 }
 
 // reconcileFilterService ensures the filter service exists
