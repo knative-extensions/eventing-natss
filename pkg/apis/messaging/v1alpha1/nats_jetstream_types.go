@@ -195,6 +195,7 @@ type StreamConfig struct {
 
 	// MaxAge defines the maximum age of a message which is allowed in the stream.
 	// +optional
+	// +kubebuilder:validation:XValidation:rule="duration(self) == duration(self)",message="must be a valid Go duration"
 	MaxAge metav1.Duration `json:"maxAge,omitempty"`
 
 	// MaxMsgSize defines the maximum size in bytes of an individual message. JetStream includes a hard-limit of 1MB so
@@ -217,6 +218,7 @@ type StreamConfig struct {
 
 	// DuplicateWindow defines the duration of which messages should be tracked for detecting duplicates.
 	// +optional
+	// +kubebuilder:validation:XValidation:rule="duration(self) == duration(self)",message="must be a valid Go duration"
 	DuplicateWindow metav1.Duration `json:"duplicateWindow,omitempty"`
 
 	// Placement allows configuring which JetStream server the stream should be placed on.
@@ -249,6 +251,7 @@ type StreamSource struct {
 	// OptStartSeq denotes the message sequence number which this source should start from. This takes precedence
 	// over OptStartTime if defined.
 	// +optional
+	// +kubebuilder:validation:Minimum=0
 	OptStartSeq uint64 `json:"optStartSeq,omitempty"`
 
 	// OptStartTime configures the source to deliver messages from the stream starting at the first message after this
