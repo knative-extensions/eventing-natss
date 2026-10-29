@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -61,11 +62,16 @@ func TestBrokerConfigInformerSyncsInvalidSpec(t *testing.T) {
 				}
 				fmt.Fprint(w, `{"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfigList","metadata":{"resourceVersion":"1"},"items":[
 {"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"good","namespace":"test-ns"},"spec":{"stream":{"replicas":3}}},
+{"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"large-integer","namespace":"test-ns"},"spec":{"stream":{"maxMsgs":9007199254740993,"sources":[{"name":"source","optStartSeq":9007199254740993}]}}},
+{"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"max-integer","namespace":"test-ns"},"spec":{"stream":{"maxMsgs":9223372036854775807,"sources":[{"name":"source","optStartSeq":9223372036854775807}]}}},
 {"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"bad-env","namespace":"test-ns"},"spec":{"filter":{"env":[{"name":"BATCH","value":50}]}}},
 {"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"bad-quantity","namespace":"test-ns"},"spec":{"filter":{"resources":{"limits":{"cpu":"1e1.1"}}}}},
 {"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"bad-range","namespace":"test-ns"},"spec":{"filter":{"replicas":2147483648}}},
 {"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"bad-time","namespace":"test-ns"},"spec":{"stream":{"mirror":{"name":"source","optStartTime":"2026-10-29"}}}},
 {"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"bad-integer","namespace":"test-ns"},"spec":{"stream":{"maxConsumers":9223372036854775808}}},
+{"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"bad-max-msgs","namespace":"test-ns"},"spec":{"stream":{"maxMsgs":9223372036854775808}}},
+{"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"bad-negative-seq","namespace":"test-ns"},"spec":{"stream":{"sources":[{"name":"source","optStartSeq":-1}]}}},
+{"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"bad-spec","namespace":"test-ns"},"spec":"not-an-object"},
 {"apiVersion":"eventing.knative.dev/v1alpha1","kind":"NatsJetStreamBrokerConfig","metadata":{"name":"bad-duration","namespace":"test-ns"},"spec":{"stream":{"maxAge":"tomorrow"}}}
 ]}`)
 			}))
@@ -88,7 +94,7 @@ func TestBrokerConfigInformerSyncsInvalidSpec(t *testing.T) {
 			shared := ctx.Value(brokerConfigInformerKey{}).(cache.SharedIndexInformer)
 			r := newBrokerConfigReconciler()
 			r.brokerConfigLister = cache.NewGenericLister(shared.GetIndexer(), brokerConfigGVK.GroupVersion().WithResource("natsjetstreambrokerconfigs").GroupResource())
-			for _, name := range []string{"bad-env", "bad-quantity", "bad-range", "bad-time", "bad-integer", "bad-duration"} {
+			for _, name := range []string{"bad-env", "bad-quantity", "bad-range", "bad-time", "bad-integer", "bad-max-msgs", "bad-negative-seq", "bad-spec", "bad-duration"} {
 				b := testBroker(testNamespace, name)
 				b.Spec.Config = testBrokerConfigRef(testNamespace, name)
 				if err := r.ReconcileKind(ctx, b); err == nil {
@@ -96,6 +102,26 @@ func TestBrokerConfigInformerSyncsInvalidSpec(t *testing.T) {
 				}
 				if cond := b.Status.GetCondition(eventingv1.BrokerConditionIngress); cond == nil || cond.Reason != "ConfigLoadFailed" {
 					t.Errorf("ReconcileKind(%s) ingress condition = %+v, want ConfigLoadFailed", name, cond)
+				}
+			}
+			for _, integer := range []struct {
+				name string
+				want int64
+			}{
+				{name: "large-integer", want: 9007199254740993},
+				{name: "max-integer", want: math.MaxInt64},
+			} {
+				b := testBroker(testNamespace, integer.name)
+				b.Spec.Config = testBrokerConfigRef(testNamespace, integer.name)
+				cfg, err := r.getBrokerConfig(ctx, b)
+				if err != nil {
+					t.Fatalf("getBrokerConfig(%s): %v", integer.name, err)
+				}
+				if cfg.Stream == nil || cfg.Stream.MaxMsgs != integer.want {
+					t.Fatalf("getBrokerConfig(%s) stream = %+v, want maxMsgs %d", integer.name, cfg.Stream, integer.want)
+				}
+				if len(cfg.Stream.Sources) != 1 || cfg.Stream.Sources[0].OptStartSeq != uint64(integer.want) {
+					t.Errorf("getBrokerConfig(%s) sources = %+v, want optStartSeq %d", integer.name, cfg.Stream.Sources, integer.want)
 				}
 			}
 			b := testBroker(testNamespace, "good")

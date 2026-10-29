@@ -370,6 +370,8 @@ func (r *Reconciler) getReferencedBrokerConfig(ctx context.Context, b *eventingv
 	}
 	// Decode only this broker's configuration. A malformed or older CR must not
 	// prevent the shared informer from syncing configurations for other brokers.
+	// The informer preserves int64 values. JSON decoding into the typed spec
+	// preserves their precision and rejects values outside each field's range.
 	data, err := json.Marshal(obj.(*unstructured.Unstructured).Object["spec"])
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
