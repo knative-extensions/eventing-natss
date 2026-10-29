@@ -631,9 +631,15 @@ spec:
                         duplicateWindow:
                           description: DuplicateWindow defines the duration of which messages should be tracked for detecting duplicates.
                           type: string
+                          x-kubernetes-validations:
+                            - message: must be a valid Go duration
+                              rule: duration(self) == duration(self)
                         maxAge:
                           description: MaxAge defines the maximum age of a message which is allowed in the stream.
                           type: string
+                          x-kubernetes-validations:
+                            - message: must be a valid Go duration
+                              rule: duration(self) == duration(self)
                         maxBytes:
                           description: MaxBytes defines how many bytes this stream can store spanning all messages in the stream.
                           type: integer
