@@ -26,7 +26,7 @@ import (
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/pkg/ptr"
 
-	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
 )
 
 func TestMakeFilterDeployment(t *testing.T) {
@@ -73,7 +73,7 @@ func TestMakeFilterDeployment(t *testing.T) {
 				ServiceAccountName: "test-sa",
 				StreamName:         "TEST_STREAM",
 				NatsURL:            "nats://nats:4222",
-				Template: &brokerconfig.DeploymentTemplate{
+				Template: &eventingv1alpha1.DeploymentTemplate{
 					Replicas: ptr.Int32(5),
 					Labels: map[string]string{
 						"custom": "label",
@@ -101,7 +101,7 @@ func TestMakeFilterDeployment(t *testing.T) {
 				ServiceAccountName: "test-sa",
 				StreamName:         "TEST_STREAM",
 				NatsURL:            "nats://nats:4222",
-				Template: &brokerconfig.DeploymentTemplate{
+				Template: &eventingv1alpha1.DeploymentTemplate{
 					PodLabels: map[string]string{
 						"pod-label": "value",
 					},
@@ -193,7 +193,7 @@ func TestMakeFilterDeploymentWithResources(t *testing.T) {
 		ServiceAccountName: "test-sa",
 		StreamName:         "TEST_STREAM",
 		NatsURL:            "nats://nats:4222",
-		Template: &brokerconfig.DeploymentTemplate{
+		Template: &eventingv1alpha1.DeploymentTemplate{
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("200m"),
@@ -238,7 +238,7 @@ func TestMakeFilterDeploymentWithNodeSelector(t *testing.T) {
 		ServiceAccountName: "test-sa",
 		StreamName:         "TEST_STREAM",
 		NatsURL:            "nats://nats:4222",
-		Template: &brokerconfig.DeploymentTemplate{
+		Template: &eventingv1alpha1.DeploymentTemplate{
 			NodeSelector: map[string]string{
 				"disktype": "ssd",
 			},
@@ -283,7 +283,7 @@ func TestMakeFilterDeploymentWithTopologySpreadConstraints(t *testing.T) {
 		ServiceAccountName: "example-service-account",
 		StreamName:         "EXAMPLE_STREAM",
 		NatsURL:            "nats://nats.example-namespace.svc.cluster.local:4222",
-		Template: &brokerconfig.DeploymentTemplate{
+		Template: &eventingv1alpha1.DeploymentTemplate{
 			TopologySpreadConstraints: want,
 		},
 	})

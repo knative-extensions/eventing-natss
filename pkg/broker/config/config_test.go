@@ -17,15 +17,14 @@ limitations under the License.
 package config
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/nats-io/nats.go"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 )
 
@@ -56,21 +55,6 @@ func TestDefaultBrokerConfig(t *testing.T) {
 		t.Errorf("Stream.Discard = %v, want %v", config.Stream.Discard, v1alpha1.OldDiscardPolicy)
 	}
 
-	if config.Consumer == nil {
-		t.Fatal("Consumer config should not be nil")
-	}
-
-	if config.Consumer.DeliverPolicy != v1alpha1.NewDeliverPolicy {
-		t.Errorf("Consumer.DeliverPolicy = %v, want %v", config.Consumer.DeliverPolicy, v1alpha1.NewDeliverPolicy)
-	}
-
-	if config.Consumer.ReplayPolicy != v1alpha1.InstantReplayPolicy {
-		t.Errorf("Consumer.ReplayPolicy = %v, want %v", config.Consumer.ReplayPolicy, v1alpha1.InstantReplayPolicy)
-	}
-
-	if config.Consumer.ConsumerType != v1alpha1.PullConsumerType {
-		t.Errorf("Consumer.ConsumerType = %v, want %v", config.Consumer.ConsumerType, v1alpha1.PullConsumerType)
-	}
 }
 
 func TestLoadDefaultsFromConfigMap(t *testing.T) {
@@ -127,7 +111,7 @@ clusterDefault:
 				},
 			},
 			want: &NatsJetStreamBrokerDefaults{
-				ClusterDefault: &NatsJetStreamBrokerConfig{
+				ClusterDefault: &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{
 					Stream: &v1alpha1.StreamConfig{
 						Replicas: 3,
 					},
@@ -151,7 +135,7 @@ namespaceDefaults:
 				},
 			},
 			want: &NatsJetStreamBrokerDefaults{
-				NamespaceDefaults: map[string]*NatsJetStreamBrokerConfig{
+				NamespaceDefaults: map[string]*eventingv1alpha1.NatsJetStreamBrokerConfigSpec{
 					"production": {
 						Stream: &v1alpha1.StreamConfig{
 							Replicas: 5,
@@ -189,102 +173,12 @@ namespaceDefaults:
 	}
 }
 
-func TestGetConfigFromAnnotation(t *testing.T) {
-	tests := []struct {
-		name        string
-		annotations map[string]string
-		want        *NatsJetStreamBrokerConfig
-		wantErr     bool
-	}{
-		{
-			name:        "nil annotations",
-			annotations: nil,
-			want:        nil,
-		},
-		{
-			name:        "empty annotations",
-			annotations: map[string]string{},
-			want:        nil,
-		},
-		{
-			name: "no broker config annotation",
-			annotations: map[string]string{
-				"some-other-annotation": "value",
-			},
-			want: nil,
-		},
-		{
-			name: "empty broker config annotation",
-			annotations: map[string]string{
-				BrokerConfigAnnotation: "",
-			},
-			want: nil,
-		},
-		{
-			name: "valid broker config annotation",
-			annotations: map[string]string{
-				BrokerConfigAnnotation: `{"stream":{"replicas":3}}`,
-			},
-			want: &NatsJetStreamBrokerConfig{
-				Stream: &v1alpha1.StreamConfig{
-					Replicas: 3,
-				},
-			},
-		},
-		{
-			name: "filter topology spread constraints",
-			annotations: map[string]string{
-				BrokerConfigAnnotation: `{"filter":{"topologySpreadConstraints":[{"maxSkew":1,"minDomains":2,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"DoNotSchedule","labelSelector":{"matchLabels":{"eventing.knative.dev/broker":"example-broker","eventing.knative.dev/role":"filter"}},"matchLabelKeys":["pod-template-hash"]}]}}`,
-			},
-			want: &NatsJetStreamBrokerConfig{
-				Filter: &DeploymentTemplate{
-					TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
-						{
-							MaxSkew:           1,
-							MinDomains:        ptr.To[int32](2),
-							TopologyKey:       corev1.LabelHostname,
-							WhenUnsatisfiable: corev1.DoNotSchedule,
-							LabelSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"eventing.knative.dev/broker": "example-broker",
-									"eventing.knative.dev/role":   "filter",
-								},
-							},
-							MatchLabelKeys: []string{"pod-template-hash"},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "invalid JSON in annotation",
-			annotations: map[string]string{
-				BrokerConfigAnnotation: `{invalid json}`,
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := GetConfigFromAnnotation(tt.annotations)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("GetConfigFromAnnotation() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Errorf("GetConfigFromAnnotation() mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
 func TestGetConfigFromConfigMap(t *testing.T) {
 	tests := []struct {
 		name      string
 		cm        *corev1.ConfigMap
 		namespace string
-		want      *NatsJetStreamBrokerConfig
+		want      *eventingv1alpha1.NatsJetStreamBrokerConfigSpec
 		wantErr   bool
 	}{
 		{
@@ -309,7 +203,7 @@ namespaceDefaults:
 				},
 			},
 			namespace: "production",
-			want: &NatsJetStreamBrokerConfig{
+			want: &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{
 				Stream: &v1alpha1.StreamConfig{
 					Replicas: 5,
 				},
@@ -331,7 +225,7 @@ namespaceDefaults:
 				},
 			},
 			namespace: "staging",
-			want: &NatsJetStreamBrokerConfig{
+			want: &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{
 				Stream: &v1alpha1.StreamConfig{
 					Replicas: 3,
 				},
@@ -368,7 +262,7 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 		name           string
 		streamName     string
 		publishSubject string
-		config         *NatsJetStreamBrokerConfig
+		config         *eventingv1alpha1.NatsJetStreamBrokerConfigSpec
 		wantName       string
 		wantSubjects   []string
 		wantRetention  nats.RetentionPolicy
@@ -390,7 +284,7 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 			name:           "nil stream config uses defaults",
 			streamName:     "TEST_STREAM",
 			publishSubject: "test.subject",
-			config:         &NatsJetStreamBrokerConfig{},
+			config:         &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{},
 			wantName:       "TEST_STREAM",
 			wantSubjects:   []string{"test.subject.>"},
 			wantRetention:  nats.LimitsPolicy,
@@ -401,7 +295,7 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 			name:           "custom stream config",
 			streamName:     "CUSTOM_STREAM",
 			publishSubject: "custom.subject",
-			config: &NatsJetStreamBrokerConfig{
+			config: &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{
 				Stream: &v1alpha1.StreamConfig{
 					Replicas:  3,
 					Storage:   v1alpha1.MemoryStorage,
@@ -418,7 +312,7 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 			name:           "additional subjects",
 			streamName:     "TEST_STREAM",
 			publishSubject: "test.subject",
-			config: &NatsJetStreamBrokerConfig{
+			config: &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{
 				Stream: &v1alpha1.StreamConfig{
 					AdditionalSubjects: []string{"extra.subject.>"},
 				},
@@ -455,72 +349,5 @@ func TestBuildNatsStreamConfig(t *testing.T) {
 				t.Errorf("Replicas = %v, want %v", got.Replicas, tt.wantReplicas)
 			}
 		})
-	}
-}
-
-func TestBrokerConfigAnnotationRoundTrip(t *testing.T) {
-	// Test that we can serialize and deserialize broker config through annotation
-	original := &NatsJetStreamBrokerConfig{
-		Stream: &v1alpha1.StreamConfig{
-			Replicas: 3,
-			Storage:  v1alpha1.MemoryStorage,
-		},
-		Consumer: &v1alpha1.ConsumerConfigTemplate{
-			DeliverPolicy: v1alpha1.AllDeliverPolicy,
-		},
-	}
-
-	// Serialize to JSON
-	data, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("Failed to marshal config: %v", err)
-	}
-
-	// Create annotation map
-	annotations := map[string]string{
-		BrokerConfigAnnotation: string(data),
-	}
-
-	// Deserialize through GetConfigFromAnnotation
-	got, err := GetConfigFromAnnotation(annotations)
-	if err != nil {
-		t.Fatalf("GetConfigFromAnnotation() error = %v", err)
-	}
-
-	if diff := cmp.Diff(original, got); diff != "" {
-		t.Errorf("Round-trip mismatch (-want +got):\n%s", diff)
-	}
-}
-
-func TestDeploymentTemplateDeepCopyTopologySpreadConstraints(t *testing.T) {
-	original := &DeploymentTemplate{
-		TopologySpreadConstraints: []corev1.TopologySpreadConstraint{
-			{
-				MaxSkew:           1,
-				MinDomains:        ptr.To[int32](2),
-				TopologyKey:       corev1.LabelHostname,
-				WhenUnsatisfiable: corev1.DoNotSchedule,
-				LabelSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{"app": "example-filter"},
-				},
-				MatchLabelKeys: []string{"pod-template-hash"},
-			},
-		},
-	}
-
-	got := original.DeepCopy()
-	got.TopologySpreadConstraints[0].LabelSelector.MatchLabels["app"] = "changed"
-	got.TopologySpreadConstraints[0].MatchLabelKeys[0] = "changed"
-	*got.TopologySpreadConstraints[0].MinDomains = 3
-
-	constraint := original.TopologySpreadConstraints[0]
-	if constraint.LabelSelector.MatchLabels["app"] != "example-filter" {
-		t.Error("DeepCopy mutated the original label selector")
-	}
-	if constraint.MatchLabelKeys[0] != "pod-template-hash" {
-		t.Error("DeepCopy mutated the original matchLabelKeys")
-	}
-	if *constraint.MinDomains != 2 {
-		t.Error("DeepCopy mutated the original minDomains")
 	}
 }

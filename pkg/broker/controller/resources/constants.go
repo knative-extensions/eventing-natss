@@ -67,7 +67,7 @@ func FilterLabels(brokerName string) map[string]string {
 // mergeMaps merges two maps, with values from the second map taking precedence.
 // The base map's required labels are preserved.
 func mergeMaps(base, override map[string]string) map[string]string {
-	result := make(map[string]string, len(base)+len(override))
+	result := make(map[string]string)
 	maps.Copy(result, base)
 	maps.Copy(result, override)
 	return result

@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 )
@@ -36,22 +37,18 @@ const (
 	ConfigKey = "config"
 )
 
-// BrokerConfigAnnotation is the annotation key for broker-specific configuration
-const BrokerConfigAnnotation = "natsjetstream.eventing.knative.dev/config"
+// LegacyConfigAnnotation used to carry the per-broker config as inline JSON.
+// It is only recognised to reject brokers that still set it.
+const LegacyConfigAnnotation = "natsjetstream.eventing.knative.dev/config"
 
 // DefaultBrokerConfig returns the default configuration for a broker
-func DefaultBrokerConfig() *NatsJetStreamBrokerConfig {
-	return &NatsJetStreamBrokerConfig{
+func DefaultBrokerConfig() *eventingv1alpha1.NatsJetStreamBrokerConfigSpec {
+	return &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{
 		Stream: &v1alpha1.StreamConfig{
 			Retention: v1alpha1.LimitsRetentionPolicy,
 			Storage:   v1alpha1.FileStorage,
 			Replicas:  1,
 			Discard:   v1alpha1.OldDiscardPolicy,
-		},
-		Consumer: &v1alpha1.ConsumerConfigTemplate{
-			DeliverPolicy: v1alpha1.NewDeliverPolicy,
-			ReplayPolicy:  v1alpha1.InstantReplayPolicy,
-			ConsumerType:  v1alpha1.PullConsumerType,
 		},
 	}
 }
@@ -80,28 +77,9 @@ func LoadDefaultsFromConfigMap(cm *corev1.ConfigMap) (*NatsJetStreamBrokerDefaul
 	return defaults, nil
 }
 
-// GetConfigFromAnnotation extracts broker config from annotations.
-// Returns nil, nil if no annotation is present.
-func GetConfigFromAnnotation(annotations map[string]string) (*NatsJetStreamBrokerConfig, error) {
-	if annotations == nil {
-		return nil, nil
-	}
-
-	configJSON, ok := annotations[BrokerConfigAnnotation]
-	if !ok || configJSON == "" {
-		return nil, nil
-	}
-
-	brokerConfig := &NatsJetStreamBrokerConfig{}
-	if err := json.Unmarshal([]byte(configJSON), brokerConfig); err != nil {
-		return nil, fmt.Errorf("failed to parse broker config annotation: %w", err)
-	}
-	return brokerConfig, nil
-}
-
 // GetConfigFromConfigMap returns the configuration for a namespace from a ConfigMap.
 // It checks namespace-specific config first, then cluster default, then hardcoded defaults.
-func GetConfigFromConfigMap(cm *corev1.ConfigMap, namespace string) (*NatsJetStreamBrokerConfig, error) {
+func GetConfigFromConfigMap(cm *corev1.ConfigMap, namespace string) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
 	defaults, err := LoadDefaultsFromConfigMap(cm)
 	if err != nil {
 		return nil, err
@@ -125,8 +103,8 @@ func GetConfigFromConfigMap(cm *corev1.ConfigMap, namespace string) (*NatsJetStr
 	return DefaultBrokerConfig(), nil
 }
 
-// BuildNatsStreamConfig converts a NatsJetStreamBrokerConfig to a nats.StreamConfig
-func BuildNatsStreamConfig(streamName, publishSubject string, config *NatsJetStreamBrokerConfig) *nats.StreamConfig {
+// BuildNatsStreamConfig converts a NatsJetStreamBrokerConfigSpec to a nats.StreamConfig
+func BuildNatsStreamConfig(streamName, publishSubject string, config *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) *nats.StreamConfig {
 	streamConfig := &nats.StreamConfig{
 		Name:     streamName,
 		Subjects: []string{publishSubject + ".>"},

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -28,10 +29,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	appsv1listers "k8s.io/client-go/listers/apps/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/ptr"
 
 	"knative.dev/pkg/apis"
@@ -41,11 +44,13 @@ import (
 	"knative.dev/pkg/network"
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/resolver"
+	"knative.dev/pkg/tracker"
 
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 	"knative.dev/eventing-natss/pkg/broker/contract"
 	"knative.dev/eventing-natss/pkg/broker/controller/resources"
@@ -68,6 +73,9 @@ const (
 	DataplaneClusterRoleName = "natsjetstream-broker-dataplane"
 )
 
+// brokerConfigGVK is the kind a Broker's spec.config must reference.
+var brokerConfigGVK = eventingv1alpha1.SchemeGroupVersion.WithKind("NatsJetStreamBrokerConfig")
+
 // Reconciler implements controller.Reconciler for Broker resources.
 type Reconciler struct {
 	kubeClientSet kubernetes.Interface
@@ -79,6 +87,9 @@ type Reconciler struct {
 	// Lister for Triggers, used to decide whether a broker needs a filter
 	triggerLister eventinglisters.TriggerLister
 
+	// Lister for the NatsJetStreamBrokerConfigs referenced by brokers
+	brokerConfigLister cache.GenericLister
+
 	// Contract manager for updating shared ingress configuration
 	contractManager *contract.Manager
 
@@ -87,6 +98,9 @@ type Reconciler struct {
 
 	// URI resolver for resolving the dead letter sink address
 	uriResolver *resolver.URIResolver
+
+	// Tracks the NatsJetStreamBrokerConfigs referenced by brokers.
+	tracker tracker.Interface
 
 	// NATS URL for data plane components
 	natsURL string
@@ -221,7 +235,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 }
 
 // reconcileStream ensures the JetStream stream exists for the broker
-func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName, publishSubject string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
+func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName, publishSubject string, brokerCfg *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
 	// Check if stream exists
@@ -272,22 +286,28 @@ func (r *Reconciler) resolveDeadLetterSink(ctx context.Context, b *eventingv1.Br
 }
 
 // getBrokerConfig loads the broker configuration with the following precedence:
-// 1. Broker-specific config from annotation (if present, use it entirely)
-// 2. Namespace-specific config from ConfigMap (if present, use it entirely)
-// 3. Cluster default config from ConfigMap (if present, use it entirely)
-// 4. Hardcoded defaults
-func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*brokerconfig.NatsJetStreamBrokerConfig, error) {
+//  1. Broker-specific config from the NatsJetStreamBrokerConfig referenced by
+//     spec.config (if present, use it entirely)
+//  2. Namespace-specific config from ConfigMap (if present, use it entirely)
+//  3. Cluster default config from ConfigMap (if present, use it entirely)
+//  4. Hardcoded defaults
+func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
 	logger := logging.FromContext(ctx)
 
-	// Check for broker-specific annotation first (highest priority)
-	if cfg, err := brokerconfig.GetConfigFromAnnotation(b.Annotations); err != nil {
-		return nil, err
-	} else if cfg != nil {
-		logger.Debugw("Using broker-specific config from annotation")
-		return cfg, nil
+	// The config used to be given through an annotation. Ignoring it would
+	// silently fall back to the defaults, so reject it and point at spec.config.
+	if b.Annotations[brokerconfig.LegacyConfigAnnotation] != "" {
+		return nil, fmt.Errorf("annotation %q is no longer supported: create a %s and reference it from the Broker's spec.config",
+			brokerconfig.LegacyConfigAnnotation, brokerConfigGVK.Kind)
 	}
 
-	// No annotation config, try to load from ConfigMap
+	// Knative's defaulting webhook can supply a ConfigMap reference for any
+	// broker class, so a ConfigMap reference is not a NATS config source.
+	if b.Spec.Config != nil && (b.Spec.Config.APIVersion != "v1" || b.Spec.Config.Kind != "ConfigMap") {
+		return r.getReferencedBrokerConfig(ctx, b)
+	}
+
+	// No broker-specific config, try to load namespace/cluster defaults from ConfigMap
 	cm, err := r.kubeClientSet.CoreV1().ConfigMaps(b.Namespace).Get(ctx, brokerconfig.ConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		if !apierrs.IsNotFound(err) {
@@ -302,6 +322,46 @@ func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) 
 
 	// Load and return config from ConfigMap
 	return brokerconfig.GetConfigFromConfigMap(cm, b.Namespace)
+}
+
+// getReferencedBrokerConfig returns a copy of the spec of the
+// NatsJetStreamBrokerConfig that the broker's spec.config points at, and tracks
+// it so that the broker is reconciled again when it changes.
+func (r *Reconciler) getReferencedBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
+	ref := b.Spec.Config
+	if ref.APIVersion != brokerConfigGVK.GroupVersion().String() || ref.Kind != brokerConfigGVK.Kind {
+		return nil, fmt.Errorf("unsupported spec.config %s %q: only %s %s is supported",
+			ref.Kind, ref.APIVersion, brokerConfigGVK.Kind, brokerConfigGVK.GroupVersion())
+	}
+	namespace := ref.Namespace
+	if namespace == "" {
+		namespace = b.Namespace
+	}
+	if err := r.tracker.TrackReference(tracker.Reference{
+		APIVersion: ref.APIVersion,
+		Kind:       ref.Kind,
+		Namespace:  namespace,
+		Name:       ref.Name,
+	}, b); err != nil {
+		return nil, fmt.Errorf("failed to track %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
+	}
+	obj, err := r.brokerConfigLister.ByNamespace(namespace).Get(ref.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
+	}
+	// Decode only this broker's configuration. A malformed or older CR must not
+	// prevent the shared informer from syncing configurations for other brokers.
+	data, err := json.Marshal(obj.(*unstructured.Unstructured).Object["spec"])
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
+	}
+	var cfg eventingv1alpha1.NatsJetStreamBrokerConfigSpec
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("invalid %s %s/%s: %w", ref.Kind, namespace, ref.Name, err)
+	}
+	logging.FromContext(ctx).Debugw("Using broker-specific config from "+ref.Kind,
+		zap.String("namespace", namespace), zap.String("name", ref.Name))
+	return &cfg, nil
 }
 
 // propagateIngressAvailability checks if the shared ingress deployment is available
@@ -355,11 +415,11 @@ func (r *Reconciler) propagateFilterAvailability(ctx context.Context, b *eventin
 }
 
 // reconcileFilterDeployment ensures the filter deployment exists
-func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
+func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
 	// Get filter deployment template if configured
-	var filterTemplate *brokerconfig.DeploymentTemplate
+	var filterTemplate *eventingv1alpha1.DeploymentTemplate
 	if brokerCfg != nil {
 		filterTemplate = brokerCfg.Filter
 	}

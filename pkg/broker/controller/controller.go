@@ -30,6 +30,7 @@ import (
 	"knative.dev/pkg/logging"
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/resolver"
+	"knative.dev/pkg/tracker"
 
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/eventing/pkg/client/injection/reconciler/eventing/v1/broker"
@@ -118,6 +119,7 @@ func NewController(
 	deploymentInformer := deploymentinformer.Get(ctx)
 	serviceInformer := serviceinformer.Get(ctx)
 	configMapInformer := configmapinformer.Get(ctx)
+	brokerConfigInformer := ctx.Value(brokerConfigInformerKey{}).(cache.SharedIndexInformer)
 
 	// Create contract manager for shared ingress
 	contractManager := contract.NewManager(
@@ -132,6 +134,8 @@ func NewController(
 		deploymentLister: deploymentInformer.Lister(),
 		serviceLister:    serviceInformer.Lister(),
 		triggerLister:    triggerInformer.Lister(),
+
+		brokerConfigLister: cache.NewGenericLister(brokerConfigInformer.GetIndexer(), brokerConfigGVK.GroupVersion().WithResource("natsjetstreambrokerconfigs").GroupResource()),
 
 		contractManager: contractManager,
 
@@ -148,6 +152,7 @@ func NewController(
 
 	// Create controller implementation
 	impl := broker.NewImpl(ctx, r, constants.BrokerClassName)
+	r.tracker = impl.Tracker
 
 	// Create URI resolver for resolving the dead letter sink address
 	r.uriResolver = resolver.NewURIResolverFromTracker(ctx, impl.Tracker)
@@ -157,6 +162,9 @@ func NewController(
 		FilterFunc: pkgreconciler.AnnotationFilterFunc(broker.ClassAnnotationKey, constants.BrokerClassName, false /*allowUnset*/),
 		Handler:    controller.HandleAll(impl.Enqueue),
 	})
+
+	// Reconcile brokers when their referenced configuration changes.
+	brokerConfigInformer.AddEventHandler(controller.HandleAll(enqueueBrokersOfBrokerConfig(impl.Tracker)))
 
 	// Watch deployments owned by brokers (for filter deployments)
 	deploymentInformer.Informer().AddEventHandler(cache.FilteringResourceEventHandler{
@@ -177,6 +185,13 @@ func NewController(
 	logger.Info("NATS JetStream Broker controller initialized")
 
 	return impl
+}
+
+// enqueueBrokersOfBrokerConfig returns a handler that enqueues the brokers
+// tracking a changed NatsJetStreamBrokerConfig. The tracker matches references
+// by TypeMeta, so it is supplied here. Handles delete tombstones.
+func enqueueBrokersOfBrokerConfig(t tracker.Interface) controller.Callback {
+	return controller.EnsureTypeMeta(t.OnChanged, brokerConfigGVK)
 }
 
 // enqueueBrokerOfTrigger returns a handler that enqueues the broker referenced

@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nats-io/nats.go"
@@ -26,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -38,12 +40,17 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	"go.uber.org/zap"
+	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/controller"
 	"knative.dev/pkg/logging"
+	reconcilertesting "knative.dev/pkg/reconciler/testing"
 
+	eventingconfig "knative.dev/eventing/pkg/apis/config"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
+	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 	"knative.dev/eventing-natss/pkg/broker/contract"
 	"knative.dev/eventing-natss/pkg/broker/controller/resources"
@@ -210,21 +217,131 @@ func TestReconcileDataplaneRBAC(t *testing.T) {
 	}
 }
 
+func testBrokerConfig(ns, name string, streamReplicas int) *eventingv1alpha1.NatsJetStreamBrokerConfig {
+	return &eventingv1alpha1.NatsJetStreamBrokerConfig{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name},
+		Spec: eventingv1alpha1.NatsJetStreamBrokerConfigSpec{
+			Stream: &messagingv1alpha1.StreamConfig{Replicas: streamReplicas},
+		},
+	}
+}
+
+func testBrokerConfigRef(ns, name string) *duckv1.KReference {
+	return &duckv1.KReference{
+		APIVersion: brokerConfigGVK.GroupVersion().String(),
+		Kind:       brokerConfigGVK.Kind,
+		Namespace:  ns,
+		Name:       name,
+	}
+}
+
+func newBrokerConfigLister(objs ...*eventingv1alpha1.NatsJetStreamBrokerConfig) cache.GenericLister {
+	idx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	for _, o := range objs {
+		obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(o)
+		if err != nil {
+			panic(err)
+		}
+		_ = idx.Add(&unstructured.Unstructured{Object: obj})
+	}
+	return cache.NewGenericLister(idx, brokerConfigGVK.GroupVersion().WithResource("natsjetstreambrokerconfigs").GroupResource())
+}
+
+// newBrokerConfigReconciler returns a Reconciler that resolves spec.config
+// references against the given NatsJetStreamBrokerConfigs.
+func newBrokerConfigReconciler(cfgs ...*eventingv1alpha1.NatsJetStreamBrokerConfig) *Reconciler {
+	return &Reconciler{
+		kubeClientSet:      kubefake.NewSimpleClientset(),
+		brokerConfigLister: newBrokerConfigLister(cfgs...),
+		tracker:            &reconcilertesting.FakeTracker{},
+	}
+}
+
 func TestGetBrokerConfig(t *testing.T) {
 	ctx := testContext()
 
-	t.Run("from broker annotation", func(t *testing.T) {
-		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset()}
-		b := testBroker(testNamespace, testBrokerName)
-		b.Annotations = map[string]string{brokerconfig.BrokerConfigAnnotation: `{"stream":{"replicas":3}}`}
-		cfg, err := r.getBrokerConfig(ctx, b)
-		if err != nil {
-			t.Fatalf("getBrokerConfig() error: %v", err)
-		}
-		if cfg.Stream == nil || cfg.Stream.Replicas != 3 {
-			t.Errorf("Stream.Replicas = %+v, want 3", cfg.Stream)
-		}
-	})
+	defaultsCM := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: brokerconfig.ConfigMapName, Namespace: testNamespace},
+		Data:       map[string]string{brokerconfig.ConfigKey: `{"clusterDefault":{"stream":{"replicas":5}}}`},
+	}
+
+	for _, tt := range []struct {
+		name         string
+		refNamespace string
+		defaults     *corev1.ConfigMap
+	}{
+		{name: "from NatsJetStreamBrokerConfig referenced by spec.config", refNamespace: testNamespace},
+		{name: "spec.config namespace defaults to the broker's namespace", refNamespace: ""},
+		{name: "spec.config takes precedence over the namespace default ConfigMap", refNamespace: testNamespace, defaults: defaultsCM},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newBrokerConfigReconciler(testBrokerConfig(testNamespace, "my-broker-cfg", 3))
+			if tt.defaults != nil {
+				r.kubeClientSet = kubefake.NewSimpleClientset(tt.defaults)
+			}
+			b := testBroker(testNamespace, testBrokerName)
+			b.Spec.Config = testBrokerConfigRef(tt.refNamespace, "my-broker-cfg")
+			cfg, err := r.getBrokerConfig(ctx, b)
+			if err != nil {
+				t.Fatalf("getBrokerConfig() error: %v", err)
+			}
+			if cfg.Stream == nil || cfg.Stream.Replicas != 3 {
+				t.Errorf("Stream.Replicas = %+v, want 3", cfg.Stream)
+			}
+		})
+	}
+
+	for _, tt := range []struct {
+		name      string
+		configure func(b *eventingv1.Broker)
+		wantErr   []string
+	}{
+		{
+			name: "spec.config names a missing NatsJetStreamBrokerConfig",
+			configure: func(b *eventingv1.Broker) {
+				b.Spec.Config = testBrokerConfigRef(testNamespace, "does-not-exist")
+			},
+			wantErr: []string{"does-not-exist"},
+		},
+		{
+			name: "unsupported spec.config kind",
+			configure: func(b *eventingv1.Broker) {
+				b.Spec.Config = &duckv1.KReference{APIVersion: "v1", Kind: "Secret", Namespace: testNamespace, Name: "my-broker-cfg"}
+			},
+			wantErr: []string{"NatsJetStreamBrokerConfig"},
+		},
+		{
+			name: "unsupported spec.config API version",
+			configure: func(b *eventingv1.Broker) {
+				b.Spec.Config = testBrokerConfigRef(testNamespace, "my-broker-cfg")
+				b.Spec.Config.APIVersion = "eventing.knative.dev/v1"
+			},
+			wantErr: []string{"NatsJetStreamBrokerConfig"},
+		},
+		{
+			name: "legacy annotation is rejected with a migration hint",
+			configure: func(b *eventingv1.Broker) {
+				b.Annotations = map[string]string{brokerconfig.LegacyConfigAnnotation: `{"stream":{"replicas":3}}`}
+			},
+			wantErr: []string{brokerconfig.LegacyConfigAnnotation, "spec.config", "NatsJetStreamBrokerConfig"},
+		},
+	} {
+		t.Run(tt.name+" is an error", func(t *testing.T) {
+			r := newBrokerConfigReconciler()
+			r.kubeClientSet = kubefake.NewSimpleClientset(defaultsCM)
+			b := testBroker(testNamespace, testBrokerName)
+			tt.configure(b)
+			_, err := r.getBrokerConfig(ctx, b)
+			if err == nil {
+				t.Fatal("getBrokerConfig() expected an error, got nil")
+			}
+			for _, want := range tt.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("getBrokerConfig() error = %q, want it to mention %q", err, want)
+				}
+			}
+		})
+	}
 
 	t.Run("hardcoded defaults when no configmap", func(t *testing.T) {
 		r := &Reconciler{kubeClientSet: kubefake.NewSimpleClientset()}
@@ -237,6 +354,70 @@ func TestGetBrokerConfig(t *testing.T) {
 			t.Errorf("Stream.Replicas = %d, want 1 (default)", cfg.Stream.Replicas)
 		}
 	})
+}
+
+func TestGetBrokerConfigAfterWebhookDefaulting(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		defaultName  string
+		defaults     string
+		wantReplicas int
+	}{
+		{name: "hardcoded defaults", defaultName: "config-br-default-channel", wantReplicas: 1},
+		{
+			name:         "cluster defaults",
+			defaultName:  "config-br-default-channel",
+			defaults:     `{"clusterDefault":{"stream":{"replicas":5}}}`,
+			wantReplicas: 5,
+		},
+		{
+			name:         "namespace defaults take precedence",
+			defaultName:  "config-br-default-channel",
+			defaults:     `{"clusterDefault":{"stream":{"replicas":5}},"namespaceDefaults":{"test-ns":{"stream":{"replicas":3}}}}`,
+			wantReplicas: 3,
+		},
+		{
+			name:         "custom webhook default ConfigMap is also ignored",
+			defaultName:  "operator-channel-config",
+			defaults:     `{"clusterDefault":{"stream":{"replicas":5}}}`,
+			wantReplicas: 5,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := eventingconfig.ToContext(testContext(), &eventingconfig.Config{
+				Defaults: &eventingconfig.Defaults{
+					ClusterDefaultConfig: &eventingconfig.DefaultConfig{
+						DefaultBrokerClass: "MTChannelBasedBroker",
+						BrokerConfig: &eventingconfig.BrokerConfig{
+							KReference: &duckv1.KReference{
+								APIVersion: "v1", Kind: "ConfigMap", Namespace: "knative-eventing", Name: tt.defaultName,
+							},
+						},
+					},
+				},
+			})
+			b := testBroker(testNamespace, testBrokerName)
+			b.Annotations = map[string]string{eventingv1.BrokerClassAnnotationKey: "NatsJetStreamBroker"}
+			b.SetDefaults(ctx)
+			if b.Spec.Config == nil || b.Spec.Config.Kind != "ConfigMap" || b.Spec.Config.Name != tt.defaultName {
+				t.Fatalf("webhook did not default spec.config: %+v", b.Spec.Config)
+			}
+			r := newBrokerConfigReconciler()
+			if tt.defaults != "" {
+				r.kubeClientSet = kubefake.NewSimpleClientset(&corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: brokerconfig.ConfigMapName, Namespace: testNamespace},
+					Data:       map[string]string{brokerconfig.ConfigKey: tt.defaults},
+				})
+			}
+			cfg, err := r.getBrokerConfig(ctx, b)
+			if err != nil {
+				t.Fatalf("getBrokerConfig() error: %v", err)
+			}
+			if cfg.Stream == nil || cfg.Stream.Replicas != tt.wantReplicas {
+				t.Errorf("Stream = %+v, want replicas %d", cfg.Stream, tt.wantReplicas)
+			}
+		})
+	}
 }
 
 func TestReconcileStream(t *testing.T) {

@@ -221,29 +221,64 @@ These variables set the **broker-wide defaults** for the filter deployment. All 
 | `CONSUMER_FETCH_TIMEOUT` | How long a fetch waits for messages before returning empty | `200ms` |
 | `CONSUMER_MAX_CONCURRENCY` | Maximum concurrent in-flight HTTP dispatches per trigger | `20` |
 
-### Configuring Consumer Fetch via Broker Annotation
+### Configuring a Broker with a NatsJetStreamBrokerConfig
 
-Set broker-wide defaults for all triggers using the `natsjetstream.eventing.knative.dev/config` annotation. These are injected as environment variables into the filter deployment.
+To configure a Broker, create a `NatsJetStreamBrokerConfig` resource and
+reference it from the Broker's `spec.config`.
+Its `spec` covers the JetStream `stream` settings and the `filter` deployment,
+whose `env` entries become environment variables on the filter.
 
 ```yaml
+apiVersion: eventing.knative.dev/v1alpha1
+kind: NatsJetStreamBrokerConfig
+metadata:
+  name: my-broker-config
+  namespace: default
+spec:
+  filter:
+    replicas: 2
+    env:
+      - name: CONSUMER_FETCH_BATCH_SIZE
+        value: "50"
+      - name: CONSUMER_FETCH_TIMEOUT
+        value: "1s"
+      - name: CONSUMER_MAX_CONCURRENCY
+        value: "40"
+  stream:
+    replicas: 3
+---
 apiVersion: eventing.knative.dev/v1
 kind: Broker
 metadata:
   name: my-broker
+  namespace: default
   annotations:
     eventing.knative.dev/broker.class: NatsJetStreamBroker
-    natsjetstream.eventing.knative.dev/config: |
-      {
-        "filter": {
-          "replicas": 2,
-          "env": [
-            {"name": "CONSUMER_FETCH_BATCH_SIZE", "value": "50"},
-            {"name": "CONSUMER_FETCH_TIMEOUT", "value": "1s"},
-            {"name": "CONSUMER_MAX_CONCURRENCY", "value": "40"}
-          ]
-        }
-      }
+spec:
+  config:
+    apiVersion: eventing.knative.dev/v1alpha1
+    kind: NatsJetStreamBrokerConfig
+    name: my-broker-config
 ```
+
+`spec.config.namespace` defaults to the Broker's namespace. Knative Eventing
+prevents changing `spec.config` after the Broker is created; the referenced
+`NatsJetStreamBrokerConfig` itself can be updated.
+
+For an existing Broker using the inline JSON annotation, follow
+[Migrating Broker configuration](broker-config-migration.md) to change the
+reference while retaining the Broker and its JetStream stream.
+
+| Broker configuration | Configuration used |
+|----------------------|--------------------|
+| `spec.config` references a `NatsJetStreamBrokerConfig` | That resource's entire `spec`; defaults are not merged into it |
+| `spec.config` is omitted or references a `v1/ConfigMap` | The Broker namespace's `natsjetstream-broker-config` ConfigMap: matching `namespaceDefaults`, then `clusterDefault`, then built-in defaults |
+| `spec.config` references another kind or API version | `ConfigLoadFailed` |
+| The referenced `NatsJetStreamBrokerConfig` does not exist | `ConfigLoadFailed` |
+| The `natsjetstream.eventing.knative.dev/config` annotation is non-empty | `ConfigLoadFailed`; the annotation is no longer supported |
+
+`stream` settings are used only when the JetStream stream is first created;
+changing them does not update an existing stream.
 
 ### Per-Trigger Configuration
 
