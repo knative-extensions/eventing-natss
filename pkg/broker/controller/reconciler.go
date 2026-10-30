@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -341,21 +342,30 @@ func (r *Reconciler) propagateFilterAvailability(ctx context.Context, b *eventin
 // filterMetadataAnnotation holds a filterDeploymentMetadata as JSON.
 const filterMetadataAnnotation = "natsjetstream.eventing.knative.dev/filter-deployment-metadata"
 
-// filterDeploymentMetadata lists the label and annotation keys the controller
-// applied to the filter Deployment, so that keys later removed from the desired
-// state can be pruned without touching metadata set by other controllers.
+// filterDeploymentMetadata records what the controller applied to the filter
+// Deployment: the label and annotation keys, so removed keys can be pruned
+// without touching metadata set by other controllers, and a hash of the Spec.
 type filterDeploymentMetadata struct {
 	Labels      []string `json:"labels,omitempty"`
 	Annotations []string `json:"annotations,omitempty"`
+
+	// SpecHash detects fields removed from the configuration, which comparing
+	// Specs cannot see.
+	SpecHash string `json:"specHash,omitempty"`
 }
 
-// trackFilterMetadata records d's current label and annotation keys in the
-// filterMetadataAnnotation annotation. It must be called on the Deployment as
-// built from the configuration, before any other controller adds metadata.
+// trackFilterMetadata records d's label and annotation keys and Spec hash in
+// filterMetadataAnnotation. Call it on d as built, before anything else adds
+// metadata.
 func trackFilterMetadata(d *appsv1.Deployment) error {
+	spec, err := json.Marshal(d.Spec)
+	if err != nil {
+		return fmt.Errorf("failed to encode filter deployment spec: %w", err)
+	}
 	data, err := json.Marshal(filterDeploymentMetadata{
 		Labels:      slices.Sorted(maps.Keys(d.Labels)),
 		Annotations: slices.Sorted(maps.Keys(d.Annotations)),
+		SpecHash:    fmt.Sprintf("%x", sha256.Sum256(spec)),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to encode filter deployment metadata keys: %w", err)
@@ -424,10 +434,8 @@ func (r *Reconciler) createFilterDeployment(ctx context.Context, b *eventingv1.B
 	return nil
 }
 
-// updateFilterDeployment brings existing in line with expected. Label and
-// annotation keys the controller applied earlier are replaced wholesale;
-// metadata added by other controllers, such as the Deployment revision
-// annotation, is preserved.
+// updateFilterDeployment updates existing if it differs from expected. Metadata
+// added by other controllers, such as the revision annotation, is kept.
 func (r *Reconciler) updateFilterDeployment(ctx context.Context, b *eventingv1.Broker, existing, expected *appsv1.Deployment) pkgreconciler.Event {
 	tracked, err := trackedFilterMetadata(existing)
 	if err != nil {
@@ -435,14 +443,22 @@ func (r *Reconciler) updateFilterDeployment(ctx context.Context, b *eventingv1.B
 		return fmt.Errorf("failed to decode filter deployment metadata keys: %w", err)
 	}
 
-	toUpdate := existing.DeepCopy()
-	toUpdate.Labels = kmap.Union(kmap.ExcludeKeyList(existing.Labels, tracked.Labels), expected.Labels)
-	toUpdate.Annotations = kmap.Union(kmap.ExcludeKeyList(existing.Annotations, tracked.Annotations), expected.Annotations)
-	toUpdate.Spec = expected.Spec
-	if equality.Semantic.DeepEqual(existing, toUpdate) {
+	labels := kmap.Union(kmap.ExcludeKeyList(existing.Labels, tracked.Labels), expected.Labels)
+	annotations := kmap.Union(kmap.ExcludeKeyList(existing.Annotations, tracked.Annotations), expected.Annotations)
+
+	// The API server defaults the fields expected leaves unset, so compare Specs
+	// with DeepDerivative. A field removed from the configuration shows up as a
+	// changed spec hash in the annotations instead.
+	if equality.Semantic.DeepEqual(existing.Labels, labels) &&
+		equality.Semantic.DeepEqual(existing.Annotations, annotations) &&
+		equality.Semantic.DeepDerivative(expected.Spec, existing.Spec) {
 		return nil
 	}
 
+	toUpdate := existing.DeepCopy()
+	toUpdate.Labels = labels
+	toUpdate.Annotations = annotations
+	toUpdate.Spec = expected.Spec
 	if _, err := r.kubeClientSet.AppsV1().Deployments(b.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{}); err != nil {
 		return r.failFilterDeployment(ctx, b, "update", err)
 	}
@@ -485,7 +501,8 @@ func (r *Reconciler) reconcileFilterService(ctx context.Context, b *eventingv1.B
 	// Update ClusterIP from existing service (immutable field)
 	expected.Spec.ClusterIP = existing.Spec.ClusterIP
 
-	if !equality.Semantic.DeepEqual(expected.Spec, existing.Spec) {
+	// The API server defaults the fields expected leaves unset.
+	if !equality.Semantic.DeepDerivative(expected.Spec, existing.Spec) {
 		toUpdate := existing.DeepCopy()
 		toUpdate.Spec = expected.Spec
 		svc, err := r.kubeClientSet.CoreV1().Services(b.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})

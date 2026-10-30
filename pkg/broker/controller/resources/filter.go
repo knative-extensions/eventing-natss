@@ -138,26 +138,8 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 									Protocol:      corev1.ProtocolTCP,
 								},
 							},
-							LivenessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/health",
-										Port: intstr.FromInt(FilterPortNumber),
-									},
-								},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       10,
-							},
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									HTTPGet: &corev1.HTTPGetAction{
-										Path: "/readiness",
-										Port: intstr.FromInt(FilterPortNumber),
-									},
-								},
-								InitialDelaySeconds: 5,
-								PeriodSeconds:       10,
-							},
+							LivenessProbe:  httpProbe("/health"),
+							ReadinessProbe: httpProbe("/readiness"),
 						},
 					},
 				},
@@ -246,4 +228,23 @@ func makeFilterEnv(args *FilterArgs) []corev1.EnvVar {
 	}
 
 	return env
+}
+
+// httpProbe returns an HTTP GET probe on the filter port. The timeout and
+// thresholds are the API server defaults, set explicitly because DeepDerivative
+// does not treat a zero number as unset.
+func httpProbe(path string) *corev1.Probe {
+	return &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path: path,
+				Port: intstr.FromInt(FilterPortNumber),
+			},
+		},
+		InitialDelaySeconds: 5,
+		PeriodSeconds:       10,
+		TimeoutSeconds:      1,
+		SuccessThreshold:    1,
+		FailureThreshold:    3,
+	}
 }
