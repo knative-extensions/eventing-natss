@@ -18,9 +18,11 @@ package filter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -865,7 +867,7 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 		t.Fatalf("create process histogram: %v", err)
 	}
 
-	cm := &ConsumerManager{
+	cm := withLifecycleState(&ConsumerManager{
 		logger:                logging.FromContext(ctx),
 		ctx:                   ctx,
 		js:                    js,
@@ -877,8 +879,7 @@ func TestObservability_SpanAndMetricsEmitted(t *testing.T) {
 		tracer:                tracer,
 		dispatchDuration:      dispatchDuration,
 		processDuration:       processDuration,
-		subscriptions:         make(map[string]*TriggerSubscription),
-	}
+	})
 	defer cm.Close() //nolint:errcheck
 
 	if _, err := meter.Int64ObservableGauge(
@@ -1129,6 +1130,147 @@ func TestSubscribeTrigger_UpdateInPlace(t *testing.T) {
 	cm.Close() //nolint:errcheck
 }
 
+func TestConsumerShutdownPreservesDurableDelivery(t *testing.T) {
+	for _, forced := range []bool{false, true} {
+		name := "natural completion"
+		if forced {
+			name = "deadline cancellation"
+		}
+		t.Run(name, func(t *testing.T) {
+			server := natsTesting.RunBasicJetstreamServer()
+			defer natsTesting.ShutdownJSServerAndRemoveStorage(t, server)
+			conn, js := natsTesting.JsClient(t, server)
+			defer conn.Close()
+			stream, consumer := setupStreamAndConsumer(t, js, "namespace-a", "broker-a", "drain-trigger-uid")
+			info, err := js.ConsumerInfo(stream, consumer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := info.Config
+			// Redelivery to the replacement below waits out AckWait.
+			config.AckWait = time.Second
+			if _, err := js.UpdateConsumer(stream, &config); err != nil {
+				t.Fatal(err)
+			}
+			entered, release := make(chan struct{}), make(chan struct{})
+			subscriber := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				close(entered)
+				select {
+				case <-release:
+					w.WriteHeader(http.StatusOK)
+				case <-r.Context().Done():
+				}
+			}))
+			defer subscriber.Close()
+			defer close(release)
+			cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{FetchBatchSize: 1, FetchTimeout: 20 * time.Millisecond})
+			defer cm.Close()
+			uri, _ := apis.ParseURL(subscriber.URL)
+			trigger := makeTriggerWithUID("namespace-a", "trigger-a", "broker-a", "drain-trigger-uid")
+			if err := cm.SubscribeTrigger(trigger, makeTestBrokerForNats("namespace-a", "broker-a"), duckv1.Addressable{URL: uri}, nil, nil, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			publishStructuredCE(t, js, brokerutils.BrokerPublishSubjectName("namespace-a", "broker-a"), "drain-event")
+			receiveWithin(t, entered, "subscriber was not called")
+			timeout := 300 * time.Millisecond
+			if !forced {
+				timeout = 6 * time.Second
+				go func() { <-cm.shutdownStarted; release <- struct{}{} }()
+			}
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+			if err := cm.Shutdown(shutdownCtx); err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.Flush(); err != nil {
+				t.Fatal(err)
+			}
+			info, err = js.ConsumerInfo(stream, consumer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !forced {
+				if info.NumAckPending != 0 || info.AckFloor.Consumer != 1 {
+					t.Fatalf("completed delivery was not acknowledged: %+v", info)
+				}
+				return
+			}
+			if info.NumAckPending != 1 || info.AckFloor.Consumer != 0 {
+				t.Fatalf("canceled delivery was discarded: %+v", info)
+			}
+			// A replacement replica can receive the same event from the durable consumer.
+			if delivered := ackRedelivery(t, js, config.FilterSubject, stream, consumer, 3*time.Second); delivered < 2 {
+				t.Fatal("event was not redelivered")
+			}
+		})
+	}
+}
+
+// TestConsumerShutdownDispatchesInProgressFetch verifies that graceful
+// shutdown lets an in-progress pull request finish and dispatches what it
+// returns. An interrupted request would stay open on the server until
+// Unsubscribe, stranding anything delivered into it until AckWait.
+func TestConsumerShutdownDispatchesInProgressFetch(t *testing.T) {
+	server := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, server)
+	conn, js := natsTesting.JsClient(t, server)
+	defer conn.Close()
+	stream, consumer := setupStreamAndConsumer(t, js, "namespace-a", "broker-a", "pull-trigger-uid")
+	received := make(chan string, 2)
+	releaseFirst := make(chan struct{})
+	subscriber := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get("Ce-Id")
+		received <- id
+		if id == "first-event" {
+			select {
+			case <-releaseFirst:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer subscriber.Close()
+	cm := newConsumerManagerForTest(t, conn, js, &ConsumerManagerConfig{FetchBatchSize: 1, FetchTimeout: 5 * time.Second})
+	defer cm.Close()
+	uri, _ := apis.ParseURL(subscriber.URL)
+	trigger := makeTriggerWithUID("namespace-a", "trigger-a", "broker-a", "pull-trigger-uid")
+	if err := cm.SubscribeTrigger(trigger, makeTestBrokerForNats("namespace-a", "broker-a"), duckv1.Addressable{URL: uri}, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	subject := brokerutils.BrokerPublishSubjectName("namespace-a", "broker-a")
+	publishStructuredCE(t, js, subject, "first-event")
+	if id := receiveWithin(t, received, "subscriber did not receive the first event"); id != "first-event" {
+		t.Fatalf("first dispatched event = %q, want first-event", id)
+	}
+
+	// The blocked first dispatch keeps shutdown waiting while the loop's next
+	// pull request is open on the server.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- cm.Shutdown(shutdownCtx) }()
+	receiveWithin(t, cm.shutdownStarted, "Shutdown did not start")
+	publishStructuredCE(t, js, subject, "second-event")
+	if id := receiveWithin(t, received, "event delivered into the in-progress Fetch was not dispatched"); id != "second-event" {
+		t.Fatalf("second dispatched event = %q, want second-event", id)
+	}
+	close(releaseFirst)
+	if err := receiveWithin(t, result, "Shutdown did not return"); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	if err := conn.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := js.ConsumerInfo(stream, consumer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.NumAckPending != 0 || info.AckFloor.Consumer != 2 {
+		t.Fatalf("shutdown left a delivered event unacknowledged: %+v", info)
+	}
+}
+
 // interruptedPullSubscription reproduces a Fetch interrupted mid-batch: it
 // returns the messages its first real Fetch received only after the caller's
 // context ends, leaving another pull request open on the server meanwhile.
@@ -1235,4 +1377,108 @@ func ackRedelivery(t *testing.T, js nats.JetStreamContext, subject, stream, cons
 		t.Fatal(err)
 	}
 	return metadata.NumDelivered
+}
+
+type delayedPullJetStream struct {
+	nats.JetStreamContext
+	created chan *nats.Subscription
+	release <-chan struct{}
+}
+
+func (js *delayedPullJetStream) PullSubscribe(subject, durable string, opts ...nats.SubOpt) (*nats.Subscription, error) {
+	sub, err := js.JetStreamContext.PullSubscribe(subject, durable, opts...)
+	if err != nil {
+		return nil, err
+	}
+	js.created <- sub
+	<-js.release
+	return sub, nil
+}
+
+func TestRuntimeShutdownDuringSubscriptionConstruction(t *testing.T) {
+	server := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, server)
+	conn, js := natsTesting.JsClient(t, server)
+	defer conn.Close()
+	stream, consumer := setupStreamAndConsumer(t, js, "default", "broker", "uid")
+	release := make(chan struct{})
+	closeRelease := sync.OnceFunc(func() { close(release) })
+	defer closeRelease()
+	delayedJS := &delayedPullJetStream{JetStreamContext: js, created: make(chan *nats.Subscription, 1), release: release}
+	manager := newConsumerManagerForTest(t, conn, delayedJS, nil)
+	trigger := makeTriggerWithUID("default", "trigger", "broker", "uid")
+	uri, _ := apis.ParseURL("http://localhost:9999")
+	subscribeResult := make(chan error, 1)
+	go func() {
+		subscribeResult <- manager.SubscribeTrigger(trigger, makeTestBrokerForNats("default", "broker"), duckv1.Addressable{URL: uri}, nil, nil, nil, nil)
+	}()
+	sub := receiveWithin(t, delayedJS.created, "pull subscription construction did not reach the blocked handoff")
+
+	shutdownRuntimePastDeadline(t, manager, conn, time.Second)
+	if !conn.IsClosed() {
+		t.Fatal("NATS connection remained open while subscription construction was blocked")
+	}
+	closeRelease()
+	if err := receiveWithin(t, subscribeResult, "late subscription was not released after shutdown"); !errors.Is(err, ErrConsumerManagerClosed) {
+		t.Fatalf("late SubscribeTrigger() error = %v, want manager closed", err)
+	}
+	waitForConsumerCleanup(t, manager)
+	if sub.IsValid() {
+		t.Fatal("late pull subscription remained valid after shutdown")
+	}
+
+	// Closing a late local subscription must preserve the durable consumer.
+	replacementConn, replacementJS := natsTesting.JsClient(t, server)
+	defer replacementConn.Close()
+	if _, err := replacementJS.ConsumerInfo(stream, consumer); err != nil {
+		t.Fatalf("durable consumer was lost during late subscription cleanup: %v", err)
+	}
+}
+
+func TestConcurrentTriggerSubscriptionLifecycle(t *testing.T) {
+	server := natsTesting.RunBasicJetstreamServer()
+	defer natsTesting.ShutdownJSServerAndRemoveStorage(t, server)
+	conn, js := natsTesting.JsClient(t, server)
+	defer conn.Close()
+	setupStreamAndConsumer(t, js, "default", "broker", "uid")
+	manager := newConsumerManagerForTest(t, conn, js, nil)
+	defer manager.Close()
+	trigger := makeTriggerWithUID("default", "trigger", "broker", "uid")
+	broker := makeTestBrokerForNats("default", "broker")
+	uri, _ := apis.ParseURL("http://localhost:9999")
+	subscriber := duckv1.Addressable{URL: uri}
+	initialSubscriptions := conn.NumSubscriptions()
+
+	const callers = 10
+	start := make(chan struct{})
+	results := make(chan error, callers)
+	for range callers {
+		go func() {
+			<-start
+			if err := manager.SubscribeTrigger(trigger, broker, subscriber, nil, nil, nil, nil); err != nil {
+				results <- err
+				return
+			}
+			results <- manager.UnsubscribeTrigger("uid")
+		}()
+	}
+	close(start)
+	for range callers {
+		if err := receiveWithin(t, results, "concurrent trigger lifecycle did not finish"); err != nil {
+			t.Fatalf("concurrent trigger lifecycle failed: %v", err)
+		}
+	}
+	if err := manager.SubscribeTrigger(trigger, broker, subscriber, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := conn.NumSubscriptions(); got != initialSubscriptions+1 {
+		t.Fatalf("NATS subscriptions = %d, want %d; concurrent replacement leaked a subscription", got, initialSubscriptions+1)
+	}
+	if err := manager.UnsubscribeTrigger("uid"); err != nil {
+		t.Fatal(err)
+	}
+	waitForConsumerCleanup(t, manager)
+	if got := conn.NumSubscriptions(); got != initialSubscriptions {
+		t.Fatalf("NATS subscriptions after deletion = %d, want %d", got, initialSubscriptions)
+	}
 }
