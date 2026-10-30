@@ -16,8 +16,6 @@ limitations under the License.
 
 package resources
 
-import "maps"
-
 const (
 	// BrokerLabelKey is the label key for broker resources
 	BrokerLabelKey = "eventing.knative.dev/broker"
@@ -62,12 +60,4 @@ func FilterLabels(brokerName string) map[string]string {
 		BrokerLabelKey: brokerName,
 		RoleLabelKey:   FilterRoleLabelValue,
 	}
-}
-
-// mergeMaps merges two maps, with values from the second map taking precedence.
-func mergeMaps(base, override map[string]string) map[string]string {
-	result := make(map[string]string, max(len(base), len(override)))
-	maps.Copy(result, base)
-	maps.Copy(result, override)
-	return result
 }

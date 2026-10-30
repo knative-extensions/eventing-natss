@@ -21,6 +21,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"knative.dev/pkg/kmap"
 	"knative.dev/pkg/kmeta"
 	"knative.dev/pkg/system"
 
@@ -76,13 +77,13 @@ func MakeFilterDeployment(args *FilterArgs) *appsv1.Deployment {
 			deploymentAnnotations = args.Template.Annotations
 		}
 		if args.Template.Labels != nil {
-			deploymentLabels = mergeMaps(args.Template.Labels, labels)
+			deploymentLabels = kmap.Union(args.Template.Labels, labels)
 		}
 		if args.Template.PodAnnotations != nil {
 			podAnnotations = args.Template.PodAnnotations
 		}
 		if args.Template.PodLabels != nil {
-			podLabels = mergeMaps(args.Template.PodLabels, labels)
+			podLabels = kmap.Union(args.Template.PodLabels, labels)
 		}
 		if args.Template.NodeSelector != nil {
 			nodeSelector = args.Template.NodeSelector
