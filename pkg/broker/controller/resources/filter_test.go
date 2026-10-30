@@ -23,10 +23,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	"knative.dev/pkg/ptr"
 
-	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
 )
 
 func TestMakeFilterDeployment(t *testing.T) {
@@ -66,6 +67,27 @@ func TestMakeFilterDeployment(t *testing.T) {
 			},
 		},
 		{
+			name: "deployment with zero replicas",
+			args: &FilterArgs{
+				Broker:             broker,
+				Image:              "gcr.io/test/filter:latest",
+				ServiceAccountName: "test-sa",
+				StreamName:         "TEST_STREAM",
+				NatsURL:            "nats://nats:4222",
+				Template: &eventingv1alpha1.DeploymentTemplate{
+					Replicas: ptr.Int32(0),
+				},
+			},
+			wantName:      "test-broker-broker-filter",
+			wantNamespace: "test-namespace",
+			wantReplicas:  0,
+			wantImage:     "gcr.io/test/filter:latest",
+			wantLabels: map[string]string{
+				BrokerLabelKey: "test-broker",
+				RoleLabelKey:   FilterRoleLabelValue,
+			},
+		},
+		{
 			name: "deployment with template",
 			args: &FilterArgs{
 				Broker:             broker,
@@ -73,7 +95,7 @@ func TestMakeFilterDeployment(t *testing.T) {
 				ServiceAccountName: "test-sa",
 				StreamName:         "TEST_STREAM",
 				NatsURL:            "nats://nats:4222",
-				Template: &brokerconfig.DeploymentTemplate{
+				Template: &eventingv1alpha1.DeploymentTemplate{
 					Replicas: ptr.Int32(5),
 					Labels: map[string]string{
 						"custom": "label",
@@ -101,7 +123,7 @@ func TestMakeFilterDeployment(t *testing.T) {
 				ServiceAccountName: "test-sa",
 				StreamName:         "TEST_STREAM",
 				NatsURL:            "nats://nats:4222",
-				Template: &brokerconfig.DeploymentTemplate{
+				Template: &eventingv1alpha1.DeploymentTemplate{
 					PodLabels: map[string]string{
 						"pod-label": "value",
 					},
@@ -178,6 +200,42 @@ func TestMakeFilterDeployment(t *testing.T) {
 	}
 }
 
+func TestMakeFilterDeploymentPreservesSelectorLabels(t *testing.T) {
+	broker := &eventingv1.Broker{ObjectMeta: metav1.ObjectMeta{Name: "test-broker", Namespace: "test-namespace"}}
+	template := &eventingv1alpha1.DeploymentTemplate{
+		Labels: map[string]string{
+			BrokerLabelKey: "another-broker",
+			RoleLabelKey:   "custom",
+			"deployment":   "custom",
+		},
+		PodLabels: map[string]string{
+			BrokerLabelKey: "another-broker",
+			RoleLabelKey:   "custom",
+			"pod":          "custom",
+		},
+	}
+	before := template.DeepCopy()
+	deployment := MakeFilterDeployment(&FilterArgs{Broker: broker, Template: template})
+	service := MakeFilterService(broker)
+	if !labels.SelectorFromSet(deployment.Spec.Selector.MatchLabels).Matches(labels.Set(deployment.Spec.Template.Labels)) {
+		t.Errorf("Deployment selector %v does not match Pod labels %v", deployment.Spec.Selector.MatchLabels, deployment.Spec.Template.Labels)
+	}
+	if !labels.SelectorFromSet(service.Spec.Selector).Matches(labels.Set(deployment.Spec.Template.Labels)) {
+		t.Errorf("Service selector %v does not match Pod labels %v", service.Spec.Selector, deployment.Spec.Template.Labels)
+	}
+	for key, value := range FilterLabels(broker.Name) {
+		if deployment.Labels[key] != value || deployment.Spec.Template.Labels[key] != value {
+			t.Errorf("required label %q = %q not preserved on Deployment and Pod", key, value)
+		}
+	}
+	if deployment.Labels["deployment"] != "custom" || deployment.Spec.Template.Labels["pod"] != "custom" {
+		t.Error("custom labels were not preserved")
+	}
+	if diff := cmp.Diff(before, template); diff != "" {
+		t.Errorf("input template changed (-want +got):\n%s", diff)
+	}
+}
+
 func TestMakeFilterDeploymentWithResources(t *testing.T) {
 	broker := &eventingv1.Broker{
 		ObjectMeta: metav1.ObjectMeta{
@@ -193,7 +251,7 @@ func TestMakeFilterDeploymentWithResources(t *testing.T) {
 		ServiceAccountName: "test-sa",
 		StreamName:         "TEST_STREAM",
 		NatsURL:            "nats://nats:4222",
-		Template: &brokerconfig.DeploymentTemplate{
+		Template: &eventingv1alpha1.DeploymentTemplate{
 			Resources: corev1.ResourceRequirements{
 				Requests: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("200m"),
@@ -238,7 +296,7 @@ func TestMakeFilterDeploymentWithNodeSelector(t *testing.T) {
 		ServiceAccountName: "test-sa",
 		StreamName:         "TEST_STREAM",
 		NatsURL:            "nats://nats:4222",
-		Template: &brokerconfig.DeploymentTemplate{
+		Template: &eventingv1alpha1.DeploymentTemplate{
 			NodeSelector: map[string]string{
 				"disktype": "ssd",
 			},
@@ -283,7 +341,7 @@ func TestMakeFilterDeploymentWithTopologySpreadConstraints(t *testing.T) {
 		ServiceAccountName: "example-service-account",
 		StreamName:         "EXAMPLE_STREAM",
 		NatsURL:            "nats://nats.example-namespace.svc.cluster.local:4222",
-		Template: &brokerconfig.DeploymentTemplate{
+		Template: &eventingv1alpha1.DeploymentTemplate{
 			TopologySpreadConstraints: want,
 		},
 	})

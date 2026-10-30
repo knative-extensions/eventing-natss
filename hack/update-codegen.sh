@@ -50,7 +50,7 @@ group "Knative Codegen"
 # Knative Injection
 ${KNATIVE_CODEGEN_PKG}/hack/generate-knative.sh "injection" \
   "knative.dev/eventing-natss/pkg/client" "knative.dev/eventing-natss/pkg/apis" \
-  "messaging:v1alpha1" \
+  "messaging:v1alpha1 eventing:v1alpha1" \
   --go-header-file ${REPO_ROOT_DIR}/hack/boilerplate.go.txt
 
 group "Update deps post-codegen"

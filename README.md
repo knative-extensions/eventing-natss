@@ -15,4 +15,7 @@ For complete documentation about Knative Eventing, see the following repos:
 - [Knative docs](https://www.knative.dev/docs/) for an overview of Knative and
   to view user documentation.
 
+For this implementation, see the [NATS JetStream Broker guide](./docs/broker.md)
+and [migration from inline JSON configuration](./docs/broker-config-migration.md).
+
 If you are interested in contributing, see [CONTRIBUTING.md](./CONTRIBUTING.md).

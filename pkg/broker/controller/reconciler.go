@@ -18,11 +18,16 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -32,20 +37,24 @@ import (
 	"k8s.io/client-go/kubernetes"
 	appsv1listers "k8s.io/client-go/listers/apps/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/utils/ptr"
 
 	"knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/controller"
+	"knative.dev/pkg/kmap"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/network"
 	pkgreconciler "knative.dev/pkg/reconciler"
 	"knative.dev/pkg/resolver"
+	"knative.dev/pkg/tracker"
 
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
 	eventingv1 "knative.dev/eventing/pkg/apis/eventing/v1"
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 	"knative.dev/eventing-natss/pkg/broker/contract"
 	"knative.dev/eventing-natss/pkg/broker/controller/resources"
@@ -54,15 +63,18 @@ import (
 
 const (
 	// Event reasons
-	ReasonContractUpdated         = "ContractUpdated"
-	ReasonContractFailed          = "ContractFailed"
-	ReasonFilterDeploymentCreated = "FilterDeploymentCreated"
-	ReasonFilterDeploymentUpdated = "FilterDeploymentUpdated"
-	ReasonFilterDeploymentFailed  = "FilterDeploymentFailed"
-	ReasonFilterServiceCreated    = "FilterServiceCreated"
-	ReasonFilterServiceFailed     = "FilterServiceFailed"
-	ReasonStreamCreated           = "JetStreamStreamCreated"
-	ReasonStreamFailed            = "JetStreamStreamFailed"
+	ReasonContractUpdated                = "ContractUpdated"
+	ReasonContractFailed                 = "ContractFailed"
+	ReasonFilterDeploymentCreated        = "FilterDeploymentCreated"
+	ReasonFilterDeploymentUpdated        = "FilterDeploymentUpdated"
+	ReasonFilterDeploymentFailed         = "FilterDeploymentFailed"
+	ReasonFilterServiceCreated           = "FilterServiceCreated"
+	ReasonFilterServiceFailed            = "FilterServiceFailed"
+	ReasonStreamCreated                  = "JetStreamStreamCreated"
+	ReasonStreamFailed                   = "JetStreamStreamFailed"
+	ReasonLegacyConfigDeprecated         = "LegacyConfigDeprecated"
+	ReasonLegacyDefaultsConfigDeprecated = "LegacyDefaultsConfigDeprecated"
+	ReasonConfigMapReferenceIgnored      = "ConfigMapReferenceIgnored"
 
 	// DataplaneClusterRoleName is the name of the ClusterRole for dataplane components
 	DataplaneClusterRoleName = "natsjetstream-broker-dataplane"
@@ -79,6 +91,9 @@ type Reconciler struct {
 	// Lister for Triggers, used to decide whether a broker needs a filter
 	triggerLister eventinglisters.TriggerLister
 
+	// Lister for the NatsJetStreamBrokerConfigs referenced by brokers
+	brokerConfigLister cache.GenericLister
+
 	// Contract manager for updating shared ingress configuration
 	contractManager *contract.Manager
 
@@ -87,6 +102,9 @@ type Reconciler struct {
 
 	// URI resolver for resolving the dead letter sink address
 	uriResolver *resolver.URIResolver
+
+	// Tracks the NatsJetStreamBrokerConfigs referenced by brokers.
+	tracker tracker.Interface
 
 	// NATS URL for data plane components
 	natsURL string
@@ -221,7 +239,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 }
 
 // reconcileStream ensures the JetStream stream exists for the broker
-func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName, publishSubject string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
+func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName, publishSubject string, brokerCfg *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
 
 	// Check if stream exists
@@ -269,39 +287,6 @@ func (r *Reconciler) resolveDeadLetterSink(ctx context.Context, b *eventingv1.Br
 		}
 	}
 	return r.uriResolver.AddressableFromDestinationV1(ctx, destination, b)
-}
-
-// getBrokerConfig loads the broker configuration with the following precedence:
-// 1. Broker-specific config from annotation (if present, use it entirely)
-// 2. Namespace-specific config from ConfigMap (if present, use it entirely)
-// 3. Cluster default config from ConfigMap (if present, use it entirely)
-// 4. Hardcoded defaults
-func (r *Reconciler) getBrokerConfig(ctx context.Context, b *eventingv1.Broker) (*brokerconfig.NatsJetStreamBrokerConfig, error) {
-	logger := logging.FromContext(ctx)
-
-	// Check for broker-specific annotation first (highest priority)
-	if cfg, err := brokerconfig.GetConfigFromAnnotation(b.Annotations); err != nil {
-		return nil, err
-	} else if cfg != nil {
-		logger.Debugw("Using broker-specific config from annotation")
-		return cfg, nil
-	}
-
-	// No annotation config, try to load from ConfigMap
-	cm, err := r.kubeClientSet.CoreV1().ConfigMaps(b.Namespace).Get(ctx, brokerconfig.ConfigMapName, metav1.GetOptions{})
-	if err != nil {
-		if !apierrs.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to get config map: %w", err)
-		}
-		// ConfigMap not found, use hardcoded defaults
-		logger.Debugw("Broker config ConfigMap not found, using hardcoded defaults",
-			zap.String("configmap", brokerconfig.ConfigMapName),
-			zap.String("namespace", b.Namespace))
-		return brokerconfig.DefaultBrokerConfig(), nil
-	}
-
-	// Load and return config from ConfigMap
-	return brokerconfig.GetConfigFromConfigMap(cm, b.Namespace)
 }
 
 // propagateIngressAvailability checks if the shared ingress deployment is available
@@ -354,17 +339,62 @@ func (r *Reconciler) propagateFilterAvailability(ctx context.Context, b *eventin
 	return nil
 }
 
-// reconcileFilterDeployment ensures the filter deployment exists
-func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *brokerconfig.NatsJetStreamBrokerConfig) pkgreconciler.Event {
-	logger := logging.FromContext(ctx)
+// filterMetadataAnnotation holds a filterDeploymentMetadata as JSON.
+const filterMetadataAnnotation = "natsjetstream.eventing.knative.dev/filter-deployment-metadata"
 
-	// Get filter deployment template if configured
-	var filterTemplate *brokerconfig.DeploymentTemplate
+// filterDeploymentMetadata records what the controller applied to the filter
+// Deployment: the label and annotation keys, so removed keys can be pruned
+// without touching metadata set by other controllers, and a hash of the Spec.
+type filterDeploymentMetadata struct {
+	Labels      []string `json:"labels,omitempty"`
+	Annotations []string `json:"annotations,omitempty"`
+
+	// SpecHash detects fields removed from the configuration, which comparing
+	// Specs cannot see.
+	SpecHash string `json:"specHash,omitempty"`
+}
+
+// trackFilterMetadata records d's label and annotation keys and Spec hash in
+// filterMetadataAnnotation. Call it on d as built, before anything else adds
+// metadata.
+func trackFilterMetadata(d *appsv1.Deployment) error {
+	spec, err := json.Marshal(d.Spec)
+	if err != nil {
+		return fmt.Errorf("failed to encode filter deployment spec: %w", err)
+	}
+	data, err := json.Marshal(filterDeploymentMetadata{
+		Labels:      slices.Sorted(maps.Keys(d.Labels)),
+		Annotations: slices.Sorted(maps.Keys(d.Annotations)),
+		SpecHash:    fmt.Sprintf("%x", sha256.Sum256(spec)),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to encode filter deployment metadata keys: %w", err)
+	}
+	// Union copies: d.Annotations may alias the broker configuration's map.
+	d.Annotations = kmap.Union(d.Annotations, map[string]string{filterMetadataAnnotation: string(data)})
+	return nil
+}
+
+// trackedFilterMetadata returns what trackFilterMetadata recorded on d, or the
+// zero value if d was never tracked.
+func trackedFilterMetadata(d *appsv1.Deployment) (filterDeploymentMetadata, error) {
+	var tracked filterDeploymentMetadata
+	if data := d.Annotations[filterMetadataAnnotation]; data != "" {
+		if err := json.Unmarshal([]byte(data), &tracked); err != nil {
+			return filterDeploymentMetadata{}, err
+		}
+	}
+	return tracked, nil
+}
+
+// desiredFilterDeployment builds the filter Deployment the broker should have.
+func (r *Reconciler) desiredFilterDeployment(b *eventingv1.Broker, streamName string, brokerCfg *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) (*appsv1.Deployment, error) {
+	var filterTemplate *eventingv1alpha1.DeploymentTemplate
 	if brokerCfg != nil {
 		filterTemplate = brokerCfg.Filter
 	}
 
-	expected := resources.MakeFilterDeployment(&resources.FilterArgs{
+	d := resources.MakeFilterDeployment(&resources.FilterArgs{
 		Broker:             b,
 		Image:              r.filterImage,
 		ServiceAccountName: r.filterServiceAccount,
@@ -372,39 +402,76 @@ func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv
 		NatsURL:            r.natsURL,
 		Template:           filterTemplate,
 	})
+	if err := trackFilterMetadata(d); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
 
-	name := resources.FilterName(b.Name)
-	existing, err := r.deploymentLister.Deployments(b.Namespace).Get(name)
+// reconcileFilterDeployment ensures the filter deployment exists and matches
+// the broker configuration.
+func (r *Reconciler) reconcileFilterDeployment(ctx context.Context, b *eventingv1.Broker, streamName string, brokerCfg *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) pkgreconciler.Event {
+	expected, err := r.desiredFilterDeployment(b, streamName, brokerCfg)
 	if err != nil {
-		if apierrs.IsNotFound(err) {
-			_, err = r.kubeClientSet.AppsV1().Deployments(b.Namespace).Create(ctx, expected, metav1.CreateOptions{})
-			if err != nil {
-				logger.Errorw("Failed to create filter deployment", zap.Error(err))
-				b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to create filter deployment: %v", err)
-				return fmt.Errorf("failed to create filter deployment: %w", err)
-			}
-			controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonFilterDeploymentCreated, "Filter deployment created")
-			return nil
-		}
-		logger.Errorw("Failed to get filter deployment", zap.Error(err))
-		b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to get filter deployment: %v", err)
-		return fmt.Errorf("failed to get filter deployment: %w", err)
+		return err
 	}
 
-	// Update if needed
-	if !equality.Semantic.DeepEqual(expected.Spec, existing.Spec) {
-		toUpdate := existing.DeepCopy()
-		toUpdate.Spec = expected.Spec
-		_, err = r.kubeClientSet.AppsV1().Deployments(b.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})
-		if err != nil {
-			logger.Errorw("Failed to update filter deployment", zap.Error(err))
-			b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to update filter deployment: %v", err)
-			return fmt.Errorf("failed to update filter deployment: %w", err)
-		}
-		controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonFilterDeploymentUpdated, "Filter deployment updated")
+	existing, err := r.deploymentLister.Deployments(b.Namespace).Get(resources.FilterName(b.Name))
+	switch {
+	case apierrs.IsNotFound(err):
+		return r.createFilterDeployment(ctx, b, expected)
+	case err != nil:
+		return r.failFilterDeployment(ctx, b, "get", err)
 	}
+	return r.updateFilterDeployment(ctx, b, existing, expected)
+}
 
+func (r *Reconciler) createFilterDeployment(ctx context.Context, b *eventingv1.Broker, expected *appsv1.Deployment) pkgreconciler.Event {
+	if _, err := r.kubeClientSet.AppsV1().Deployments(b.Namespace).Create(ctx, expected, metav1.CreateOptions{}); err != nil {
+		return r.failFilterDeployment(ctx, b, "create", err)
+	}
+	controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonFilterDeploymentCreated, "Filter deployment created")
 	return nil
+}
+
+// updateFilterDeployment updates existing if it differs from expected. Metadata
+// added by other controllers, such as the revision annotation, is kept.
+func (r *Reconciler) updateFilterDeployment(ctx context.Context, b *eventingv1.Broker, existing, expected *appsv1.Deployment) pkgreconciler.Event {
+	tracked, err := trackedFilterMetadata(existing)
+	if err != nil {
+		b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to decode filter deployment metadata keys: %v", err)
+		return fmt.Errorf("failed to decode filter deployment metadata keys: %w", err)
+	}
+
+	labels := kmap.Union(kmap.ExcludeKeyList(existing.Labels, tracked.Labels), expected.Labels)
+	annotations := kmap.Union(kmap.ExcludeKeyList(existing.Annotations, tracked.Annotations), expected.Annotations)
+
+	// The API server defaults the fields expected leaves unset, so compare Specs
+	// with DeepDerivative. A field removed from the configuration shows up as a
+	// changed spec hash in the annotations instead.
+	if equality.Semantic.DeepEqual(existing.Labels, labels) &&
+		equality.Semantic.DeepEqual(existing.Annotations, annotations) &&
+		equality.Semantic.DeepDerivative(expected.Spec, existing.Spec) {
+		return nil
+	}
+
+	toUpdate := existing.DeepCopy()
+	toUpdate.Labels = labels
+	toUpdate.Annotations = annotations
+	toUpdate.Spec = expected.Spec
+	if _, err := r.kubeClientSet.AppsV1().Deployments(b.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{}); err != nil {
+		return r.failFilterDeployment(ctx, b, "update", err)
+	}
+	controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonFilterDeploymentUpdated, "Filter deployment updated")
+	return nil
+}
+
+// failFilterDeployment logs err and marks the filter failed. verb is "get",
+// "create" or "update".
+func (r *Reconciler) failFilterDeployment(ctx context.Context, b *eventingv1.Broker, verb string, err error) pkgreconciler.Event {
+	logging.FromContext(ctx).Errorw("Failed to "+verb+" filter deployment", zap.Error(err))
+	b.Status.MarkFilterFailed("FilterDeploymentFailed", "Failed to "+verb+" filter deployment: %v", err)
+	return fmt.Errorf("failed to %s filter deployment: %w", verb, err)
 }
 
 // reconcileFilterService ensures the filter service exists
@@ -434,7 +501,8 @@ func (r *Reconciler) reconcileFilterService(ctx context.Context, b *eventingv1.B
 	// Update ClusterIP from existing service (immutable field)
 	expected.Spec.ClusterIP = existing.Spec.ClusterIP
 
-	if !equality.Semantic.DeepEqual(expected.Spec, existing.Spec) {
+	// The API server defaults the fields expected leaves unset.
+	if !equality.Semantic.DeepDerivative(expected.Spec, existing.Spec) {
 		toUpdate := existing.DeepCopy()
 		toUpdate.Spec = expected.Spec
 		svc, err := r.kubeClientSet.CoreV1().Services(b.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})

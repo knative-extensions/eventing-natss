@@ -74,55 +74,6 @@ func TestFilterLabels(t *testing.T) {
 	}
 }
 
-func TestMergeMaps(t *testing.T) {
-	tests := []struct {
-		name     string
-		base     map[string]string
-		override map[string]string
-		want     map[string]string
-	}{
-		{
-			name:     "both empty",
-			base:     map[string]string{},
-			override: map[string]string{},
-			want:     map[string]string{},
-		},
-		{
-			name:     "empty override",
-			base:     map[string]string{"a": "1", "b": "2"},
-			override: map[string]string{},
-			want:     map[string]string{"a": "1", "b": "2"},
-		},
-		{
-			name:     "empty base",
-			base:     map[string]string{},
-			override: map[string]string{"c": "3"},
-			want:     map[string]string{"c": "3"},
-		},
-		{
-			name:     "no overlap",
-			base:     map[string]string{"a": "1"},
-			override: map[string]string{"b": "2"},
-			want:     map[string]string{"a": "1", "b": "2"},
-		},
-		{
-			name:     "override takes precedence",
-			base:     map[string]string{"a": "1", "b": "2"},
-			override: map[string]string{"b": "override", "c": "3"},
-			want:     map[string]string{"a": "1", "b": "override", "c": "3"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := mergeMaps(tt.base, tt.override)
-			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Errorf("mergeMaps() mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
 func TestConstants(t *testing.T) {
 	// Verify constant values don't accidentally change
 	if BrokerLabelKey != "eventing.knative.dev/broker" {

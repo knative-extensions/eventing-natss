@@ -24,39 +24,40 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/yaml"
 
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
 	"knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	"knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 )
 
 const (
-	// ConfigMapName is the name of the ConfigMap containing broker defaults
+	// ConfigMapName is the name of the legacy ConfigMap containing broker defaults.
+	//
+	// Deprecated: Use NatsJetStreamBrokerConfig references in config-br-defaults.
 	ConfigMapName = "natsjetstream-broker-config"
 
 	// ConfigKey is the key in the ConfigMap containing the YAML configuration
 	ConfigKey = "config"
 )
 
-// BrokerConfigAnnotation is the annotation key for broker-specific configuration
-const BrokerConfigAnnotation = "natsjetstream.eventing.knative.dev/config"
+// LegacyConfigAnnotation carries deprecated per-broker configuration as inline JSON.
+// Existing brokers can continue using it; new brokers should use spec.config.
+const LegacyConfigAnnotation = "natsjetstream.eventing.knative.dev/config"
 
 // DefaultBrokerConfig returns the default configuration for a broker
-func DefaultBrokerConfig() *NatsJetStreamBrokerConfig {
-	return &NatsJetStreamBrokerConfig{
+func DefaultBrokerConfig() *eventingv1alpha1.NatsJetStreamBrokerConfigSpec {
+	return &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{
 		Stream: &v1alpha1.StreamConfig{
 			Retention: v1alpha1.LimitsRetentionPolicy,
 			Storage:   v1alpha1.FileStorage,
 			Replicas:  1,
 			Discard:   v1alpha1.OldDiscardPolicy,
 		},
-		Consumer: &v1alpha1.ConsumerConfigTemplate{
-			DeliverPolicy: v1alpha1.NewDeliverPolicy,
-			ReplayPolicy:  v1alpha1.InstantReplayPolicy,
-			ConsumerType:  v1alpha1.PullConsumerType,
-		},
 	}
 }
 
-// LoadDefaultsFromConfigMap loads NatsJetStreamBrokerDefaults from a ConfigMap
+// LoadDefaultsFromConfigMap loads legacy NatsJetStreamBrokerDefaults from a ConfigMap.
+//
+// Deprecated: Use NatsJetStreamBrokerConfig references in config-br-defaults.
 func LoadDefaultsFromConfigMap(cm *corev1.ConfigMap) (*NatsJetStreamBrokerDefaults, error) {
 	if cm == nil {
 		return nil, nil
@@ -80,53 +81,50 @@ func LoadDefaultsFromConfigMap(cm *corev1.ConfigMap) (*NatsJetStreamBrokerDefaul
 	return defaults, nil
 }
 
-// GetConfigFromAnnotation extracts broker config from annotations.
-// Returns nil, nil if no annotation is present.
-func GetConfigFromAnnotation(annotations map[string]string) (*NatsJetStreamBrokerConfig, error) {
-	if annotations == nil {
+// GetConfigFromAnnotation reads the deprecated inline JSON configuration.
+// It returns nil if the annotation is absent or empty.
+func GetConfigFromAnnotation(annotations map[string]string) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
+	configJSON := annotations[LegacyConfigAnnotation]
+	if configJSON == "" {
 		return nil, nil
 	}
-
-	configJSON, ok := annotations[BrokerConfigAnnotation]
-	if !ok || configJSON == "" {
-		return nil, nil
+	cfg := &eventingv1alpha1.NatsJetStreamBrokerConfigSpec{}
+	if err := json.Unmarshal([]byte(configJSON), cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse broker config annotation %q: %w", LegacyConfigAnnotation, err)
 	}
+	return cfg, nil
+}
 
-	brokerConfig := &NatsJetStreamBrokerConfig{}
-	if err := json.Unmarshal([]byte(configJSON), brokerConfig); err != nil {
-		return nil, fmt.Errorf("failed to parse broker config annotation: %w", err)
+// ConfigFor returns the config for namespace: its namespace default, else the
+// cluster default, else the built-in defaults. Safe on a nil receiver.
+//
+// Deprecated: Use NatsJetStreamBrokerConfig references in config-br-defaults.
+func (d *NatsJetStreamBrokerDefaults) ConfigFor(namespace string) *eventingv1alpha1.NatsJetStreamBrokerConfigSpec {
+	if d != nil {
+		if nsConfig := d.NamespaceDefaults[namespace]; nsConfig != nil {
+			return nsConfig
+		}
+		if d.ClusterDefault != nil {
+			return d.ClusterDefault
+		}
 	}
-	return brokerConfig, nil
+	return DefaultBrokerConfig()
 }
 
 // GetConfigFromConfigMap returns the configuration for a namespace from a ConfigMap.
 // It checks namespace-specific config first, then cluster default, then hardcoded defaults.
-func GetConfigFromConfigMap(cm *corev1.ConfigMap, namespace string) (*NatsJetStreamBrokerConfig, error) {
+//
+// Deprecated: Use NatsJetStreamBrokerConfig references in config-br-defaults.
+func GetConfigFromConfigMap(cm *corev1.ConfigMap, namespace string) (*eventingv1alpha1.NatsJetStreamBrokerConfigSpec, error) {
 	defaults, err := LoadDefaultsFromConfigMap(cm)
 	if err != nil {
 		return nil, err
 	}
-
-	if defaults == nil {
-		return DefaultBrokerConfig(), nil
-	}
-
-	// Check for namespace-specific config
-	if nsConfig, ok := defaults.NamespaceDefaults[namespace]; ok && nsConfig != nil {
-		return nsConfig, nil
-	}
-
-	// Check for cluster default config
-	if defaults.ClusterDefault != nil {
-		return defaults.ClusterDefault, nil
-	}
-
-	// Return hardcoded defaults
-	return DefaultBrokerConfig(), nil
+	return defaults.ConfigFor(namespace), nil
 }
 
-// BuildNatsStreamConfig converts a NatsJetStreamBrokerConfig to a nats.StreamConfig
-func BuildNatsStreamConfig(streamName, publishSubject string, config *NatsJetStreamBrokerConfig) *nats.StreamConfig {
+// BuildNatsStreamConfig converts a NatsJetStreamBrokerConfigSpec to a nats.StreamConfig
+func BuildNatsStreamConfig(streamName, publishSubject string, config *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) *nats.StreamConfig {
 	streamConfig := &nats.StreamConfig{
 		Name:     streamName,
 		Subjects: []string{publishSubject + ".>"},
@@ -159,6 +157,8 @@ func BuildNatsStreamConfig(streamName, publishSubject string, config *NatsJetStr
 	streamConfig.MaxMsgSize = sc.MaxMsgSize
 	streamConfig.Storage = utils.ConvertStorage(sc.Storage, nats.FileStorage)
 	streamConfig.Replicas = sc.Replicas
+	// Legacy annotations and ConfigMaps can still set NoAck and Mirror.
+	// NatsJetStreamBrokerConfig validation rejects NoAck=true and any Mirror.
 	streamConfig.NoAck = sc.NoAck
 	streamConfig.Duplicates = sc.DuplicateWindow.Duration
 	streamConfig.Placement = utils.ConvertPlacement(sc.Placement)

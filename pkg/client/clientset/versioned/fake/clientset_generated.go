@@ -26,6 +26,8 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/testing"
 	clientset "knative.dev/eventing-natss/pkg/client/clientset/versioned"
+	eventingv1alpha1 "knative.dev/eventing-natss/pkg/client/clientset/versioned/typed/eventing/v1alpha1"
+	fakeeventingv1alpha1 "knative.dev/eventing-natss/pkg/client/clientset/versioned/typed/eventing/v1alpha1/fake"
 	messagingv1alpha1 "knative.dev/eventing-natss/pkg/client/clientset/versioned/typed/messaging/v1alpha1"
 	fakemessagingv1alpha1 "knative.dev/eventing-natss/pkg/client/clientset/versioned/typed/messaging/v1alpha1/fake"
 )
@@ -94,6 +96,11 @@ var (
 	_ clientset.Interface = &Clientset{}
 	_ testing.FakeClient  = &Clientset{}
 )
+
+// EventingV1alpha1 retrieves the EventingV1alpha1Client
+func (c *Clientset) EventingV1alpha1() eventingv1alpha1.EventingV1alpha1Interface {
+	return &fakeeventingv1alpha1.FakeEventingV1alpha1{Fake: &c.Fake}
+}
 
 // MessagingV1alpha1 retrieves the MessagingV1alpha1Client
 func (c *Clientset) MessagingV1alpha1() messagingv1alpha1.MessagingV1alpha1Interface {

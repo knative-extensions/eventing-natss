@@ -30,6 +30,7 @@ import (
 	wait "k8s.io/apimachinery/pkg/util/wait"
 	cache "k8s.io/client-go/tools/cache"
 	versioned "knative.dev/eventing-natss/pkg/client/clientset/versioned"
+	eventing "knative.dev/eventing-natss/pkg/client/informers/externalversions/eventing"
 	internalinterfaces "knative.dev/eventing-natss/pkg/client/informers/externalversions/internalinterfaces"
 	messaging "knative.dev/eventing-natss/pkg/client/informers/externalversions/messaging"
 )
@@ -325,7 +326,12 @@ type SharedInformerFactory interface {
 	// client.
 	InformerFor(obj runtime.Object, newFunc internalinterfaces.NewInformerFunc) cache.SharedIndexInformer
 
+	Eventing() eventing.Interface
 	Messaging() messaging.Interface
+}
+
+func (f *sharedInformerFactory) Eventing() eventing.Interface {
+	return eventing.New(f, f.namespace, f.tweakListOptions)
 }
 
 func (f *sharedInformerFactory) Messaging() messaging.Interface {
