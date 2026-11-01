@@ -28,6 +28,7 @@ import (
 	"knative.dev/eventing/pkg/kncloudevents"
 
 	dispatchertesting "knative.dev/eventing-natss/pkg/channel/jetstream/dispatcher/testing"
+	jsutils "knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 )
 
 // TestProcessDispatchResultRetriesPerSpec verifies that a failed delivery is
@@ -78,12 +79,19 @@ func TestProcessDispatchResultRetriesPerSpec(t *testing.T) {
 			// A nil retry config makes the NAK delay zero, so a retried
 			// message is redelivered at once.
 			processDispatchResult(ctx, msgs[0], nil, 1,
-				&kncloudevents.DispatchInfo{ResponseCode: tt.code}, errors.New("delivery failed"))
+				&kncloudevents.DispatchInfo{ResponseCode: tt.code}, jsutils.IsRetriableStatusCode(tt.code), errors.New("delivery failed"))
 
 			redelivered, err := sub.Fetch(1, nats.MaxWait(500*time.Millisecond))
 			if !tt.wantRetried {
 				if !errors.Is(err, nats.ErrTimeout) {
 					t.Fatalf("Fetch after a non-retriable response: got %d messages, err %v; want a timeout", len(redelivered), err)
+				}
+				info, err := sub.ConsumerInfo()
+				if err != nil {
+					t.Fatalf("ConsumerInfo: %v", err)
+				}
+				if info.NumAckPending != 0 {
+					t.Errorf("NumAckPending = %d, want 0", info.NumAckPending)
 				}
 				return
 			}

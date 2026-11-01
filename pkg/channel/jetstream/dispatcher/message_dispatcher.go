@@ -170,25 +170,36 @@ func send(dispatcher *kncloudevents.Dispatcher, ctx context.Context, message bin
 	noRetires.RequestTimeout = jsutils.CalcRequestTimeout(retryNumber, ackWait)
 
 	ctx, responseMessage, dispatchExecutionInfo, err := executeRequest(dispatcher, ctx, destination, message, additionalHeadersForDestination, &noRetires, config.oidcServiceAccount, config.transformers)
-	processDispatchResult(ctx, msg, config.retryConfig, retryNumber, dispatchExecutionInfo, err)
+	retriable := err != nil && jsutils.IsRetriableStatusCode(dispatchExecutionInfo.ResponseCode)
 
-	if err != nil && lastTry {
-		// If DeadLetter is configured, then send original message with knative error extensions
-		if config.deadLetterSink != nil {
-			dispatchTransformers := dispatchExecutionInfoTransformers(destination.URL, dispatchExecutionInfo)
-			_, deadLetterResponse, dispatchExecutionInfo, deadLetterErr := executeRequest(dispatcher, ctx, *config.deadLetterSink, message, config.additionalHeaders, config.retryConfig, config.oidcServiceAccount, append(config.transformers, dispatchTransformers))
-			if deadLetterErr != nil {
-				return dispatchExecutionInfo, fmt.Errorf("unable to complete request to either %s (%v) or %s (%v)", destination.URL, err, config.deadLetterSink.URL, deadLetterErr)
-			}
-			if deadLetterResponse != nil {
-				messagesToFinish = append(messagesToFinish, deadLetterResponse)
-			}
-
-			return dispatchExecutionInfo, nil
+	// Keep the message pending until its dead letter delivery succeeds.
+	if err != nil && (lastTry || !retriable) && config.deadLetterSink != nil {
+		dispatchTransformers := dispatchExecutionInfoTransformers(destination.URL, dispatchExecutionInfo)
+		_, deadLetterResponse, deadLetterInfo, deadLetterErr := executeRequest(dispatcher, ctx, *config.deadLetterSink, message, config.additionalHeaders, config.retryConfig, config.oidcServiceAccount, append(config.transformers, dispatchTransformers))
+		if deadLetterErr != nil {
+			return deadLetterInfo, fmt.Errorf("unable to complete request to either %s (%v) or %s (%v)", destination.URL, err, config.deadLetterSink.URL, deadLetterErr)
 		}
+		if deadLetterResponse != nil {
+			messagesToFinish = append(messagesToFinish, deadLetterResponse)
+		}
+
+		settleErr := err
+		if retriable {
+			settleErr = nil
+		}
+		processDispatchResult(ctx, msg, config.retryConfig, retryNumber, dispatchExecutionInfo, false, settleErr)
+		return deadLetterInfo, nil
+	}
+
+	processDispatchResult(ctx, msg, config.retryConfig, retryNumber, dispatchExecutionInfo, retriable, err)
+	if err != nil && (lastTry || !retriable) {
 		// No DeadLetter, just fail
-		return dispatchExecutionInfo, fmt.Errorf("unable to complete request to %s: %w, last try failed", destination.URL, err)
-	} else if err != nil && !lastTry {
+		reason := "last try failed"
+		if !retriable {
+			reason = "response is not retriable"
+		}
+		return dispatchExecutionInfo, fmt.Errorf("unable to complete request to %s: %w, %s", destination.URL, err, reason)
+	} else if err != nil {
 		return dispatchExecutionInfo, fmt.Errorf("unable to complete request to %s: %w, going for retry", destination.URL, err)
 	}
 
@@ -247,7 +258,7 @@ func numDelivered(msg *nats.Msg) (int, error) {
 	return int(meta.NumDelivered), nil
 }
 
-func processDispatchResult(ctx context.Context, msg *nats.Msg, retryConfig *kncloudevents.RetryConfig, retryNumber int, dispatchExecutionInfo *kncloudevents.DispatchInfo, err error) {
+func processDispatchResult(ctx context.Context, msg *nats.Msg, retryConfig *kncloudevents.RetryConfig, retryNumber int, dispatchExecutionInfo *kncloudevents.DispatchInfo, retriable bool, err error) {
 	logger := logging.FromContext(ctx)
 	result := protocol.ResultACK
 
@@ -256,7 +267,7 @@ func processDispatchResult(ctx context.Context, msg *nats.Msg, retryConfig *kncl
 			zap.Error(err),
 			zap.Any("dispatch_resp_code", dispatchExecutionInfo.ResponseCode))
 
-		if jsutils.IsRetriableStatusCode(dispatchExecutionInfo.ResponseCode) {
+		if retriable {
 			// tell JSM to redeliver the message later
 			result = protocol.NewReceipt(false, "%w", err)
 		} else {

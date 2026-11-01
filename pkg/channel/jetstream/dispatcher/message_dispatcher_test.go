@@ -484,7 +484,9 @@ func TestDispatchMessage(t *testing.T) {
 
 			var deadLetterSinkHandler *fakeHandler
 			var deadLetterSinkServer *httptest.Server
-			var deadLetterSinkURL *apis.URL
+			// Nil without a dead letter sink, as the fanout subscription
+			// passes it in production.
+			var deadLetterSinkDestination *duckv1.Addressable
 
 			if tc.hasDeadLetterSink {
 				deadLetterSinkHandler = &fakeHandler{
@@ -496,10 +498,9 @@ func TestDispatchMessage(t *testing.T) {
 				defer deadLetterSinkServer.Close()
 
 				getOnlyDomainURL(t, true, deadLetterSinkServer.URL)
-				deadLetterSinkURL, _ = apis.ParseURL(deadLetterSinkServer.URL)
+				deadLetterSinkURL, _ := apis.ParseURL(deadLetterSinkServer.URL)
+				deadLetterSinkDestination = &duckv1.Addressable{URL: deadLetterSinkURL}
 			}
-
-			deadLetterSinkDestination := duckv1.Addressable{URL: deadLetterSinkURL}
 
 			event := cloudevents.NewEvent(cloudevents.VersionV1)
 			event.SetID(uuid.New().String())
@@ -576,7 +577,7 @@ func TestDispatchMessage(t *testing.T) {
 				ackWait,
 				msg,
 				WithReply(&replyDestination),
-				WithDeadLetterSink(&deadLetterSinkDestination),
+				WithDeadLetterSink(deadLetterSinkDestination),
 				WithRetryConfig(&retryConfig),
 				WithTransformers(&te),
 				WithHeader(headers))

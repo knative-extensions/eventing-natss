@@ -194,7 +194,8 @@ between `backoffMax` and `retryAfterMax` and for the required feature flags.
 The channel retries a delivery when the subscriber returns 5xx, 404, 408, 409,
 or 429, or cannot be reached, as the
 [Knative Eventing data plane specification](https://github.com/knative/specs/blob/main/specs/eventing/data-plane.md#event-acknowledgement-and-delivery-retry)
-defines. Other non-2xx responses are not retried.
+defines. Other non-2xx responses are not retried; if a dead letter sink is
+configured, the event is sent there right away.
 
 ## `NatsJetStreamChannel` CRD
 
