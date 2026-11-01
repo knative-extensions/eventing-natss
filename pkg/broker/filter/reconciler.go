@@ -197,11 +197,10 @@ func (r *FilterReconciler) ReconcileTrigger(ctx context.Context, trigger *eventi
 		}
 	}
 
-	// Build no-retry config (JetStream handles retries via redelivery)
-	var requestTimeout time.Duration
-	if retryConfig != nil {
-		requestTimeout = retryConfig.RequestTimeout
-	}
+	// Build no-retry config (JetStream handles retries via redelivery). Each
+	// request times out after the delivery timeout, which the Trigger
+	// reconciler keeps shorter than the consumer's AckWait.
+	requestTimeout := brokerutils.DeliveryTimeout(brokerutils.EffectiveDelivery(trigger, broker))
 	var noRetryConfig = kncloudevents.RetryConfig{
 		RetryMax: 0,
 		CheckRetry: func(ctx context.Context, resp *http.Response, err error) (bool, error) {
