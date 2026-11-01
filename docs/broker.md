@@ -465,8 +465,8 @@ The fetch loop caps each pull request to the number of free semaphore slots, so 
 
 When a subscriber returns an error or times out:
 
-1. **5xx errors, 408, 429**: Message is redelivered with backoff
-2. **4xx errors (except 408, 429)**: Message is terminated (non-retriable)
+1. **5xx errors, 404, 408, 409, 429**: Message is redelivered with backoff, as the [Knative Eventing data plane specification](https://github.com/knative/specs/blob/main/specs/eventing/data-plane.md#event-acknowledgement-and-delivery-retry) defines
+2. **Other non-2xx responses, such as 400, 403, and 413**: Message is terminated (non-retriable)
 3. **Network errors**: Message is redelivered with backoff
 
 After all retries are exhausted, if a dead letter sink is configured, the event is sent there before being acknowledged.

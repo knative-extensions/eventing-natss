@@ -256,8 +256,7 @@ func processDispatchResult(ctx context.Context, msg *nats.Msg, retryConfig *kncl
 			zap.Error(err),
 			zap.Any("dispatch_resp_code", dispatchExecutionInfo.ResponseCode))
 
-		code := dispatchExecutionInfo.ResponseCode
-		if code/100 == 5 || code == http.StatusTooManyRequests || code == http.StatusRequestTimeout {
+		if jsutils.IsRetriableStatusCode(dispatchExecutionInfo.ResponseCode) {
 			// tell JSM to redeliver the message later
 			result = protocol.NewReceipt(false, "%w", err)
 		} else {

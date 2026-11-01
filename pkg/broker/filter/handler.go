@@ -504,8 +504,7 @@ func (h *TriggerHandler) Cleanup() {
 func determineNatsResult(responseCode int, err error) protocol.Result {
 	result := protocol.ResultACK
 	if err != nil {
-		code := responseCode
-		if code/100 == 5 || code == http.StatusTooManyRequests || code == http.StatusRequestTimeout {
+		if jsutils.IsRetriableStatusCode(responseCode) {
 			// Retriable error, effectively this is nats protocol NACK
 			result = protocol.NewReceipt(false, "%w", err)
 		} else {
