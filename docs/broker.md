@@ -270,8 +270,12 @@ and Pods. The required `eventing.knative.dev/broker` and
 `eventing.knative.dev/role` labels take precedence over conflicting custom
 labels so that the Deployment and Service selectors continue to match the Pods.
 
-`stream` settings are used only when the JetStream stream is first created;
-changing them does not update an existing stream.
+The controller applies `stream` settings when it creates the JetStream stream
+and updates an existing stream in place, instead of recreating it, when they
+change. Lowering a limit such as `maxBytes`, `maxMsgs`, or `maxAge` discards the
+stored messages beyond the new limit. If JetStream rejects a change, such as a
+different `storage` type, the Broker's ingress is marked not ready with the
+error.
 
 ### Namespace and Cluster Defaults
 

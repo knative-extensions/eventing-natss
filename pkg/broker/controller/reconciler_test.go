@@ -48,6 +48,7 @@ import (
 	eventinglisters "knative.dev/eventing/pkg/client/listers/eventing/v1"
 
 	eventingv1alpha1 "knative.dev/eventing-natss/pkg/apis/eventing/v1alpha1"
+	messagingv1alpha1 "knative.dev/eventing-natss/pkg/apis/messaging/v1alpha1"
 	brokerconfig "knative.dev/eventing-natss/pkg/broker/config"
 	"knative.dev/eventing-natss/pkg/broker/contract"
 	"knative.dev/eventing-natss/pkg/broker/controller/resources"
@@ -221,7 +222,8 @@ func TestReconcileStream(t *testing.T) {
 	defer conn.Close()
 
 	r := &Reconciler{js: js}
-	ctx := testContext()
+	recorder := record.NewFakeRecorder(10)
+	ctx := controller.WithEventRecorder(testContext(), recorder)
 	b := testBroker(testNamespace, testBrokerName)
 	streamName := brokerutils.BrokerStreamName(b)
 	publish := brokerutils.BrokerPublishSubjectName(b.Namespace, b.Name)
@@ -229,12 +231,51 @@ func TestReconcileStream(t *testing.T) {
 	if err := r.reconcileStream(ctx, b, streamName, publish, brokerconfig.DefaultBrokerConfig()); err != nil {
 		t.Fatalf("reconcileStream() error: %v", err)
 	}
-	if _, err := js.StreamInfo(streamName); err != nil {
-		t.Fatalf("stream not created: %v", err)
+	if diff := cmp.Diff([]string{"Normal " + ReasonStreamCreated + " JetStream stream created"}, drainEvents(recorder)); diff != "" {
+		t.Fatalf("events after create (-want +got):\n%s", diff)
 	}
-	// Idempotent when the stream already exists.
+	if _, err := js.Publish(publish+".event", []byte("stored-before-update")); err != nil {
+		t.Fatalf("Publish() before stream update: %v", err)
+	}
+
+	// An unchanged configuration leaves the stream as it is.
 	if err := r.reconcileStream(ctx, b, streamName, publish, brokerconfig.DefaultBrokerConfig()); err != nil {
-		t.Errorf("second reconcileStream() error: %v", err)
+		t.Fatalf("reconcileStream() with unchanged config error: %v", err)
+	}
+	if events := drainEvents(recorder); len(events) != 0 {
+		t.Errorf("unchanged config recorded events %q, want none", events)
+	}
+
+	// A changed configuration is applied to the existing stream in place,
+	// without deleting the messages it stores.
+	updatedConfig := brokerconfig.DefaultBrokerConfig()
+	updatedConfig.Stream.MaxBytes = 123456
+	if err := r.reconcileStream(ctx, b, streamName, publish, updatedConfig); err != nil {
+		t.Fatalf("reconcileStream() with updated config error: %v", err)
+	}
+	if diff := cmp.Diff([]string{"Normal " + ReasonStreamUpdated + " JetStream stream updated"}, drainEvents(recorder)); diff != "" {
+		t.Errorf("events after update (-want +got):\n%s", diff)
+	}
+	info, err := js.StreamInfo(streamName)
+	if err != nil {
+		t.Fatalf("StreamInfo() after update: %v", err)
+	}
+	if info.Config.MaxBytes != updatedConfig.Stream.MaxBytes {
+		t.Errorf("stream MaxBytes = %d, want %d", info.Config.MaxBytes, updatedConfig.Stream.MaxBytes)
+	}
+	if info.State.Msgs != 1 {
+		t.Errorf("stream messages after update = %d, want 1", info.State.Msgs)
+	}
+
+	// JetStream cannot change the storage type of a stream. The rejection is
+	// reported on the Broker instead of being ignored.
+	rejectedConfig := brokerconfig.DefaultBrokerConfig()
+	rejectedConfig.Stream.Storage = messagingv1alpha1.MemoryStorage
+	if err := r.reconcileStream(ctx, b, streamName, publish, rejectedConfig); err == nil {
+		t.Fatal("reconcileStream() with a storage change returned nil, want error")
+	}
+	if cond := b.Status.GetCondition(eventingv1.BrokerConditionIngress); cond == nil || cond.Reason != "StreamUpdateFailed" {
+		t.Errorf("ingress condition after rejected update = %v, want reason StreamUpdateFailed", cond)
 	}
 }
 
