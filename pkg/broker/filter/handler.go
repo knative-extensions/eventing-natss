@@ -101,10 +101,13 @@ type TriggerHandler struct {
 
 	// Observability. tracer is used to wrap each dispatch in a span;
 	// dispatchDuration records the per-dispatch HTTP wall time; processDuration
-	// records the pre-dispatch work (message decode + filter evaluation).
+	// records the pre-dispatch work (message decode + filter evaluation);
+	// dispatchAttempts counts subscriber and dead letter sink requests by the
+	// delivery result.
 	tracer           trace.Tracer
 	dispatchDuration metric.Float64Histogram
 	processDuration  metric.Float64Histogram
+	dispatchAttempts metric.Int64Counter
 }
 
 type handlerConfig struct {
@@ -130,6 +133,7 @@ func NewTriggerHandler(
 	tracer trace.Tracer,
 	dispatchDuration metric.Float64Histogram,
 	processDuration metric.Float64Histogram,
+	dispatchAttempts metric.Int64Counter,
 ) (*TriggerHandler, error) {
 	logger := logging.FromContext(ctx).With(
 		zap.String("trigger", trigger.Name),
@@ -154,6 +158,7 @@ func NewTriggerHandler(
 		tracer:           tracer,
 		dispatchDuration: dispatchDuration,
 		processDuration:  processDuration,
+		dispatchAttempts: dispatchAttempts,
 	}
 	h.Update(trigger, subscriber, brokerIngressURL, deadLetterSink, retryConfig, noRetryConfig)
 	return h, nil
@@ -362,6 +367,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	if h.dispatchDuration != nil && dispatchInfo != nil && dispatchInfo.Duration >= 0 {
 		h.dispatchDuration.Record(ctx, dispatchInfo.Duration.Seconds(), h.metricAttrs)
 	}
+	h.recordSubscriberAttempt(ctx, dispatchInfo, err)
 
 	// Context deadline/cancellation means the AckWait guard fired before we got
 	// a subscriber response. Don't ack/nack/term the message — JetStream will
@@ -418,6 +424,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 					kncloudevents.WithHeader(additionalHeaders),
 					kncloudevents.WithTransformers(&te),
 				)
+				h.recordDeadLetterAttempt(ctx, dlsDispatchInfo, dlsErr)
 				if dlsErr != nil {
 					logger.Errorw("failed to send to dead letter sink",
 						zap.Error(dlsErr),
@@ -454,6 +461,7 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 				kncloudevents.WithHeader(additionalHeaders),
 				kncloudevents.WithTransformers(&te),
 			)
+			h.recordDeadLetterAttempt(ctx, dlsDispatchInfo, dlsErr)
 			if dlsErr != nil {
 				logger.Errorw("failed to send to dead letter sink",
 					zap.Error(dlsErr),
@@ -471,6 +479,69 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 	}
 
 	return dispatchInfo, err
+}
+
+// Values of the delivery.result attribute of the dispatch attempts counter.
+const (
+	deliveryResultSubscriberSuccess   = "subscriber_success"
+	deliveryResultSubscriberRetry     = "subscriber_retry"
+	deliveryResultSubscriberPermanent = "subscriber_permanent"
+	deliveryResultSubscriberTimeout   = "subscriber_timeout"
+	deliveryResultDeadLetterSuccess   = "dead_letter_success"
+	deliveryResultDeadLetterFailure   = "dead_letter_failure"
+)
+
+// recordDispatchAttempt counts one subscriber or dead letter sink delivery.
+// statusCode is 0 when the subscriber did not respond before the dispatch
+// deadline, and -1 (kncloudevents.NoResponse) when the request could not be
+// sent.
+func (h *TriggerHandler) recordDispatchAttempt(ctx context.Context, statusCode int, result string) {
+	// Skip building the attribute set when metrics are disabled; the default
+	// Knative metrics configuration installs a no-op meter provider.
+	if h.dispatchAttempts == nil || !h.dispatchAttempts.Enabled(ctx) {
+		return
+	}
+	h.dispatchAttempts.Add(ctx, 1, h.metricAttrs, metric.WithAttributes(
+		attribute.Int("http.response.status_code", statusCode),
+		attribute.String("delivery.result", result),
+	))
+}
+
+func (h *TriggerHandler) recordDeadLetterAttempt(ctx context.Context, info *kncloudevents.DispatchInfo, err error) {
+	statusCode := 0
+	if info != nil {
+		statusCode = info.ResponseCode
+	}
+	result := deliveryResultDeadLetterSuccess
+	if err != nil {
+		result = deliveryResultDeadLetterFailure
+	}
+	h.recordDispatchAttempt(ctx, statusCode, result)
+}
+
+// recordSubscriberAttempt counts a subscriber request by its outcome. A
+// dispatch cancelled by shutdown is not a delivery outcome and is not counted.
+func (h *TriggerHandler) recordSubscriberAttempt(ctx context.Context, info *kncloudevents.DispatchInfo, err error) {
+	switch {
+	case errors.Is(err, context.Canceled):
+	case errors.Is(err, context.DeadlineExceeded):
+		h.recordDispatchAttempt(ctx, 0, deliveryResultSubscriberTimeout)
+	default:
+		h.recordDispatchAttempt(ctx, info.ResponseCode, subscriberDeliveryResult(determineNatsResult(info.ResponseCode, err)))
+	}
+}
+
+// subscriberDeliveryResult maps the ack decision for a subscriber response to
+// its delivery.result value.
+func subscriberDeliveryResult(result protocol.Result) string {
+	switch {
+	case protocol.IsACK(result):
+		return deliveryResultSubscriberSuccess
+	case protocol.IsNACK(result):
+		return deliveryResultSubscriberRetry
+	default:
+		return deliveryResultSubscriberPermanent
+	}
 }
 
 func eventProcessingDeadlineExceeded(err error) bool {
