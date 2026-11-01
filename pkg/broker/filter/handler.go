@@ -446,8 +446,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 			}
 		}
 	default:
-		// Terminate - non-retriable error
-		if lastTry && config.deadLetterSink != nil {
+		// Non-retriable response: retrying cannot succeed, so dead-letter the
+		// event right away (if configured) and terminate the message.
+		if config.deadLetterSink != nil {
 			// Send to dead letter sink
 			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *config.deadLetterSink,
 				kncloudevents.WithRetryConfig(&defaultRetry),

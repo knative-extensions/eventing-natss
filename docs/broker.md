@@ -148,7 +148,7 @@ spec:
 
 ### Dead Letter Sink
 
-Configure a dead letter sink to receive events that fail delivery after all retries:
+Configure a dead letter sink to receive events that fail delivery after all retries, or that the subscriber rejects with a non-retriable response (see [Retry Behavior](#retry-behavior)):
 
 ```yaml
 apiVersion: eventing.knative.dev/v1
@@ -466,7 +466,7 @@ The fetch loop caps each pull request to the number of free semaphore slots, so 
 When a subscriber returns an error or times out:
 
 1. **5xx errors, 404, 408, 409, 429**: Message is redelivered with backoff, as the [Knative Eventing data plane specification](https://github.com/knative/specs/blob/main/specs/eventing/data-plane.md#event-acknowledgement-and-delivery-retry) defines
-2. **Other non-2xx responses, such as 400, 403, and 413**: Message is terminated (non-retriable)
+2. **Other non-2xx responses, such as 400, 403, and 413**: Message is terminated without retrying; if a dead letter sink is configured, the event is sent there first
 3. **Network errors**: Message is redelivered with backoff
 
 After all retries are exhausted, if a dead letter sink is configured, the event is sent there before being acknowledged.
@@ -495,6 +495,6 @@ If consumers are receiving the same event more than once, the most likely cause 
 
 ### Events going to dead letter sink
 
-1. Check subscriber logs for errors
+1. Check subscriber logs and response codes: non-retriable responses (see [Retry Behavior](#retry-behavior)) are dead-lettered on the delivery that receives them, without waiting for the remaining retries
 2. Verify subscriber endpoint is correct
 3. Review retry configuration
