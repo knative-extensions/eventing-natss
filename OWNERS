@@ -1,7 +1,7 @@
 # In order to be an approver you need to be an approver in the eventing repo
 # or fulfill the requirements in https://github.com/knative/community/blob/master/ROLES.md#approver
 approvers:
-  - technical-oversight-committee
+  - steering-committee
   - knative-release-leads
   - eventing-writers
   - eventing-natss-approvers
