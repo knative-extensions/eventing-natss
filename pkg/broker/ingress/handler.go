@@ -19,8 +19,11 @@ package ingress
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	cejs "github.com/cloudevents/sdk-go/protocol/nats_jetstream/v2"
 	ce "github.com/cloudevents/sdk-go/v2"
@@ -34,10 +37,23 @@ import (
 	"knative.dev/eventing-natss/pkg/tracing"
 )
 
+// defaultPublishTimeout bounds how long a request waits for a JetStream ack
+// before the producer is asked to retry.
+const defaultPublishTimeout = 30 * time.Second
+
+// errPublishUnavailable indicates the event could not be durably stored due to
+// backpressure or a transient JetStream error. It maps to HTTP 503 so the
+// producer retries; deduplication (nats.MsgId + the stream's duplicate window)
+// makes those retries safe.
+var errPublishUnavailable = errors.New("jetstream publish unavailable")
+
 // This is a shared handler that can route events to multiple brokers based on URL path
 type Handler struct {
 	logger *zap.SugaredLogger
 	js     nats.JetStreamContext
+
+	// publishTimeout bounds how long a request waits for a JetStream ack.
+	publishTimeout time.Duration
 
 	// Broker mappings protected by mutex
 	mu      sync.RWMutex
@@ -48,14 +64,23 @@ type Handler struct {
 type HandlerConfig struct {
 	Logger    *zap.SugaredLogger
 	JetStream nats.JetStreamContext
+
+	// PublishTimeout bounds how long a request waits for a JetStream ack before
+	// asking the producer to retry. Defaults to defaultPublishTimeout when unset.
+	PublishTimeout time.Duration
 }
 
 // NewHandler creates a new shared ingress handler
 func NewHandler(config HandlerConfig) *Handler {
+	publishTimeout := config.PublishTimeout
+	if publishTimeout <= 0 {
+		publishTimeout = defaultPublishTimeout
+	}
 	return &Handler{
-		logger:  config.Logger,
-		js:      config.JetStream,
-		brokers: make(map[string]contract.BrokerContract),
+		logger:         config.Logger,
+		js:             config.JetStream,
+		publishTimeout: publishTimeout,
+		brokers:        make(map[string]contract.BrokerContract),
 	}
 }
 
@@ -140,6 +165,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Publish to JetStream
 	if err := h.publishToJetStream(ctx, event, broker); err != nil {
+		if errors.Is(err, errPublishUnavailable) {
+			// Backpressure or transient JetStream error: ask the producer to
+			// retry rather than dropping the event as a hard failure.
+			logger.Warnw("JetStream publish unavailable, asking producer to retry", zap.Error(err))
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		logger.Errorw("Failed to publish event to JetStream", zap.Error(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -174,23 +207,46 @@ func (h *Handler) publishToJetStream(ctx context.Context, event *ce.Event, broke
 	// Add .events suffix to match the stream's subject pattern (publishSubject.>)
 	subject := broker.PublishSubject + ".events"
 
-	// Publish to JetStream with message ID for deduplication
-	_, err := h.js.Publish(subject, writer.Bytes(), nats.MsgId(string(eventID)))
+	// Publish asynchronously so many requests can be in flight at once, but wait
+	// for the ack before returning: a 202 is only sent once JetStream has
+	// durably stored the event. nats.MsgId enables server-side deduplication so
+	// a producer retry after a timeout does not double-store the event.
+	pubCtx, cancel := context.WithTimeout(ctx, h.publishTimeout)
+	defer cancel()
+
+	future, err := h.js.PublishAsync(subject, writer.Bytes(), nats.MsgId(string(eventID)))
 	if err != nil {
-		logger.Errorw("Failed to publish to JetStream",
+		// Immediate failure, e.g. the in-flight window is full (backpressure).
+		logger.Errorw("Failed to submit publish to JetStream",
 			zap.Error(err),
 			zap.String("subject", subject),
 			zap.String("event_id", string(eventID)),
 		)
-		return err
+		return fmt.Errorf("%w: %v", errPublishUnavailable, err)
 	}
 
-	logger.Debugw("Published event to JetStream",
-		zap.String("subject", subject),
-		zap.String("event_id", string(eventID)),
-	)
-
-	return nil
+	select {
+	case <-future.Ok():
+		logger.Debugw("Published event to JetStream",
+			zap.String("subject", subject),
+			zap.String("event_id", string(eventID)),
+		)
+		return nil
+	case ackErr := <-future.Err():
+		logger.Errorw("JetStream rejected the published event",
+			zap.Error(ackErr),
+			zap.String("subject", subject),
+			zap.String("event_id", string(eventID)),
+		)
+		return fmt.Errorf("%w: %v", errPublishUnavailable, ackErr)
+	case <-pubCtx.Done():
+		logger.Errorw("Timed out waiting for JetStream ack",
+			zap.Error(pubCtx.Err()),
+			zap.String("subject", subject),
+			zap.String("event_id", string(eventID)),
+		)
+		return fmt.Errorf("%w: %v", errPublishUnavailable, pubCtx.Err())
+	}
 }
 
 // ReadinessChecker returns an http.HandlerFunc for readiness checks
