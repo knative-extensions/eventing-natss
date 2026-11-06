@@ -71,6 +71,7 @@ const (
 	ReasonFilterServiceCreated           = "FilterServiceCreated"
 	ReasonFilterServiceFailed            = "FilterServiceFailed"
 	ReasonStreamCreated                  = "JetStreamStreamCreated"
+	ReasonStreamUpdated                  = "JetStreamStreamUpdated"
 	ReasonStreamFailed                   = "JetStreamStreamFailed"
 	ReasonLegacyConfigDeprecated         = "LegacyConfigDeprecated"
 	ReasonLegacyDefaultsConfigDeprecated = "LegacyDefaultsConfigDeprecated"
@@ -238,12 +239,14 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, b *eventingv1.Broker) pk
 	return nil
 }
 
-// reconcileStream ensures the JetStream stream exists for the broker
+// reconcileStream creates the JetStream stream for the broker, or updates the
+// existing stream to match brokerCfg.
 func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, streamName, publishSubject string, brokerCfg *eventingv1alpha1.NatsJetStreamBrokerConfigSpec) pkgreconciler.Event {
 	logger := logging.FromContext(ctx)
+	streamConfig := brokerconfig.BuildNatsStreamConfig(streamName, publishSubject, brokerCfg)
 
 	// Check if stream exists
-	_, err := r.js.StreamInfo(streamName)
+	existing, err := r.js.StreamInfo(streamName)
 	if err != nil {
 		if !errors.Is(err, nats.ErrStreamNotFound) {
 			logger.Errorw("Failed to get stream info", zap.Error(err), zap.String("stream", streamName))
@@ -252,8 +255,6 @@ func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, 
 		}
 
 		// Stream doesn't exist, create it
-		streamConfig := brokerconfig.BuildNatsStreamConfig(streamName, publishSubject, brokerCfg)
-
 		_, err = r.js.AddStream(streamConfig)
 		if err != nil {
 			logger.Errorw("Failed to create JetStream stream", zap.Error(err), zap.String("stream", streamName))
@@ -264,6 +265,23 @@ func (r *Reconciler) reconcileStream(ctx context.Context, b *eventingv1.Broker, 
 
 		logger.Infow("JetStream stream created", zap.String("stream", streamName))
 		controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonStreamCreated, "JetStream stream created")
+		return nil
+	}
+
+	// The stream exists, so update it in place instead of recreating it. Always
+	// update: the server fills defaults into the stored config (for example 0
+	// becomes -1), so the desired config cannot be compared with existing.Config
+	// beforehand. Compare the stored config before and after instead.
+	updated, err := r.js.UpdateStream(streamConfig)
+	if err != nil {
+		logger.Errorw("Failed to update JetStream stream", zap.Error(err), zap.String("stream", streamName))
+		controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeWarning, ReasonStreamFailed, err.Error())
+		b.Status.MarkIngressFailed("StreamUpdateFailed", "Failed to update JetStream stream: %v", err)
+		return fmt.Errorf("failed to update stream: %w", err)
+	}
+	if !equality.Semantic.DeepEqual(existing.Config, updated.Config) {
+		logger.Infow("JetStream stream updated", zap.String("stream", streamName))
+		controller.GetEventRecorder(ctx).Event(b, corev1.EventTypeNormal, ReasonStreamUpdated, "JetStream stream updated")
 	}
 
 	return nil
