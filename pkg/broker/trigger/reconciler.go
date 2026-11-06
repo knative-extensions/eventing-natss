@@ -20,10 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/rickb777/date/period"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
@@ -299,7 +297,6 @@ func (r *Reconciler) buildConsumerConfig(trigger *eventingv1.Trigger, broker *ev
 	filterSubject := brokerutils.BrokerPublishSubjectName(broker.Namespace, broker.Name) + ".>"
 
 	// Default delivery configuration
-	ackWait := 30 * time.Second
 	maxDeliver := 3
 
 	// Apply effective delivery: trigger spec overrides broker spec field-by-field.
@@ -307,13 +304,12 @@ func (r *Reconciler) buildConsumerConfig(trigger *eventingv1.Trigger, broker *ev
 		if delivery.Retry != nil {
 			maxDeliver = int(*delivery.Retry) + 1
 		}
-		if delivery.Timeout != nil {
-			timeout, err := period.Parse(*delivery.Timeout)
-			if err == nil {
-				ackWait, _ = timeout.Duration()
-			}
-		}
 	}
+
+	// The delivery timeout bounds each request to the subscriber. AckWait is
+	// longer, so JetStream redelivers only a message that the filter did not
+	// settle, for example because the filter stopped.
+	ackWait := brokerutils.ConsumerAckWait(brokerutils.DeliveryTimeout(brokerutils.EffectiveDelivery(trigger, broker)))
 
 	// Pull consumer configuration (no DeliverSubject or DeliverGroup)
 	return &nats.ConsumerConfig{
