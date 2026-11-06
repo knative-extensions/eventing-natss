@@ -42,7 +42,8 @@ type envConfig struct {
 	MaxConcurrency int           `envconfig:"CONSUMER_MAX_CONCURRENCY" default:"0"`
 }
 
-// NewController creates a filter controller and exposes its NATS connection to the probes.
+// NewController creates a filter controller whose data-plane resources are
+// owned and shut down by this Runtime.
 func (r *Runtime) NewController(ctx context.Context, _ configmap.Watcher) *controller.Impl {
 	logger := logging.FromContext(ctx)
 
@@ -78,7 +79,7 @@ func (r *Runtime) NewController(ctx context.Context, _ configmap.Watcher) *contr
 		MaxConcurrency: env.MaxConcurrency,
 	}
 	consumerManager := NewConsumerManager(ctx, natsConn, js, consumerConfig)
-	r.Attach(natsConn)
+	r.Attach(consumerManager, natsConn)
 
 	// Create filter reconciler
 	reconciler := NewFilterReconciler(
