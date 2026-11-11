@@ -18,30 +18,73 @@ package filter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"sync/atomic"
+	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"knative.dev/eventing-natss/pkg/broker/constants"
 )
+
+const (
+	// ShutdownTimeout leaves five seconds of
+	// constants.FilterTerminationGracePeriod for kubelet and process-level
+	// cleanup.
+	ShutdownTimeout = constants.FilterTerminationGracePeriod - 5*time.Second
+
+	// natsDrainReserve is the end of the shutdown deadline kept for draining
+	// the NATS connection after the consumer manager shuts down.
+	natsDrainReserve = 5 * time.Second
+)
+
+type consumerShutdowner interface {
+	Shutdown(context.Context) error
+}
 
 type natsConnection interface {
 	Status() nats.Status
+	StatusChanged(statuses ...nats.Status) chan nats.Status
+	Drain() error
+	Close()
 }
 
-// Runtime reports the filter's NATS connection and process health.
+// Runtime owns the filter's ConsumerManager and NATS connection so process
+// shutdown and readiness reflect the data plane rather than only the controller
+// work queue.
 type Runtime struct {
 	signalCtx context.Context
-	conn      natsConnection
-	attached  chan struct{}
+	// stopping is set by the first Shutdown call, which starts runShutdown.
+	stopping atomic.Bool
+
+	// consumer and conn are written once before attached is closed and only
+	// read after it.
+	consumer consumerShutdowner
+	conn     natsConnection
+	attached chan struct{}
+
+	// done is closed after consumer and NATS shutdown have completed or timed out.
+	done chan struct{}
+	// err is written before done is closed and only read after it.
+	err error
 }
 
 func NewRuntime(signalCtx context.Context) *Runtime {
-	return &Runtime{signalCtx: signalCtx, attached: make(chan struct{})}
+	return &Runtime{
+		signalCtx: signalCtx,
+		attached:  make(chan struct{}),
+		done:      make(chan struct{}),
+	}
 }
 
-// Attach makes the controller's NATS connection available to the probes.
-// It must be called exactly once.
-func (r *Runtime) Attach(conn natsConnection) {
+// Attach transfers ownership of the consumer manager and NATS connection to
+// the Runtime. A shutdown that arrived during controller construction waits for
+// this handoff rather than leaking resources created after the signal. It must
+// be called exactly once.
+func (r *Runtime) Attach(consumer consumerShutdowner, conn natsConnection) {
+	r.consumer = consumer
 	r.conn = conn
 	close(r.attached)
 }
@@ -66,7 +109,7 @@ func (r *Runtime) ReadinessHandler() http.HandlerFunc {
 		}
 
 		conn := r.attachedConn()
-		if conn == nil {
+		if r.stopping.Load() || conn == nil {
 			http.Error(w, "filter runtime is not running", http.StatusServiceUnavailable)
 			return
 		}
@@ -93,5 +136,69 @@ func (r *Runtime) LivenessHandler() http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// Shutdown is idempotent. The first caller starts shutdown; all callers wait
+// for that same result or their own context deadline.
+func (r *Runtime) Shutdown(ctx context.Context) error {
+	if r.stopping.CompareAndSwap(false, true) {
+		go r.runShutdown(ctx)
+	}
+
+	select {
+	case <-r.done:
+		return r.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (r *Runtime) runShutdown(ctx context.Context) {
+	defer close(r.done)
+
+	// Wait even if the initiating caller's context expires. If shutdown races
+	// controller construction, a later Attach must still close the resources;
+	// it will receive the already-canceled context and take the forced path.
+	<-r.attached
+
+	consumerCtx, cancelConsumer := reserveDeadline(ctx, natsDrainReserve)
+	consumerErr := r.consumer.Shutdown(consumerCtx)
+	cancelConsumer()
+
+	r.err = errors.Join(consumerErr, drainNATS(ctx, r.conn))
+}
+
+// reserveDeadline returns a context that expires reserve before ctx's deadline
+// (immediately if that point has passed), or follows ctx when it has none.
+func reserveDeadline(ctx context.Context, reserve time.Duration) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return context.WithCancel(ctx)
+	}
+	return context.WithDeadline(ctx, deadline.Add(-reserve))
+}
+
+func drainNATS(ctx context.Context, conn natsConnection) error {
+	// Register before draining so the CLOSED transition that ends the drain
+	// cannot be missed.
+	closed := conn.StatusChanged(nats.CLOSED)
+	if err := conn.Drain(); err != nil {
+		if errors.Is(err, nats.ErrConnectionClosed) {
+			return nil
+		}
+		conn.Close()
+		return err
+	}
+
+	select {
+	case <-closed:
+		return nil
+	case <-ctx.Done():
+		if conn.Status() == nats.CLOSED {
+			return nil
+		}
+		conn.Close()
+		return ctx.Err()
 	}
 }
