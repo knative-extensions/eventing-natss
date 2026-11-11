@@ -18,6 +18,7 @@ package utils
 
 import (
 	"testing"
+	"time"
 
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 
@@ -127,5 +128,47 @@ func TestEffectiveDelivery(t *testing.T) {
 				t.Errorf("BackoffMax = %v, want %v", got.BackoffMax, tc.wantMax)
 			}
 		})
+	}
+}
+
+func TestDeliveryTimeout(t *testing.T) {
+	timeout := func(s string) *eventingduckv1.DeliverySpec {
+		return &eventingduckv1.DeliverySpec{Timeout: &s}
+	}
+	tests := []struct {
+		name     string
+		delivery *eventingduckv1.DeliverySpec
+		want     time.Duration
+	}{
+		{name: "nil delivery", delivery: nil, want: DefaultDeliveryTimeout},
+		{name: "unset timeout", delivery: &eventingduckv1.DeliverySpec{}, want: DefaultDeliveryTimeout},
+		{name: "seconds", delivery: timeout("PT5S"), want: 5 * time.Second},
+		{name: "minutes", delivery: timeout("PT1M"), want: time.Minute},
+		{name: "zero", delivery: timeout("PT0S"), want: DefaultDeliveryTimeout},
+		{name: "negative", delivery: timeout("-PT1S"), want: DefaultDeliveryTimeout},
+		{name: "invalid", delivery: timeout("invalid"), want: DefaultDeliveryTimeout},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DeliveryTimeout(tt.delivery); got != tt.want {
+				t.Errorf("DeliveryTimeout() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConsumerAckWait(t *testing.T) {
+	tests := []struct {
+		timeout time.Duration
+		want    time.Duration
+	}{
+		{timeout: 5 * time.Second, want: 5*time.Second + AckWaitMargin},
+		{timeout: time.Minute, want: time.Minute + AckWaitMargin},
+		{timeout: 0, want: DefaultDeliveryTimeout + AckWaitMargin},
+	}
+	for _, tt := range tests {
+		if got := ConsumerAckWait(tt.timeout); got != tt.want {
+			t.Errorf("ConsumerAckWait(%v) = %v, want %v", tt.timeout, got, tt.want)
+		}
 	}
 }

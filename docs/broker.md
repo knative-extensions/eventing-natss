@@ -416,7 +416,7 @@ spec:
 
 The filter dispatches messages concurrently using a per-trigger counting semaphore controlled by `max-concurrency`. The semaphore is acquired **before** fetching each message's dispatch goroutine, so when all slots are occupied the fetch loop stalls and new messages remain in the JetStream stream with their AckWait clocks not yet running. This prevents unbounded goroutine growth and avoids the AckWait expiry / duplicate-delivery problem that arises when messages are fetched faster than they can be processed.
 
-Each dispatched message also carries a context deadline equal to the consumer's `AckWait` (set via `trigger.spec.delivery.timeout`). If the subscriber does not respond within that window the HTTP call is cancelled and JetStream redelivers the message automatically.
+Each subscriber request uses `spec.delivery.timeout`, or 30 seconds when unset. A request that times out counts as a retriable failure. The consumer's `AckWait` is the request timeout plus 10 seconds, leaving time to settle the message before JetStream redelivers it. AckWait provides a fallback when the filter stops before acknowledging or rejecting a message. Before forwarding a reply or sending to a dead letter sink, the filter extends AckWait to allow that request to finish.
 
 Slow triggers affect only their own semaphore — they cannot starve or delay other triggers sharing the same filter pod.
 
@@ -463,6 +463,8 @@ The fetch loop caps each pull request to the number of free semaphore slots, so 
 
 ## Retry Behavior
 
+A subscriber request that exceeds `spec.delivery.timeout` follows the same retry count and backoff as a retriable HTTP error. Its final failed attempt is sent to the dead letter sink if configured, then acknowledged. When `retry` is unset, a timed-out request is not retried, matching other retriable failures.
+
 When a subscriber returns an error or times out:
 
 1. **5xx errors, 408, 429**: Message is redelivered with backoff
@@ -491,7 +493,7 @@ After all retries are exhausted, if a dead letter sink is configured, the event 
 
 ### Duplicate message delivery
 
-If consumers are receiving the same event more than once, the most likely cause is that the subscriber is taking longer than `trigger.spec.delivery.timeout` (the consumer's AckWait) to respond. JetStream redelivers the message once AckWait expires. Increase the timeout or reduce subscriber latency.
+Delivery is at least once: a subscriber can receive an event again if the filter stops after sending it but before acknowledging it. A timed-out subscriber request may also have been processed before the connection was closed. Subscribers should handle duplicate event IDs safely. If requests frequently time out, review `spec.delivery.timeout` and subscriber latency.
 
 ### Events going to dead letter sink
 
