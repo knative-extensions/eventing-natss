@@ -146,7 +146,7 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, trigger *eventingv1.Trig
 
 	// Step 4: Reconcile the JetStream consumer
 	if err := r.reconcileConsumer(ctx, trigger, broker); err != nil {
-		trigger.Status.MarkNotSubscribed("ConsumerFailed", "Failed to create JetStream consumer: %v", err)
+		trigger.Status.MarkNotSubscribed("ConsumerFailed", "Failed to reconcile JetStream consumer: %v", err)
 		return err
 	}
 
@@ -280,15 +280,16 @@ func (r *Reconciler) reconcileConsumer(ctx context.Context, trigger *eventingv1.
 		return nil
 	}
 
-	// Consumer exists, update it
+	// Consumer exists, update it. A rejected update keeps the previous
+	// MaxDeliver/AckWait, so the Trigger must not become ready.
 	_, err = r.js.UpdateConsumer(streamName, consumerConfig)
 	if err != nil {
-		// Some fields cannot be updated, so log and continue if it's just a minor mismatch
-		logger.Warnw("Failed to update JetStream consumer", zap.Error(err), zap.String("consumer", consumerName))
-	} else {
-		logger.Debugw("JetStream consumer updated", zap.String("consumer", consumerName))
-		controller.GetEventRecorder(ctx).Event(trigger, corev1.EventTypeNormal, ReasonConsumerUpdated, "JetStream consumer updated")
+		logger.Errorw("Failed to update JetStream consumer", zap.Error(err), zap.String("consumer", consumerName))
+		controller.GetEventRecorder(ctx).Event(trigger, corev1.EventTypeWarning, ReasonConsumerFailed, err.Error())
+		return fmt.Errorf("failed to update consumer: %w", err)
 	}
+	logger.Debugw("JetStream consumer updated", zap.String("consumer", consumerName))
+	controller.GetEventRecorder(ctx).Event(trigger, corev1.EventTypeNormal, ReasonConsumerUpdated, "JetStream consumer updated")
 
 	return nil
 }
