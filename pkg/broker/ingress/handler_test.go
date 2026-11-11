@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natstest "github.com/nats-io/nats-server/v2/test"
@@ -264,6 +265,62 @@ func TestServeHTTP_InvalidCloudEvent(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Status code = %v, want %v", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestServeHTTP_PublishUnavailableReturns503(t *testing.T) {
+	s := runBasicJetStreamServer(t)
+	defer s.Shutdown()
+
+	nc, err := nats.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer nc.Close()
+
+	js, err := nc.JetStream()
+	if err != nil {
+		t.Fatalf("Failed to get JetStream context: %v", err)
+	}
+
+	// Deliberately do NOT create a stream for this broker's subject, so no ack
+	// ever comes back. With a short publish timeout the handler should return
+	// 503 (ask the producer to retry) rather than 500.
+	handler := NewHandler(HandlerConfig{
+		Logger:         zap.NewNop().Sugar(),
+		JetStream:      js,
+		PublishTimeout: 300 * time.Millisecond,
+	})
+	handler.UpdateContract(&contract.Contract{
+		Brokers: map[string]contract.BrokerContract{
+			"test-namespace/no-stream": {
+				Namespace:      "test-namespace",
+				Name:           "no-stream",
+				Path:           "/test-namespace/no-stream",
+				PublishSubject: "test-namespace.no-stream._knative_broker",
+				StreamName:     "MISSING_STREAM",
+			},
+		},
+	})
+
+	event := map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "test.type",
+		"source":      "test/source",
+		"id":          "test-id-503",
+	}
+	eventJSON, _ := json.Marshal(event)
+	req := httptest.NewRequest(http.MethodPost, "/test-namespace/no-stream", bytes.NewBuffer(eventJSON))
+	req.Header.Set("Content-Type", "application/cloudevents+json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("Status code = %v, want %v", w.Code, http.StatusServiceUnavailable)
+	}
+	if got := w.Header().Get("Retry-After"); got == "" {
+		t.Error("expected Retry-After header to be set on 503")
 	}
 }
 
