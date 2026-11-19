@@ -18,6 +18,7 @@ package filter
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -466,4 +467,33 @@ func TestTransform_NoType(t *testing.T) {
 	if string(te) != "initial" {
 		t.Errorf("TypeExtractorTransformer = %q, want %q (should be unchanged when type is absent)", string(te), "initial")
 	}
+}
+
+func TestHandleMessage_LastRequestTimeoutSendsToDeadLetter(t *testing.T) {
+	subscriber := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	defer subscriber.Close()
+	deliveries := make(chan string, 1)
+	dls := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deliveries <- r.Header.Get("Ce-Id")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer dls.Close()
+
+	ctx := logCtx()
+	handler := newTestHandler(t, ctx, subscriber.URL, "")
+	defer handler.Cleanup()
+	dlsURL, err := apis.ParseURL(dls.URL)
+	require.NoError(t, err)
+	handler.Update(makeTrigger("default", "test-trigger", ""),
+		snapshotHandlerConfig(t, handler).subscriber, nil,
+		&duckv1.Addressable{URL: dlsURL}, &kncloudevents.RetryConfig{},
+		&kncloudevents.RetryConfig{
+			RequestTimeout: 50 * time.Millisecond,
+			CheckRetry:     func(context.Context, *http.Response, error) (bool, error) { return false, nil },
+		})
+	handler.HandleMessage(ctx, makeStructuredCEMsg("test.type", "test/source", "last-timeout"))
+	require.Equal(t, "last-timeout", receiveWithin(t, deliveries, "timed-out final try did not reach dead letter sink"))
 }

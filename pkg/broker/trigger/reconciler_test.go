@@ -448,7 +448,7 @@ func TestBuildConsumerConfig(t *testing.T) {
 			trigger:        newTriggerWithSubscriber(testNamespace, testTriggerName, testBrokerName, "subscriber.example.com"),
 			broker:         newReadyBroker(testNamespace, testBrokerName),
 			consumerName:   "test-consumer",
-			wantAckWait:    30 * time.Second,
+			wantAckWait:    40 * time.Second, // 30s default timeout + 10s margin
 			wantMaxDeliver: 3,
 			wantAckPolicy:  nats.AckExplicitPolicy,
 			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
@@ -465,7 +465,7 @@ func TestBuildConsumerConfig(t *testing.T) {
 			}(),
 			broker:         newReadyBroker(testNamespace, testBrokerName),
 			consumerName:   "test-consumer",
-			wantAckWait:    30 * time.Second,
+			wantAckWait:    40 * time.Second,
 			wantMaxDeliver: 6, // retry + 1
 			wantAckPolicy:  nats.AckExplicitPolicy,
 			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
@@ -482,7 +482,7 @@ func TestBuildConsumerConfig(t *testing.T) {
 			}(),
 			broker:         newReadyBroker(testNamespace, testBrokerName),
 			consumerName:   "test-consumer",
-			wantAckWait:    1 * time.Minute,
+			wantAckWait:    70 * time.Second, // timeout + 10s margin
 			wantMaxDeliver: 3,
 			wantAckPolicy:  nats.AckExplicitPolicy,
 			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
@@ -499,7 +499,24 @@ func TestBuildConsumerConfig(t *testing.T) {
 			}(),
 			broker:         newReadyBroker(testNamespace, testBrokerName),
 			consumerName:   "test-consumer",
-			wantAckWait:    30 * time.Second, // default
+			wantAckWait:    40 * time.Second, // default timeout + margin
+			wantMaxDeliver: 3,
+			wantAckPolicy:  nats.AckExplicitPolicy,
+			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
+		},
+		{
+			name: "zero timeout falls back to default",
+			trigger: func() *eventingv1.Trigger {
+				timeout := "PT0S"
+				trigger := newTriggerWithSubscriber(testNamespace, testTriggerName, testBrokerName, "subscriber.example.com")
+				trigger.Spec.Delivery = &eventingduckv1.DeliverySpec{
+					Timeout: &timeout,
+				}
+				return trigger
+			}(),
+			broker:         newReadyBroker(testNamespace, testBrokerName),
+			consumerName:   "test-consumer",
+			wantAckWait:    40 * time.Second,
 			wantMaxDeliver: 3,
 			wantAckPolicy:  nats.AckExplicitPolicy,
 			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
@@ -514,7 +531,7 @@ func TestBuildConsumerConfig(t *testing.T) {
 				return b
 			}(),
 			consumerName:   "test-consumer",
-			wantAckWait:    time.Minute,
+			wantAckWait:    70 * time.Second,
 			wantMaxDeliver: 6,
 			wantAckPolicy:  nats.AckExplicitPolicy,
 			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
@@ -534,7 +551,7 @@ func TestBuildConsumerConfig(t *testing.T) {
 				return b
 			}(),
 			consumerName:   "test-consumer",
-			wantAckWait:    30 * time.Second, // trigger spec wins wholesale; its unset timeout is NOT inherited
+			wantAckWait:    40 * time.Second, // trigger spec wins wholesale; its unset timeout is NOT inherited
 			wantMaxDeliver: 2,                // trigger retry + 1
 			wantAckPolicy:  nats.AckExplicitPolicy,
 			wantFilterSubj: "test-namespace.test-broker._knative_broker.>",
