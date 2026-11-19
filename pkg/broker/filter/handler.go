@@ -446,8 +446,9 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 			}
 		}
 	default:
-		// Terminate - non-retriable error
-		if lastTry && config.deadLetterSink != nil {
+		// Non-retriable response: retrying cannot succeed, so dead-letter the
+		// event right away (if configured) and terminate the message.
+		if config.deadLetterSink != nil {
 			// Send to dead letter sink
 			dlsDispatchInfo, dlsErr := h.dispatcher.SendEvent(ctx, *event, *config.deadLetterSink,
 				kncloudevents.WithRetryConfig(&defaultRetry),
@@ -504,8 +505,7 @@ func (h *TriggerHandler) Cleanup() {
 func determineNatsResult(responseCode int, err error) protocol.Result {
 	result := protocol.ResultACK
 	if err != nil {
-		code := responseCode
-		if code/100 == 5 || code == http.StatusTooManyRequests || code == http.StatusRequestTimeout {
+		if jsutils.IsRetriableStatusCode(responseCode) {
 			// Retriable error, effectively this is nats protocol NACK
 			result = protocol.NewReceipt(false, "%w", err)
 		} else {
