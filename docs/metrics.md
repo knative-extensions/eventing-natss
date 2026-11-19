@@ -113,3 +113,27 @@ EOF
 
 Access NatssChannel controller metrics
 [http://localhost:9091/metrics](http://localhost:9091/metrics).
+
+## Broker filter delivery attempts
+
+The Broker filter exports `kn.eventing.broker.filter.dispatch.attempts`, which
+the Prometheus exporter exposes as
+`kn_eventing_broker_filter_dispatch_attempts_total`. It counts each delivery
+attempt to a subscriber and each delivery to a dead letter sink. A dead letter
+delivery counts once, after the filter's own retries of the dead letter
+request.
+
+| Label | Value |
+|-------|-------|
+| `kn_trigger_namespace`, `kn_trigger_name` | The Trigger that sent the request |
+| `http_response_status_code` | The response status code. `0` when the subscriber did not respond before the delivery deadline, and `-1` when the request could not be sent. The Knative dispatcher reports a request that failed without a response, such as a connection error, as `500` |
+| `delivery_result` | `subscriber_success`, `subscriber_retry`, `subscriber_permanent`, `subscriber_timeout`, `dead_letter_success`, or `dead_letter_failure`. A subscriber request cancelled because the filter is stopping is not counted |
+
+For example, this query shows the dead letter requests that failed in the last
+five minutes:
+
+```promql
+sum by (kn_trigger_namespace, kn_trigger_name, http_response_status_code) (
+  increase(kn_eventing_broker_filter_dispatch_attempts_total{delivery_result="dead_letter_failure"}[5m])
+)
+```

@@ -46,6 +46,10 @@ import (
 // same as the channel's (kn.eventing.dispatch.duration) so they aggregate.
 const otelScope = "knative.dev/eventing-natss/pkg/broker/filter"
 
+// dispatchAttemptsMetric is the name of the counter of subscriber and dead
+// letter sink deliveries.
+const dispatchAttemptsMetric = "kn.eventing.broker.filter.dispatch.attempts"
+
 // latencyBounds are the explicit histogram bucket boundaries (in seconds) for
 // the dispatch.duration metric. They must match upstream eventing's channel
 // dispatcher (pkg/channel/fanout) so the shared kn.eventing.dispatch.duration
@@ -124,6 +128,7 @@ type ConsumerManager struct {
 	tracer           trace.Tracer
 	dispatchDuration metric.Float64Histogram
 	processDuration  metric.Float64Histogram
+	dispatchAttempts metric.Int64Counter
 
 	// Map of trigger UID to subscription
 	subscriptions map[string]*TriggerSubscription
@@ -233,6 +238,15 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 		processDuration = nil
 	}
 
+	dispatchAttempts, err := meter.Int64Counter(
+		dispatchAttemptsMetric,
+		metric.WithDescription("Subscriber and dead letter sink deliveries by delivery result"),
+	)
+	if err != nil {
+		logger.Warnw("failed to create dispatch attempts counter; metric will be skipped", zap.Error(err))
+		dispatchAttempts = nil
+	}
+
 	cm := &ConsumerManager{
 		logger:                logger,
 		ctx:                   ctx,
@@ -245,6 +259,7 @@ func NewConsumerManager(ctx context.Context, conn *nats.Conn, js nats.JetStreamC
 		tracer:                tracer,
 		dispatchDuration:      dispatchDuration,
 		processDuration:       processDuration,
+		dispatchAttempts:      dispatchAttempts,
 		subscriptions:         make(map[string]*TriggerSubscription),
 	}
 
@@ -387,6 +402,7 @@ func (m *ConsumerManager) SubscribeTrigger(
 		m.tracer,
 		m.dispatchDuration,
 		m.processDuration,
+		m.dispatchAttempts,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create trigger handler: %w", err)
