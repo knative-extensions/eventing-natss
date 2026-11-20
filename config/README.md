@@ -32,11 +32,11 @@ They do not offer:
 4. Create JetStream channels:
 
    ```yaml
-    apiVersion: messaging.knative.dev/v1alpha1
-    kind: NatsJetStreamChannel
-    metadata:
-        name: channel-defaults
-        namespace: knative-eventing
+   apiVersion: messaging.knative.dev/v1alpha1
+   kind: NatsJetStreamChannel
+   metadata:
+     name: channel-defaults
+     namespace: knative-eventing
    ```
 
 ## Components

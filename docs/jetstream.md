@@ -42,17 +42,17 @@ that namespace.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-    name: config-ch-jetstream-defaults
-    namespace: knative-eventing
+  name: config-ch-jetstream-defaults
+  namespace: knative-eventing
 data:
-    jetstream-dispatcher-config: |
-        clusterDefault:
-            configName: config-nats
-        namespaceDefaults:
-            my-namespace:
-                configName: custom-jetstream-config     # for dispatchers in the namespace, "my-namespace", use the 
-                                                        # ConfigMap "custom-jetstream-config". Only applicable when 
-                                                        # namespace-scoping is enabled.
+  jetstream-dispatcher-config: |
+    clusterDefault:
+        configName: config-nats
+    namespaceDefaults:
+        my-namespace:
+            configName: custom-jetstream-config     # for dispatchers in the namespace, "my-namespace", use the 
+                                                    # ConfigMap "custom-jetstream-config". Only applicable when 
+                                                    # namespace-scoping is enabled.
 ```
 
 ### Dispatcher
@@ -83,34 +83,34 @@ This config map should follow the shape outlined below:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-    name: config-nats
-    namespace: knative-eventing
+  name: config-nats
+  namespace: knative-eventing
 data:
-    eventing-nats: |
-        url: ""                         # the URL to the JetStream-enabled NATS server
-        auth:
-            credentialFile:             # details of the NATS credential file to use for authentication, initially only
-                                        # 'secret' will be supported, but other options may be implemented in the future.
-                secret:
-                    key: ""             # the key of the secret containing the credentials, defaults to "nats.creds"
-                    name: ""      # the secret containing a NATS credentials file.
-            tls:                        # enable mTLS authentication
-                secret:
-                    name: ""            # a secret matching the shape as the type "kubernetes.io/tls" to be used for 
-                                        # mTLS connections.
-        tls:                            # this object should only be defined when mTLS is not required (configured via 
-                                        # `.auth.tls`) but server verification is. N.B. this is also only required if
-                                        # the server isn't using a certificate chain which already exists in the 
-                                        # truststore.
-            caBundle: ""                # caBundle is a base64 PEM encoded CA certificate chain
+  eventing-nats: |
+    url: ""                         # the URL to the JetStream-enabled NATS server
+    auth:
+        credentialFile:             # details of the NATS credential file to use for authentication, initially only
+                                    # 'secret' will be supported, but other options may be implemented in the future.
             secret:
-                name: ""                # a secret containing a `ca.crt` entry.
-        connOpts:
-          retryOnFailedConnect: true           # should it reconnect on failed connection
-          maxReconnects: 50                    # max reconnect attempts
-          reconnectWait: 2000                  # delay between reconnect attempts
-          reconnectJitterMilliseconds: 100     # upper bound of a random delay added ReconnectWait
-          reconnectJitterTLSMilliseconds: 1000 # upper bound of a random delay added ReconnectWait
+                key: ""             # the key of the secret containing the credentials, defaults to "nats.creds"
+                name: ""      # the secret containing a NATS credentials file.
+        tls:                        # enable mTLS authentication
+            secret:
+                name: ""            # a secret matching the shape as the type "kubernetes.io/tls" to be used for 
+                                    # mTLS connections.
+    tls:                            # this object should only be defined when mTLS is not required (configured via 
+                                    # `.auth.tls`) but server verification is. N.B. this is also only required if
+                                    # the server isn't using a certificate chain which already exists in the 
+                                    # truststore.
+        caBundle: ""                # caBundle is a base64 PEM encoded CA certificate chain
+        secret:
+            name: ""                # a secret containing a `ca.crt` entry.
+    connOpts:
+      retryOnFailedConnect: true           # should it reconnect on failed connection
+      maxReconnects: 50                    # max reconnect attempts
+      reconnectWait: 2000                  # delay between reconnect attempts
+      reconnectJitterMilliseconds: 100     # upper bound of a random delay added ReconnectWait
+      reconnectJitterTLSMilliseconds: 1000 # upper bound of a random delay added ReconnectWait
 ```
 
 ## JetStream integration
@@ -129,7 +129,6 @@ for [Dispatcher Configuration](#Dispatcher configuration):
 All `NatsJetStreamChannel` resources managed by a dispatcher will inherit the same security configuration. If you wish
 for different channels use separate credentials then they must exist in different namespaces and scoped to that
 namespace (see [Scoping](#Scoping) above).
-
 
 ### Stream/Consumer configuration
 
@@ -197,52 +196,57 @@ between `backoffMax` and `retryAfterMax` and for the required feature flags.
 apiVersion: messaging.knative.dev/v1alpha1
 kind: NatsJetStreamChannel
 metadata:
-    name: foo
+  name: foo
 spec:
-    subscribers: []                 # SubscribableSpec
-    delivery: {}                    # DeliverySpec
-    stream:
-        overrideName: ""            # stream name defaults to be based on the namespace/name of the channel, use this 
-                                    # to override it
-        config:
-            additionalSubjects: []  # we create a unique subject per channel, but users may have existing components 
-                                    # publishing to existing subjects which users may want to adopt into Knative 
-                                    # subscriptions
-            retention: ""           # one of: Limits, Interest, Work - defaults to "Limits"
-            maxConsumers: 0         # default 0 denoting no maximum
-            maxMsgs: 0              # default 0 denoting no maximum
-            maxBytes: 0             # default 0 denoting no maximum
-            discard: ""             # one of: Old, New - defaults to "Old"
-            maxAge: ""              # time.Duration, defaults to no max age
-            maxMsgSize: 0           # default 0 denoting no maximum
-            storage: ""             # one of: File, Memory - defaults to "File"
-            replicas: 0             # applicable when the JetStream instance is clustered; the number of replicas of 
-                                    # the data to create
-            noAck: false            # defaults to false (i.e. ack enabled), not sure if we should allow users to 
-                                    # configure this?
-            duplicateWindow: ""     # time.Duration for duplication tracking
-            placement:
-                cluster: ""         # place the stream on a specific cluster
-                tags: [""]          # place the stream on servers with specific tags
-            mirror:                 # mirror this stream from another stream
-                name: ""            # the name of the stream to mirror
-                optStartSeq: ""     # stringified uint64 - takes precendence over optStartTime
-                optStartTime: ""    # RFC3339 datetime
-                filterSubject: ""   # defaults to no filter
-            sources: []             # an array of stream sources (see mirror)
-    consumerConfigTemplate:         # a consumer per .spec.subscribers[] will be created with these defaults
-        deliverPolicy: ""           # one of: All, Last, New, ByStartSequence, ByStartTime - defaults to "All"
-        optStartSeq: ""             # stringified uint64 - takes precendence over optStartTime
-        optStartTime: ""            # RFC3339 datetime
-        ackWait: ""                 # time.Duration
-        maxDeliver: 0               # defaults to no maximum
-        filterSubject: ""           # defaults to no filter
-        replayPolicy: ""            # one of: Instant, Original - defaults to "Instant"
-        rateLimitBps: 0             # bits-per-second
-        sampleFrequency: ""         # percentage of events to sample in the range 0-100, this is a string and allows 
-                                    # both 30 and 30% as valid values
-        maxAckPending: 0            # number of outstanding messages awaiting ack before suspending delivery, 0 denotes 
-                                    # no maximum
+  subscribers: [] # SubscribableSpec
+  delivery: {} # DeliverySpec
+  stream:
+    overrideName:
+      "" # stream name defaults to be based on the namespace/name of the channel, use this
+      # to override it
+    config:
+      additionalSubjects: [] # we create a unique subject per channel, but users may have existing components
+        # publishing to existing subjects which users may want to adopt into Knative
+        # subscriptions
+      retention: "" # one of: Limits, Interest, Work - defaults to "Limits"
+      maxConsumers: 0 # default 0 denoting no maximum
+      maxMsgs: 0 # default 0 denoting no maximum
+      maxBytes: 0 # default 0 denoting no maximum
+      discard: "" # one of: Old, New - defaults to "Old"
+      maxAge: "" # time.Duration, defaults to no max age
+      maxMsgSize: 0 # default 0 denoting no maximum
+      storage: "" # one of: File, Memory - defaults to "File"
+      replicas:
+        0 # applicable when the JetStream instance is clustered; the number of replicas of
+        # the data to create
+      noAck:
+        false # defaults to false (i.e. ack enabled), not sure if we should allow users to
+        # configure this?
+      duplicateWindow: "" # time.Duration for duplication tracking
+      placement:
+        cluster: "" # place the stream on a specific cluster
+        tags: [""] # place the stream on servers with specific tags
+      mirror: # mirror this stream from another stream
+        name: "" # the name of the stream to mirror
+        optStartSeq: "" # stringified uint64 - takes precendence over optStartTime
+        optStartTime: "" # RFC3339 datetime
+        filterSubject: "" # defaults to no filter
+      sources: [] # an array of stream sources (see mirror)
+  consumerConfigTemplate: # a consumer per .spec.subscribers[] will be created with these defaults
+    deliverPolicy: "" # one of: All, Last, New, ByStartSequence, ByStartTime - defaults to "All"
+    optStartSeq: "" # stringified uint64 - takes precendence over optStartTime
+    optStartTime: "" # RFC3339 datetime
+    ackWait: "" # time.Duration
+    maxDeliver: 0 # defaults to no maximum
+    filterSubject: "" # defaults to no filter
+    replayPolicy: "" # one of: Instant, Original - defaults to "Instant"
+    rateLimitBps: 0 # bits-per-second
+    sampleFrequency:
+      "" # percentage of events to sample in the range 0-100, this is a string and allows
+      # both 30 and 30% as valid values
+    maxAckPending:
+      0 # number of outstanding messages awaiting ack before suspending delivery, 0 denotes
+      # no maximum
 ```
 
 ### Future functionality
@@ -254,17 +258,17 @@ spec:
 
   ```yaml
   auth:
-      usernamePassword:
-          secret:
-              usernameKey: ""     # the key of the secret containing the username, defaults to "username"
-              passwordKey: ""     # the key of the secret containing the password, defaults to "password"
-              secretName: ""      # the secret containing the username and password
-      token:
-          secret:
-              key: ""             # the key of the secret containing the token, defaults to "token"
-              secretName: ""      # the secret containing a token.
-      nKey:                       # NKey authentication requires some client-side 
-          secret:
-              key: ""             # the key of the secret containing the credentials, defaults to "nats.creds"
-              secretName: ""      # the secret containing a NATS credentials file.
+    usernamePassword:
+      secret:
+        usernameKey: "" # the key of the secret containing the username, defaults to "username"
+        passwordKey: "" # the key of the secret containing the password, defaults to "password"
+        secretName: "" # the secret containing the username and password
+    token:
+      secret:
+        key: "" # the key of the secret containing the token, defaults to "token"
+        secretName: "" # the secret containing a token.
+    nKey: # NKey authentication requires some client-side
+      secret:
+        key: "" # the key of the secret containing the credentials, defaults to "nats.creds"
+        secretName: "" # the secret containing a NATS credentials file.
   ```
