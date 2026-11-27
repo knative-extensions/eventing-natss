@@ -51,15 +51,15 @@ From the root directory of this repository:
 
 1. Install NATS JetStream by running the command:
 
-    ```bash
-    kubectl apply -f ./config/mtbroker/natsjsm.yaml
-    ```
+   ```bash
+   kubectl apply -f ./config/mtbroker/natsjsm.yaml
+   ```
 
 1. Install the Broker controller and data plane by running the command:
 
-    ```bash
-    ko apply -f ./config/broker
-    ```
+   ```bash
+   ko apply -f ./config/broker
+   ```
 
 ## Usage
 
@@ -129,6 +129,7 @@ spec:
 The new `filters` field (plural) supports more advanced filtering using the CloudEvents Subscriptions API:
 
 **Exact Match:**
+
 ```yaml
 apiVersion: eventing.knative.dev/v1
 kind: Trigger
@@ -182,10 +183,10 @@ The Trigger owner uses these fields to keep retry delays bounded when
 delays calculated by the Broker filter are `1s`, `2s`, `4s`, `4s`, `4s`, and
 `4s`.
 
-| Field | Delay it limits | When it applies | Example result |
-|-------|-----------------|-----------------|----------------|
-| `backoffMax` | The delay calculated from `backoffDelay` and `backoffPolicy` | Every normal retry | `PT4S` stops the exponential sequence at 4 seconds |
-| `retryAfterMax` | A delay requested by a subscriber's `Retry-After` response header | HTTP 429 and 503 responses | `PT6S` reduces `Retry-After: 10` to 6 seconds |
+| Field           | Delay it limits                                                   | When it applies            | Example result                                     |
+| --------------- | ----------------------------------------------------------------- | -------------------------- | -------------------------------------------------- |
+| `backoffMax`    | The delay calculated from `backoffDelay` and `backoffPolicy`      | Every normal retry         | `PT4S` stops the exponential sequence at 4 seconds |
+| `retryAfterMax` | A delay requested by a subscriber's `Retry-After` response header | HTTP 429 and 503 responses | `PT6S` reduces `Retry-After: 10` to 6 seconds      |
 
 For a 429 or 503 response, the Broker uses the larger of the normal backoff and
 the capped `Retry-After` value. These fields limit the delay requested from
@@ -212,14 +213,14 @@ data:
 
 These variables set the **broker-wide defaults** for the filter deployment. All triggers in the same broker share these defaults unless they override them with per-trigger annotations (see below).
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `NATS_URL` | NATS server URL | Required |
-| `POD_NAME` | Pod name for identification | Required |
-| `CONTAINER_NAME` | Container name for identification | Required |
-| `CONSUMER_FETCH_BATCH_SIZE` | Number of messages to fetch per batch | `10` |
-| `CONSUMER_FETCH_TIMEOUT` | How long a fetch waits for messages before returning empty | `200ms` |
-| `CONSUMER_MAX_CONCURRENCY` | Maximum concurrent in-flight HTTP dispatches per trigger | `20` |
+| Variable                    | Description                                                | Default  |
+| --------------------------- | ---------------------------------------------------------- | -------- |
+| `NATS_URL`                  | NATS server URL                                            | Required |
+| `POD_NAME`                  | Pod name for identification                                | Required |
+| `CONTAINER_NAME`            | Container name for identification                          | Required |
+| `CONSUMER_FETCH_BATCH_SIZE` | Number of messages to fetch per batch                      | `10`     |
+| `CONSUMER_FETCH_TIMEOUT`    | How long a fetch waits for messages before returning empty | `200ms`  |
+| `CONSUMER_MAX_CONCURRENCY`  | Maximum concurrent in-flight HTTP dispatches per trigger   | `20`     |
 
 ### Configuring a Broker with a NatsJetStreamBrokerConfig
 
@@ -344,12 +345,12 @@ A Broker with `eventing.knative.dev/broker.class: NatsJetStreamBroker` can
 omit `spec.config`. Knative's webhook fills it from these defaults when the
 Broker is created:
 
-| Broker | Selected configuration |
-|--------|------------------------|
-| NATS Broker in `orders`, with no explicit `spec.config` | `orders/natsjetstream-default` |
-| NATS Broker in another namespace, with no explicit `spec.config` | `knative-eventing/natsjetstream-default` |
-| NATS Broker with an explicit `spec.config` | The explicitly referenced CR |
-| `MTChannelBasedBroker`, with no explicit `spec.config` | Its existing `config-br-default-channel` reference |
+| Broker                                                           | Selected configuration                             |
+| ---------------------------------------------------------------- | -------------------------------------------------- |
+| NATS Broker in `orders`, with no explicit `spec.config`          | `orders/natsjetstream-default`                     |
+| NATS Broker in another namespace, with no explicit `spec.config` | `knative-eventing/natsjetstream-default`           |
+| NATS Broker with an explicit `spec.config`                       | The explicitly referenced CR                       |
+| `MTChannelBasedBroker`, with no explicit `spec.config`           | Its existing `config-br-default-channel` reference |
 
 Changing `config-br-defaults` selects a different reference for new Brokers.
 Existing Brokers keep their selected reference. Updating a referenced CR
@@ -368,14 +369,14 @@ for a non-empty annotation and `LegacyDefaultsConfigDeprecated` when it
 successfully reads a non-empty legacy defaults ConfigMap. New configurations
 use the CR references described above.
 
-| Broker configuration | Configuration used |
-|----------------------|--------------------|
-| `spec.config` references a `NatsJetStreamBrokerConfig`, explicitly or through Knative defaults | That resource's entire `spec`; defaults and the legacy annotation are not merged into it |
-| `spec.config` is omitted or references a `v1/ConfigMap`, and the legacy annotation is non-empty | The annotation's entire JSON configuration; defaults are not merged into it |
+| Broker configuration                                                                                  | Configuration used                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spec.config` references a `NatsJetStreamBrokerConfig`, explicitly or through Knative defaults        | That resource's entire `spec`; defaults and the legacy annotation are not merged into it                                                    |
+| `spec.config` is omitted or references a `v1/ConfigMap`, and the legacy annotation is non-empty       | The annotation's entire JSON configuration; defaults are not merged into it                                                                 |
 | `spec.config` is omitted or references a `v1/ConfigMap`, and the legacy annotation is absent or empty | The Broker namespace's `natsjetstream-broker-config` ConfigMap: matching `namespaceDefaults`, then `clusterDefault`, then built-in defaults |
-| `spec.config` references another kind or API version | `ConfigLoadFailed` |
-| The referenced `NatsJetStreamBrokerConfig` does not exist | `ConfigLoadFailed` |
-| The legacy annotation contains invalid JSON and no new CR is referenced | `ConfigLoadFailed` |
+| `spec.config` references another kind or API version                                                  | `ConfigLoadFailed`                                                                                                                          |
+| The referenced `NatsJetStreamBrokerConfig` does not exist                                             | `ConfigLoadFailed`                                                                                                                          |
+| The legacy annotation contains invalid JSON and no new CR is referenced                               | `ConfigLoadFailed`                                                                                                                          |
 
 Knative's webhook can supply a `v1/ConfigMap` reference even for a
 `NatsJetStreamBroker`. The controller does not read NATS settings from that
@@ -388,11 +389,11 @@ explicit ConfigMap references as well as webhook defaults.
 
 Each trigger can override the broker-wide defaults via annotations. This lets individual triggers with different throughput or latency requirements coexist in the same broker without affecting each other.
 
-| Annotation | Description | Default |
-|------------|-------------|---------|
-| `natsjetstream.eventing.knative.dev/fetch-batch-size` | Messages fetched per pull request | `CONSUMER_FETCH_BATCH_SIZE` |
-| `natsjetstream.eventing.knative.dev/fetch-timeout` | Wait time per fetch when no messages arrive (Go duration, e.g. `200ms`, `1s`) | `CONSUMER_FETCH_TIMEOUT` |
-| `natsjetstream.eventing.knative.dev/max-concurrency` | Maximum concurrent in-flight HTTP dispatches for this trigger | `CONSUMER_MAX_CONCURRENCY` |
+| Annotation                                            | Description                                                                   | Default                     |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------- |
+| `natsjetstream.eventing.knative.dev/fetch-batch-size` | Messages fetched per pull request                                             | `CONSUMER_FETCH_BATCH_SIZE` |
+| `natsjetstream.eventing.knative.dev/fetch-timeout`    | Wait time per fetch when no messages arrive (Go duration, e.g. `200ms`, `1s`) | `CONSUMER_FETCH_TIMEOUT`    |
+| `natsjetstream.eventing.knative.dev/max-concurrency`  | Maximum concurrent in-flight HTTP dispatches for this trigger                 | `CONSUMER_MAX_CONCURRENCY`  |
 
 ```yaml
 apiVersion: eventing.knative.dev/v1
@@ -422,12 +423,12 @@ Slow triggers affect only their own semaphore — they cannot starve or delay ot
 
 ### Tuning Guidelines
 
-| Scenario | Batch Size | Fetch Timeout | Max Concurrency | Use Case |
-|----------|------------|---------------|-----------------|----------|
-| High Throughput | 50–100 | 1–2s | 50–100 | Batch processing, analytics |
-| Low Latency | 1–5 | 100ms | 10–20 | Real-time notifications |
-| Slow Subscriber | 5–10 | 200ms | 2–5 | Rate-limited or expensive downstream |
-| Balanced (default) | 10 | 200ms | 20 | General purpose |
+| Scenario           | Batch Size | Fetch Timeout | Max Concurrency | Use Case                             |
+| ------------------ | ---------- | ------------- | --------------- | ------------------------------------ |
+| High Throughput    | 50–100     | 1–2s          | 50–100          | Batch processing, analytics          |
+| Low Latency        | 1–5        | 100ms         | 10–20           | Real-time notifications              |
+| Slow Subscriber    | 5–10       | 200ms         | 2–5             | Rate-limited or expensive downstream |
+| Balanced (default) | 10         | 200ms         | 20              | General purpose                      |
 
 The fetch loop caps each pull request to the number of free semaphore slots, so a batch is never larger than the available dispatch capacity. This means `max-concurrency` and `fetch-batch-size` can be tuned independently — there is no requirement for one to be larger than the other.
 
@@ -479,9 +480,9 @@ After all retries are exhausted, if a dead letter sink is configured, the event 
 2. Verify the subscriber service is running and accessible
 3. Check the filter Pod logs by running the command:
 
-    ```bash
-    kubectl logs -l eventing.knative.dev/role=filter -n <namespace>
-    ```
+   ```bash
+   kubectl logs -l eventing.knative.dev/role=filter -n <namespace>
+   ```
 
 ### High latency or low throughput
 
