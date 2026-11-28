@@ -62,6 +62,10 @@ func (m *mockJetStreamContext) setAddConsumerError(err error) {
 	m.addConsumerErr = err
 }
 
+func (m *mockJetStreamContext) setUpdateConsumerError(err error) {
+	m.updateConsumer = err
+}
+
 func (m *mockJetStreamContext) setDeleteConsumerError(err error) {
 	m.deleteConsumer = err
 }
@@ -641,6 +645,23 @@ func TestReconcileConsumer_UpdateExisting(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("reconcileConsumer() returned error = %v, want nil", err)
+	}
+}
+
+func TestReconcileConsumer_UpdateFailed(t *testing.T) {
+	ctx := testContextWithRecorder(t)
+	js := newMockJetStreamContext()
+	broker := newReadyBroker(testNamespace, testBrokerName)
+	streamName := "KN_BROKER_TEST_NAMESPACE__TEST_BROKER"
+	consumerName := "KN_TRIGGER_TESTTRIGGERUID12345"
+	js.addConsumerInfo(streamName, consumerName)
+	js.setUpdateConsumerError(errors.New("consumer update rejected"))
+
+	r := newReconcilerForTest(newFakeBrokerLister(), js)
+	trigger := newTriggerWithSubscriber(testNamespace, testTriggerName, testBrokerName, "subscriber.example.com")
+
+	if err := r.reconcileConsumer(ctx, trigger, broker); err == nil {
+		t.Error("reconcileConsumer() returned nil, want error when the consumer update is rejected")
 	}
 }
 
