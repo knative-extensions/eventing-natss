@@ -105,6 +105,20 @@ func TestDetermineNatsResult(t *testing.T) {
 			wantNACK:     true,
 		},
 		{
+			name:         "retriable - 404 not found",
+			responseCode: http.StatusNotFound,
+			err:          errors.New("not found"),
+			wantACK:      false,
+			wantNACK:     true,
+		},
+		{
+			name:         "retriable - 409 conflict",
+			responseCode: http.StatusConflict,
+			err:          errors.New("conflict"),
+			wantACK:      false,
+			wantNACK:     true,
+		},
+		{
 			name:         "non-retriable - 400 bad request",
 			responseCode: http.StatusBadRequest,
 			err:          errors.New("bad request"),
@@ -126,9 +140,9 @@ func TestDetermineNatsResult(t *testing.T) {
 			wantNACK:     false,
 		},
 		{
-			name:         "non-retriable - 404 not found",
-			responseCode: http.StatusNotFound,
-			err:          errors.New("not found"),
+			name:         "non-retriable - 413 content too large",
+			responseCode: http.StatusRequestEntityTooLarge,
+			err:          errors.New("content too large"),
 			wantACK:      false,
 			wantNACK:     false,
 		},

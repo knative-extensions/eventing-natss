@@ -337,12 +337,14 @@ func TestHandleMessage_Dispatch_Success(t *testing.T) {
 	}
 }
 
-// TestHandleMessage_Dispatch_RetriableError verifies that 5xx/429 responses
+// TestHandleMessage_Dispatch_RetriableError verifies that 5xx/404/409/429 responses
 // reach the subscriber and nack is attempted (fails gracefully without a real NATS conn).
 func TestHandleMessage_Dispatch_RetriableError(t *testing.T) {
 	codes := []int{
 		http.StatusInternalServerError,
 		http.StatusServiceUnavailable,
+		http.StatusNotFound,
+		http.StatusConflict,
 		http.StatusTooManyRequests,
 	}
 	for _, code := range codes {
@@ -375,7 +377,7 @@ func TestHandleMessage_Dispatch_NonRetriable(t *testing.T) {
 	codes := []int{
 		http.StatusBadRequest,
 		http.StatusForbidden,
-		http.StatusNotFound,
+		http.StatusRequestEntityTooLarge,
 	}
 	for _, code := range codes {
 		code := code
