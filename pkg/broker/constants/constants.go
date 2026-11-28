@@ -16,6 +16,8 @@ limitations under the License.
 
 package constants
 
+import "time"
+
 const (
 	// SettingsConfigMapName is the name of the configmap used to hold broker NATS settings
 	SettingsConfigMapName = "config-nats-broker"
@@ -25,4 +27,8 @@ const (
 
 	// BrokerClassName is the broker class annotation value for NatsJetStream brokers
 	BrokerClassName = "NatsJetStreamBroker"
+
+	// FilterTerminationGracePeriod gives the filter runtime time to stop
+	// fetching, finish dispatches, and drain its NATS connection.
+	FilterTerminationGracePeriod = 45 * time.Second
 )
