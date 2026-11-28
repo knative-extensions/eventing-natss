@@ -43,6 +43,7 @@ import (
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	"knative.dev/pkg/logging"
 
+	brokerutils "knative.dev/eventing-natss/pkg/broker/utils"
 	jsutils "knative.dev/eventing-natss/pkg/channel/jetstream/utils"
 	"knative.dev/eventing-natss/pkg/tracing"
 	eventingduckv1 "knative.dev/eventing/pkg/apis/duck/v1"
@@ -208,8 +209,9 @@ func (h *TriggerHandler) filterEvent(ctx context.Context, event *cloudevents.Eve
 }
 
 // HandleMessage processes a NATS message, applies filter, and dispatches to subscriber.
-// ctx should carry an AckWait deadline so that the outbound HTTP call is cancelled
-// before JetStream redelivers the message; use context.WithTimeout(parent, ackWait).
+// ctx cancels subscriber requests when the subscription stops. Each request has
+// its own delivery timeout; reply forwarding and message settlement can finish
+// after cancellation.
 func (h *TriggerHandler) HandleMessage(ctx context.Context, msg *nats.Msg) {
 	logger := h.logger.With(zap.String("msg_id", msg.Header.Get(nats.MsgIdHdr)))
 	ctx = logging.WithLogger(ctx, logger)
@@ -311,8 +313,8 @@ func (h *TriggerHandler) doHandle(ctx context.Context, msg *nats.Msg) {
 		span.SetAttributes(attribute.Int("http.response.status_code", dispatchInfo.ResponseCode))
 	}
 	if eventProcessingDeadlineExceeded(err) {
-		span.SetStatus(codes.Error, "dispatch deadline exceeded")
-		logger.Warnw("dispatch context expired before subscriber response, message will be redelivered by JetStream", zap.Error(err))
+		span.SetStatus(codes.Error, "dispatch timed out or canceled")
+		logger.Warnw("subscriber request timed out or was canceled", zap.Error(err))
 		return
 	} else if err != nil {
 		span.RecordError(err)
@@ -363,14 +365,24 @@ func (h *TriggerHandler) dispatchEvent(ctx context.Context, event *cloudevents.E
 		h.dispatchDuration.Record(ctx, dispatchInfo.Duration.Seconds(), h.metricAttrs)
 	}
 
-	// Context deadline/cancellation means the AckWait guard fired before we got
-	// a subscriber response. Don't ack/nack/term the message — JetStream will
-	// redeliver it automatically once its own AckWait timer expires.
-	if eventProcessingDeadlineExceeded(err) {
+	// A canceled subscriber request is left pending for redelivery. A request
+	// timeout is a failed try and follows the same path as other failures.
+	if dispatchCanceled(err) {
 		return dispatchInfo, err
 	}
 
 	result := determineNatsResult(dispatchInfo.ResponseCode, err)
+
+	// Give a following reply or dead letter request a fresh AckWait window.
+	// Ordinary acknowledgements and retries do not need this extra write.
+	if (protocol.IsACK(result) && config.brokerIngressURL != nil && len(dispatchInfo.ResponseBody) > 0) ||
+		(!protocol.IsACK(result) && lastTry && config.deadLetterSink != nil) {
+		if err := msg.InProgress(); err != nil {
+			logger.Warnw("failed to extend AckWait before follow-up request", zap.Error(err))
+		}
+	}
+	ctx, cancel := settleContext(ctx, config)
+	defer cancel()
 
 	// Extract pass-through headers (tracing, knative-*, x-b3-*, etc.) from
 	// the subscriber's response so they are available in every code path.
@@ -514,6 +526,20 @@ func determineNatsResult(responseCode int, err error) protocol.Result {
 		}
 	}
 	return result
+}
+
+func dispatchCanceled(err error) bool {
+	return errors.Is(err, context.Canceled)
+}
+
+// settleContext preserves tracing and logging while allowing reply forwarding,
+// dead letter delivery and message settlement to finish after shutdown starts.
+func settleContext(ctx context.Context, config *handlerConfig) (context.Context, context.CancelFunc) {
+	var timeout time.Duration
+	if config.noRetryConfig != nil {
+		timeout = config.noRetryConfig.RequestTimeout
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), brokerutils.ConsumerAckWait(timeout))
 }
 
 // buildTriggerFilter builds a filter from the trigger spec.
